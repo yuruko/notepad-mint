@@ -1,0 +1,51 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # puts the 32-bit msvc toolchain (cl / ml / link / rc) on the path; build.bat then skips its own vcvars lookup
+      - name: msvc x86 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
+      - name: build (release)
+        shell: cmd
+        run: build.bat
+
+      - name: imports (must be kernel32 / user32 / gdi32 only)
+        shell: cmd
+        run: dumpbin /imports "build\notepad mint.exe"
+
+      - name: upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: notepad-mint-x86
+          path: build/notepad mint.exe
+
+      # best effort: needs a desktop session on the runner. does not fail the job yet - harden it as it proves stable
+      - name: smoke test (starts, opens a file, stays alive)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $exe = Join-Path (Get-Location) 'build\notepad mint.exe'
+          $sample = Join-Path (Get-Location) 'tests\multilingual-sample.txt'
+          $p = Start-Process -FilePath $exe -ArgumentList ('"' + $sample + '"') -PassThru
+          Start-Sleep -Seconds 4
+          $p.Refresh()
+          Write-Host ("alive: {0}  title: [{1}]" -f (-not $p.HasExited), $p.MainWindowTitle)
+          if ($p.HasExited) { Write-Error 'the exe exited'; exit 1 }
+          Stop-Process -Id $p.Id -Force
+          if ($p.MainWindowTitle -ne 'multilingual-sample.txt - notepad mint') { Write-Error 'unexpected window title'; exit 1 }
+
+      - name: build (debug, compile check)
+        shell: cmd
+        run: build.bat dbg
