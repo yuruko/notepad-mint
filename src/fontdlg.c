@@ -13,6 +13,7 @@ typedef struct {
     HFONT   font;                                   /* the preview's font (rebuilt on every change) */
     WCHAR   face[32];
     int     pt, bold, italic, mono;
+    int     busy;                                   /* SetSizeText is writing the size edit: its EN_CHANGE echo is ignored */
 } FontSt;
 
 typedef struct { WCHAR name[32]; int mono; } FontEnt;   /* mono: 0 not measured yet, 1 monospaced, 2 proportional */
@@ -141,7 +142,7 @@ static void FillList(FontSt *d)
     for (i = 0; i < g_nfonts; i++)
         if (!d->mono || !dc || IsMono(dc, i)) SendMessageW(d->list, LB_ADDSTRING, 0, (LPARAM)g_fonts[i].name);
     if (dc) DeleteDC(dc);
-    if (d->mono) SetCursor(cur);
+    if (d->mono) SetCursor(cur ? cur : LoadCursorW(NULL, IDC_ARROW));     /* SetCursor(NULL) would hide the cursor */
     SendMessageW(d->list, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(d->list, NULL, TRUE);
 }
@@ -174,16 +175,24 @@ static int SizeText(HWND e, int def)
     return (*p >= '0' && *p <= '9') ? Clamp(wtoi(p)) : def;
 }
 
+/* d->pt -> the size edit. WM_SETTEXT on an edit does send EN_CHANGE, synchronously: FontCmd re-enters from inside
+ * SetWindowTextW. busy makes that echo return early (every caller rebuilds the preview itself afterwards), and the text is
+ * only written when it differs, so this cannot loop */
 static void SetSizeText(FontSt *d)
 {
     WCHAR t[16], cur[16];
     wsprintfW(t, L"%d", d->pt);
     cur[0] = 0;
     GetWindowTextW(d->edit, cur, 16);
-    if (wcmp(cur, t)) SetWindowTextW(d->edit, t);
+    if (wcmp(cur, t)) {
+        d->busy = 1;
+        SetWindowTextW(d->edit, t);
+        d->busy = 0;
+    }
 }
 
-/* the dialog's controls -> the local state (ok: a scripted LB_SETCURSEL / WM_SETTEXT sends no notification) */
+/* the dialog's controls -> the local state. ok runs it because a scripted LB_SETCURSEL / BM_SETCHECK sends no notification
+ * (WM_SETTEXT on the size edit does notify with EN_CHANGE, but the edit is read here anyway) */
 static void Sync(FontSt *d)
 {
     ItemText(d->list, (int)SendMessageW(d->list, LB_GETCURSEL, 0, 0), d->face);
@@ -199,27 +208,60 @@ static HFONT MakeFont(const FontSt *d, int px)
                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, d->face);
 }
 
-/* the chosen size at the current dpi, made smaller when three lines would not fit */
-static void PreviewFont(FontSt *d)
+/* the text column of the panel has PV_L / PV_R of padding. a line box is the font's cell (height + external leading) plus PV_AIR:
+ * the cjk / arabic line falls back to other fonts whose glyphs can stand taller than the cell, and DrawText clips to its box */
+#define PV_L   S(10)
+#define PV_R   S(6)
+#define PV_AIR S(4)
+#define PV_MINPX 8                                  /* the preview font is never made smaller than this (px high) */
+
+/* the height of one line's cell in the font selected into dc: tmHeight + tmExternalLeading (0 when the metrics fail) */
+static int PvCell(HDC dc)
 {
     TEXTMETRICW tm;
+    memset(&tm, 0, sizeof tm);
+    GetTextMetricsW(dc, &tm);
+    return tm.tmHeight + tm.tmExternalLeading;
+}
+
+/* f's cell height and the width of the widest of the three sample lines (f is only selected into dc for the call) */
+static void PvMeasure(HDC dc, HFONT f, int *cell, int *wide)
+{
+    HGDIOBJ of = SelectObject(dc, f);
+    int i, w;
+    *cell = PvCell(dc);
+    *wide = 0;
+    for (i = 0; i < COUNTOF(g_sample); i++) {
+        w = TextW(dc, g_sample[i], -1);
+        if (w > *wide) *wide = w;
+    }
+    SelectObject(dc, of);
+}
+
+/* the chosen size at the current dpi, made smaller until the three lines fit the panel in height and in width. at most 3
+ * refits: the first estimate (a MulDiv ratio of the size) can be a px off because hinted advances are not linear in the size */
+static void PreviewFont(FontSt *d)
+{
     RECT rc;
     HDC dc;
     HFONT f;
-    int px = MulDiv(d->pt, g_dpi, 72), avail;
+    int px = MulDiv(d->pt, g_dpi, 72), room, col, cell, wide, np, t, i;
     if (!d->pv || !GetClientRect(d->pv, &rc)) return;
-    avail = (rc.bottom - S(6)) / 3;
+    room = (rc.bottom - S(6)) / 3 - PV_AIR;         /* what the cell of one of the three lines may take */
+    col = rc.right - PV_L - PV_R;                   /* the width of the text column */
     f = MakeFont(d, px);
     dc = GetDC(d->pv);
-    if (f && dc) {
-        HGDIOBJ of = SelectObject(dc, f);
-        tm.tmHeight = 0;
-        GetTextMetricsW(dc, &tm);
-        SelectObject(dc, of);
-        if (tm.tmHeight > avail && avail > 0) {
-            DeleteObject(f);
-            f = MakeFont(d, MulDiv(px, avail, tm.tmHeight));
-        }
+    for (i = 0; f && dc && i < 3; i++) {
+        PvMeasure(dc, f, &cell, &wide);
+        if ((room <= 0 || cell <= room) && (col <= 0 || wide <= col)) break;        /* it fits */
+        np = px - 1;                                /* always at least one px smaller, whatever the estimates say */
+        if (room > 0 && cell > room) { t = MulDiv(px, room, cell); if (t < np) np = t; }
+        if (col > 0 && wide > col) { t = MulDiv(px, col, wide); if (t < np) np = t; }
+        if (np < PV_MINPX) np = PV_MINPX;
+        if (np >= px) break;                        /* already at the floor */
+        DeleteObject(f);                            /* (not selected into any dc here) */
+        px = np;
+        f = MakeFont(d, px);                        /* same face, bold, italic: only the height changes */
     }
     if (dc) ReleaseDC(d->pv, dc);
     if (d->font) DeleteObject(d->font);
@@ -227,11 +269,10 @@ static void PreviewFont(FontSt *d)
     InvalidateRect(d->pv, NULL, FALSE);
 }
 
-/* double buffered, in the editor colours of the current theme */
+/* double buffered, in the editor colours of the current theme (read here, never cached) */
 static void PreviewPaint(HWND h, const FontSt *d)
 {
     PAINTSTRUCT ps;
-    TEXTMETRICW tm;
     RECT rc, lr;
     HDC dc = BeginPaint(h, &ps), mdc;
     HBITMAP bmp;
@@ -241,17 +282,15 @@ static void PreviewPaint(HWND h, const FontSt *d)
     mdc = CreateCompatibleDC(dc);
     bmp = CreateCompatibleBitmap(dc, rc.right, rc.bottom);
     ob = SelectObject(mdc, bmp);
-    FillC(mdc, &rc, g_pf.bg);
+    FillC(mdc, &rc, C_EDIT_BG);
     if (d && d->font) {
         of = SelectObject(mdc, d->font);
-        tm.tmHeight = 0;
-        GetTextMetricsW(mdc, &tm);
-        lh = tm.tmHeight > 0 ? tm.tmHeight : 1;
+        lh = PvCell(mdc) + PV_AIR;
         y = (rc.bottom - 3 * lh) / 2;
         if (y < 0) y = 0;
         for (i = 0; i < 3; i++) {
-            lr.left = S(10); lr.top = y + i * lh; lr.right = rc.right - S(6); lr.bottom = lr.top + lh;
-            TextC(mdc, g_sample[i], -1, &lr, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX, g_pf.fg);
+            lr.left = PV_L; lr.top = y + i * lh; lr.right = rc.right - PV_R; lr.bottom = lr.top + lh;
+            TextC(mdc, g_sample[i], -1, &lr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, C_EDIT_FG);
         }
         SelectObject(mdc, of);
     }
@@ -372,7 +411,7 @@ static void FontCmd(FontSt *d, int id, int code)
         SelectFace(d, 0);
         return;
     case ID_SIZE:
-        if (code != EN_CHANGE && code != EN_KILLFOCUS) return;
+        if (d->busy || (code != EN_CHANGE && code != EN_KILLFOCUS)) return;     /* busy: the echo of SetSizeText */
         d->pt = SizeText(d->edit, d->pt);
         if (code == EN_KILLFOCUS) SetSizeText(d);                  /* the clamped value replaces what was typed */
         break;
