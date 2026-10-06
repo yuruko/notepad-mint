@@ -178,12 +178,25 @@ static void FocusEdit(void)
     if (g_edit && IsWindowEnabled(g_hwnd)) SetFocus(g_edit);
 }
 
+/* a fresh default name for a document that has no file yet ("mintXXXX", from the local date and time) */
+static void NewDocName(void)
+{
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    DefaultDocName(&st, g_doc.name, COUNTOF(g_doc.name));
+}
+
+const WCHAR *AppDocName(void)
+{
+    return g_doc.path[0] ? PathName(g_doc.path) : g_doc.name;
+}
+
 void AppUpdateTitle(void)
 {
     WCHAR t[PATH_CAP + 64];
     t[0] = 0;
     if (AppIsDirty()) wcopy(t, L"*", COUNTOF(t));
-    wcat(t, g_doc.path[0] ? PathName(g_doc.path) : L"untitled", COUNTOF(t));
+    wcat(t, AppDocName(), COUNTOF(t));
     wcat(t, L" - " APP_NAME, COUNTOF(t));
     if (wcmp(t, g_title) != 0) {
         wcopy(g_title, t, COUNTOF(g_title));
@@ -324,6 +337,7 @@ static BOOL FileSave(BOOL saveAs)
     int enc = g_doc.enc, eol = g_doc.eol;
     wcopy(path, g_doc.path, PATH_CAP);
     if (saveAs || !path[0]) {
+        if (!path[0]) wcopy(path, g_doc.name, PATH_CAP);     /* an unsaved document: the dialog proposes its default name (".txt" is added) */
         if (!FileDlgSave(g_hwnd, path, PATH_CAP, &enc, &eol)) return FALSE;
     }
     return WriteDoc(path, enc, eol);
@@ -335,7 +349,7 @@ static BOOL Confirm(void)
     WCHAR msg[PATH_CAP + 64];
     if (!AppIsDirty()) return TRUE;
     wcopy(msg, L"do you want to save changes to ", COUNTOF(msg));
-    wcat(msg, g_doc.path[0] ? PathName(g_doc.path) : L"untitled", COUNTOF(msg));
+    wcat(msg, AppDocName(), COUNTOF(msg));
     wcat(msg, L"?", COUNTOF(msg));
     switch (MpAsk(g_hwnd, APP_NAME, msg, L"save", L"don't save", L"cancel", 3)) {
     case 1:  return FileSave(FALSE);
@@ -349,6 +363,7 @@ static void FileNew(void)
     if (!Confirm()) return;
     EditSetDocText(L"");
     g_doc.path[0] = 0;
+    NewDocName();                                            /* every new document gets its own default name */
     g_doc.enc = ENC_UTF8;
     g_doc.eol = EOL_CRLF;
     AppUpdateTitle();
@@ -890,6 +905,7 @@ int mp_main(void)
     PrefsLoad();
     g_doc.enc = ENC_UTF8;
     g_doc.eol = EOL_CRLF;
+    NewDocName();                                            /* before the window exists: its first title already uses it */
 
     memset(&wc, 0, sizeof wc);
     wc.cbSize = sizeof wc;

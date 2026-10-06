@@ -224,6 +224,61 @@ static void TestStrings(void)
     Int(L"wtoi huge input doesn't overflow", wtoi(L"99999999999999"), 999999999);
 }
 
+/* ------------------------------------------------- default document name -- */
+static void NameAt(const WCHAR *label, int y, int mo, int d, int h, int mi, int s, const WCHAR *want)
+{
+    SYSTEMTIME st;
+    WCHAR b[16];
+    memset(&st, 0, sizeof st);
+    st.wYear = (WORD)y; st.wMonth = (WORD)mo; st.wDay = (WORD)d;
+    st.wHour = (WORD)h; st.wMinute = (WORD)mi; st.wSecond = (WORD)s;
+    DefaultDocName(&st, b, COUNTOF(b));
+    Str(label, b, want);
+}
+
+static void TestDocName(void)
+{
+    SYSTEMTIME st;
+    WCHAR b[16], prev[16], c;
+    int h, mi, s, i, bad, same;
+
+    Group(L"util.c default document name (mint + 4 base-36 chars)");
+    /* year + month*100 + day + seconds since midnight, base 36 (0-9 a-z), zero padded */
+    NameAt(L"2026-10-05 21:53:42 = 2026 + 1005 + 78822 = 81853", 2026, 10, 5, 21, 53, 42, L"mint1r5p");
+    NameAt(L"the next second is the next name", 2026, 10, 5, 21, 53, 43, L"mint1r5q");
+    NameAt(L"midnight, 1 january 2026 (zero padded)", 2026, 1, 1, 0, 0, 0, L"mint01n3");
+    NameAt(L"midnight, 6 october 2026", 2026, 10, 6, 0, 0, 0, L"mint02c8");
+    NameAt(L"the last second of year 9999", 9999, 12, 31, 23, 59, 59, L"mint23bx");
+
+    memset(&st, 0, sizeof st);
+    st.wYear = 2026; st.wMonth = 10; st.wDay = 5;
+    bad = 0; same = 0; prev[0] = 0;
+    for (h = 0; h < 24; h++)
+        for (mi = 0; mi < 60; mi++)
+            for (s = 0; s < 60; s++) {
+                st.wHour = (WORD)h; st.wMinute = (WORD)mi; st.wSecond = (WORD)s;
+                DefaultDocName(&st, b, COUNTOF(b));
+                if (wlen(b) != 8 || b[0] != 'm' || b[1] != 'i' || b[2] != 'n' || b[3] != 't') bad++;
+                for (i = 4; i < 8; i++) {
+                    c = b[i];
+                    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z'))) bad++;
+                }
+                if (wcmp(b, prev) == 0) same++;
+                wcopy(prev, b, COUNTOF(prev));
+            }
+    Int(L"all 86400 seconds of a day: \"mint\" + exactly four of 0-9 a-z", bad, 0);
+    Int(L"no two consecutive seconds share a name", same, 0);
+
+    memset(b, 0x55, sizeof b);
+    DefaultDocName(&st, b, 8);
+    Want(b[0] == 0 && b[1] == 0x5555, L"cap 8: expected an empty string and nothing written past it", 0, 0);
+    Done(L"a buffer that cannot hold 8 chars + nul gets an empty string");
+    memset(b, 0x55, sizeof b);
+    DefaultDocName(&st, b, 9);
+    Want(wlen(b) == 8 && b[9] == 0x5555, L"cap 9: expected 8 characters and nothing written past the nul", 0, 0);
+    Done(L"cap 9 is exactly enough");
+}
+
 /* ------------------------------------------------------------- paths --- */
 static void TestPaths(void)
 {
@@ -978,6 +1033,7 @@ void start(void)
     wsprintfW(b, L"notepad mint unit tests (system ansi code page %u)\r\n", GetACP());
     Out(b);
     TestStrings();
+    TestDocName();
     TestPaths();
     TestColors();
     TestWild();

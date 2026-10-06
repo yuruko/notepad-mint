@@ -259,7 +259,7 @@ static BOOL UserCancelled(DWORD er) { return er == ERROR_PRINT_CANCELLED || er =
  * page range lies past the last page, so there was nothing to print */
 static int PrintJob(HDC dc, const WCHAR *text, int n, int copies, int from, int to)
 {
-    const WCHAR *name = g_doc.path[0] ? PathName(g_doc.path) : L"untitled", *s = NULL;
+    const WCHAR *name = AppDocName(), *s = NULL;
     TEXTMETRICW tm;
     DOCINFOW di;
     RECT box;

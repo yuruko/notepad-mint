@@ -84,6 +84,10 @@ tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `
 - fonts: dialogs use segoe ui 9pt, DEFAULT_CHARSET. **measured on this ja-JP machine: tahoma + microsoft sans serif draw '\' as a yen sign
   in every charset, segoe ui/arial do it with ANSI_CHARSET** (tools\fonttest.c). consolas/verdana/courier new/lucida console are fine.
 - system locale of the dev/user machine is ja-JP (ansi code page 932): "ansi" in this app = shift-jis there.
+- default document name (maintainer's request, replaces "untitled"): an unsaved document is called `mintXXXX`, XXXX = 4 characters of 0-9 a-z (base 36, zero padded) of the sum
+  year + month*100 + day + seconds since midnight, local time (`DefaultDocName` in util.c, unit tested; e.g. 2026-10-05 21:53:42 -> 2026 + 1005 + 78822 = 81853 -> `mint1r5p`).
+  generated at startup and again on file > new (`g_doc.name`, `NewDocName` / `AppDocName` in main.c); it is the title, the name in the "save changes to ..." prompt, the print job / header name, and
+  what the save as dialog proposes in its file name box (".txt" is added). the sum stays below 100000 for any year up to 9999, so the first character is only ever 0, 1 or 2 (change the formula in one place).
 - notepad parity details: title `*name - notepad mint`; unsaved prompt "do you want to save changes to <name>?" save/don't save/cancel;
   cmdline path that doesn't exist => "cannot find the <path> file. do you want to create a new file?"; time/date = short time (no secs) + space + short date;
   not-found msg `cannot find "<text>"`; goto line error "the line number is beyond the total number of lines"; default ext txt on save.

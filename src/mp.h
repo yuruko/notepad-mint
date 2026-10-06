@@ -75,6 +75,7 @@ BOOL   IsDir(const WCHAR *path);
 BOOL   WildMatch(const WCHAR *pat, const WCHAR *name);   /* case-insensitive * and ?, "a;b" = either, "*.*" also matches "readme" */
 size_t mp_count_lf(const WCHAR *p, size_t n);        /* rt.asm */
 int    WordClass(WCHAR c);                           /* edit.c: 0 blank, 1 word char, 2 punctuation (word delete) */
+void   DefaultDocName(const SYSTEMTIME *st, WCHAR *out, int cap);   /* "mint" + 4 base-36 chars of year + month*100 + day + seconds of the day */
 
 /* ------------------------------------------------------------ search.c -- */
 /* pure text search (no ui, unit tested): pattern pat[0..m) in t[0..n) (neither needs a terminator).
@@ -222,10 +223,12 @@ extern Prefs g_pf;
 extern HWND  g_hwnd, g_edit, g_status;
 
 typedef struct DocState {
-    WCHAR path[PATH_CAP];                       /* "" = untitled */
+    WCHAR path[PATH_CAP];                       /* "" = not saved yet: the document is called `name` */
+    WCHAR name[12];                             /* the default name of an unsaved document, "mintXXXX" (DefaultDocName) */
     int   enc, eol;                             /* what DocWrite will use on the next save */
 } DocState;
 extern DocState g_doc;
+const WCHAR *AppDocName(void);                  /* main.c: the file name, or the default name while unsaved (title, prompts, print job) */
 
 /* main.c services used by dialogs / the edit module */
 void  AppApplyPrefs(void);                      /* re-create font/brush from g_pf and repaint */
