@@ -502,8 +502,8 @@ static void Cmd(int id)
     case IDM_EDIT_DELETE:   SendMessageW(g_edit, WM_CLEAR, 0, 0); break;
     case IDM_EDIT_FIND:     FindDlgShow(0); return;
     case IDM_EDIT_REPLACE:  FindDlgShow(1); return;
-    case IDM_EDIT_FINDNEXT: FindNext(0); break;
-    case IDM_EDIT_FINDPREV: FindNext(1); break;
+    case IDM_EDIT_FINDNEXT: FindNext(0); return;          /* may open the find dialog: don't take its focus */
+    case IDM_EDIT_FINDPREV: FindNext(1); return;
     case IDM_EDIT_GOTO:     GotoDlg(g_hwnd); break;
     case IDM_EDIT_SELALL:   SendMessageW(g_edit, EM_SETSEL, 0, (LPARAM)-1); break;
     case IDM_EDIT_TIMEDATE: InsertTimeDate(); break;

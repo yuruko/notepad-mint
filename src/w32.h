@@ -232,6 +232,7 @@ typedef struct {
 #define WM_GETMINMAXINFO 0x0024
 #define WM_DRAWITEM 0x002B
 #define WM_MEASUREITEM 0x002C
+#define WM_VKEYTOITEM 0x002E
 #define WM_SETFONT 0x0030
 #define WM_GETFONT 0x0031
 #define WM_WINDOWPOSCHANGED 0x0047
@@ -243,6 +244,7 @@ typedef struct {
 #define WM_NCHITTEST 0x0084
 #define WM_NCACTIVATE 0x0086
 #define WM_NCLBUTTONDBLCLK 0x00A3
+#define WM_NCRBUTTONDOWN 0x00A4
 #define WM_NCRBUTTONUP 0x00A5
 #define WM_GETDLGCODE 0x0087
 #define WM_KEYDOWN 0x0100
@@ -317,6 +319,7 @@ typedef struct {
 #define SWP_FRAMECHANGED 0x0020
 #define SWP_SHOWWINDOW 0x0040
 
+#define GCL_HBRBACKGROUND (-10)
 #define GWL_STYLE (-16)
 #define GWL_EXSTYLE (-20)
 #define GWLP_WNDPROC (-4)
@@ -343,6 +346,7 @@ typedef struct {
 
 #define IDC_ARROW MAKEINTRESOURCEW(32512)
 #define IDC_IBEAM MAKEINTRESOURCEW(32513)
+#define IDC_WAIT  MAKEINTRESOURCEW(32514)
 #define IDC_HAND  MAKEINTRESOURCEW(32649)
 #define IMAGE_ICON 1
 #define LR_DEFAULTCOLOR 0
@@ -491,6 +495,7 @@ typedef struct {
 #define LB_SETITEMDATA 0x019A
 #define LB_SETITEMHEIGHT 0x01A0
 #define LB_FINDSTRINGEXACT 0x01A2
+#define LB_INITSTORAGE 0x01A8
 #define LB_ITEMFROMPOINT 0x01A9
 #define LBN_SELCHANGE 1
 #define LBN_DBLCLK 2
@@ -499,6 +504,7 @@ typedef struct {
 #define LBS_OWNERDRAWFIXED 0x0010
 #define LBS_HASSTRINGS 0x0040
 #define LBS_NOINTEGRALHEIGHT 0x0100
+#define LBS_WANTKEYBOARDINPUT 0x0400L
 #define LB_ERR (-1)
 #define ODS_SELECTED 0x0001
 #define ODS_FOCUS 0x0010
@@ -550,6 +556,7 @@ typedef struct {
 #define DEFAULT_GUI_FONT 17
 #define DC_BRUSH 18
 #define DC_PEN 19
+#define RASTER_FONTTYPE 0x0001
 #define TRUETYPE_FONTTYPE 4
 #define MM_TEXT 1
 
@@ -578,11 +585,15 @@ typedef struct {
 #define FORMAT_MESSAGE_FROM_SYSTEM 0x1000
 #define CF_UNICODETEXT 13
 #define CREATE_UNICODE_ENVIRONMENT 0x400
+#define DRIVE_NO_ROOT_DIR 1
 #define DRIVE_REMOVABLE 2
 #define DRIVE_FIXED 3
 #define DRIVE_REMOTE 4
 #define DRIVE_CDROM 5
+#define ERROR_FILE_NOT_FOUND 2L
+#define ERROR_PRINT_CANCELLED 63L
 #define ERROR_ALREADY_EXISTS 183
+#define ERROR_CANCELLED 1223L
 #define CSTR_EQUAL 2
 
 /* dwm (dwmapi.dll, loaded at run time) */
@@ -594,6 +605,7 @@ typedef struct {
 #define DWMWCP_DONOTROUND 1
 
 /* comdlg32 printing */
+#define PD_PAGENUMS 0x00000002
 #define PD_RETURNDC 0x00000100
 #define PD_NOSELECTION 0x00000004
 #define PD_NOPAGENUMS 0x00000008
@@ -601,6 +613,10 @@ typedef struct {
 #define PSD_MARGINS 0x00000002
 #define PSD_INTHOUSANDTHSOFINCHES 0x00000004
 #define PSD_DISABLEPRINTER 0x00000020
+#define PDERR_NODEFAULTPRN 0x1008                       /* cderr.h */
+#define PDERR_DNDMMISMATCH 0x1009
+#define PDERR_PRINTERNOTFOUND 0x100B
+#define PDERR_DEFAULTDIFFERENT 0x100C
 
 /* ------------------------------------------------------------- kernel32 -- */
 API void    WINAPI ExitProcess(UINT);
@@ -649,6 +665,8 @@ API DWORD   WINAPI GetTickCount(void);
 API BOOL    WINAPI CreateProcessW(LPCWSTR, LPWSTR, void *, void *, BOOL, DWORD, LPVOID, LPCWSTR, STARTUPINFOW *, PROCESS_INFORMATION *);
 API BOOL    WINAPI SetCurrentDirectoryW(LPCWSTR);
 API DWORD   WINAPI FormatMessageW(DWORD, LPCVOID, DWORD, DWORD, LPWSTR, DWORD, void *);
+API DWORD   WINAPI GetCurrentThreadId(void);
+API HGLOBAL WINAPI GlobalFree(HGLOBAL);
 
 /* --------------------------------------------------------------- user32 -- */
 API ATOM    WINAPI RegisterClassExW(const WNDCLASSEXW *);
@@ -742,6 +760,9 @@ API BOOL    WINAPI MessageBeep(UINT);
 API BOOL    WINAPI RedrawWindow(HWND, const RECT *, HRGN, UINT);
 API int     WINAPI GetClassNameW(HWND, LPWSTR, int);
 API BOOL    WINAPI EnumChildWindows(HWND, BOOL (CALLBACK *)(HWND, LPARAM), LPARAM);
+API BOOL    WINAPI EnumThreadWindows(DWORD, BOOL (CALLBACK *)(HWND, LPARAM), LPARAM);
+API HWND    WINAPI GetActiveWindow(void);
+API DWORD   WINAPI SetClassLongW(HWND, int, LONG);              /* SetClassLongPtrW on 32-bit */
 API LRESULT WINAPI SendDlgItemMessageW(HWND, int, UINT, WPARAM, LPARAM);
 API BOOL    WINAPI GetCaretPos(POINT *);
 API BOOL    WINAPI GetScrollInfo(HWND, int, SCROLLINFO *);
