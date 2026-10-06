@@ -5,7 +5,7 @@
 #   -PadR/-PadB  grow the capture rect to include popups that hang outside the window
 #   -Cmd / -Mouse "x,y" / -Burst N / -Drag "x1,y1,x2,y2" [-DragHold]   a menu command by id, a parked mouse (hover), N captures in a row, a real mouse drag (selection)
 #   -Keep     don't kill the process afterwards
-# NB: it kills EVERY process named "notepad mint" before and after (the gui tests' temp copies too): never run it while tests\ui\ui_test.ps1 is running.
+# NB: it kills every running copy of the exe it launches (-Exe, default build\notepad mint.exe) before and after: close your own notepad mint first. the gui tests run temp copies, those are left alone.
 param(
     [string]$Out = (Join-Path $PSScriptRoot "..\build\shot.png"),
     [string]$Arg = "",
@@ -63,7 +63,9 @@ public class W {
 "@
 [void][W]::SetProcessDPIAware()
 
-Get-Process -Name "notepad mint" -ErrorAction SilentlyContinue | Stop-Process -Force
+$exeFull = (Resolve-Path -LiteralPath $Exe).Path
+function Kill-Same { Get-Process -Name "notepad mint" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exeFull } | Stop-Process -Force }   # only copies of THIS exe (the gui tests run temp copies)
+Kill-Same
 Start-Sleep -Milliseconds 200
 if ($Arg -ne "") { $p = Start-Process -FilePath $Exe -ArgumentList ('"' + $Arg + '"') -PassThru } else { $p = Start-Process -FilePath $Exe -PassThru }
 Start-Sleep -Milliseconds $Delay
@@ -136,4 +138,4 @@ for ($i = 0; $i -lt $shots; $i++) {
 if ($dragUp) { [W]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
 Write-Output ("saved {0}  ({1}x{2})  title='{3}' responding={4}" -f $Out, $w, $ht, $p.MainWindowTitle, $p.Responding)
 
-if (-not $Keep) { Get-Process -Name "notepad mint" -ErrorAction SilentlyContinue | Stop-Process -Force }
+if (-not $Keep) { Kill-Same }

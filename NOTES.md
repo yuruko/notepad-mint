@@ -138,8 +138,8 @@ needs no `WM_CHARTOITEM` handler, and Enter on a focused non-default button does
   with AttachThreadInput; the keys go to the real foreground window, so runs are flaky if something steals focus).
 - `tools\shot.ps1` and `tools\frame_test.ps1` steal the foreground (and the mouse): the user's own typing can land in the test window (it happened: stray text showed up in the editor).
   `tests\ui\ui_test.ps1` does not: it runs the app on a private desktop (`CreateDesktop`) and uses window messages only. `shot.ps1 -Cmd <IDM_ id>` posts a menu command by id; `-Mouse "x,y"` parks the real mouse (hover states),
-  `-Burst N` takes N captures in a row (blinking caret), `-Drag "x1,y1,x2,y2" [-DragHold]` drags the real mouse (selection painting). **`shot.ps1` kills every process named "notepad mint" at the start and the end,
-  the gui tests' temp copies included: never run it while the gui suite runs** (and not while the user has a notepad mint open).
+  `-Burst N` takes N captures in a row (blinking caret), `-Drag "x1,y1,x2,y2" [-DragHold]` drags the real mouse (selection painting). `shot.ps1` kills every running copy of `build\notepad mint.exe` at the start
+  and the end (so close your own notepad mint first); the gui tests run temp copies of the exe, those are left alone (an earlier version killed every "notepad mint" process, the tests' copies included).
 - batch files: the current directory is not on the command lookup path here, so every `cmd /c` / `call` uses an absolute path (`tools\verify.bat` builds one from `%~dp0`);
   `a && b & c` runs `c` unconditionally (use parentheses).
 - the unit tests, layout_check, probe builds and the gui suite all write under `build\` (git-ignored) and never touch `build\notepad mint.exe` except `build.bat` itself.

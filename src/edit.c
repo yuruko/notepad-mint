@@ -305,6 +305,7 @@ static void PaintSelection(HWND h, HDC dc, DWORD s, DWORD e)
             } else {                                                /* a selected tab is a blank block up to the next character */
                 x1 = j < le ? (short)LOWORD(SendMessageW(h, EM_POSFROMCHAR, (WPARAM)j, 0)) : x0 + lh / 2;
             }
+            if (GetPixel(dc, x1, y + lh / 2) == GetSysColor(COLOR_HIGHLIGHT)) x1++;   /* the control's own highlight is a pixel wider than its text: no stock-blue sliver at the end of a run */
             r.left = x0; r.right = x1; r.top = y; r.bottom = y + lh;
             FillC(dc, &r, C_ACCENT);
             if (t[i] != '\t') ExtTextOutW(dc, x0, y, 0, NULL, t + i, (UINT)(j - i), NULL);

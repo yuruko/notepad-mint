@@ -384,6 +384,7 @@ typedef struct {
 #define MONITOR_DEFAULTTONULL 0
 #define MONITOR_DEFAULTTONEAREST 2
 #define SPI_GETCARETWIDTH 0x2006
+#define COLOR_HIGHLIGHT 13
 #define SPI_GETWORKAREA 0x0030
 #define SPI_GETNONCLIENTMETRICS 0x0029
 
@@ -733,6 +734,7 @@ API int     WINAPI FillRect(HDC, const RECT *, HBRUSH);
 API int     WINAPI DrawTextW(HDC, LPCWSTR, int, RECT *, UINT);
 API BOOL    WINAPI DrawFocusRect(HDC, const RECT *);
 API int     WINAPI GetSystemMetrics(int);
+API DWORD   WINAPI GetSysColor(int);
 API BOOL    WINAPI SystemParametersInfoW(UINT, UINT, PVOID, UINT);
 API HCURSOR WINAPI LoadCursorW(HINSTANCE, LPCWSTR);
 API HCURSOR WINAPI SetCursor(HCURSOR);
@@ -846,6 +848,7 @@ API int      WINAPI EndPage(HDC);
 API int      WINAPI AbortDoc(HDC);
 API COLORREF WINAPI SetDCBrushColor(HDC, COLORREF);
 API COLORREF WINAPI SetDCPenColor(HDC, COLORREF);
+API COLORREF WINAPI GetPixel(HDC, int, int);
 
 /* mem* (provided by rt.asm) */
 void *memset(void *, int, size_t);
