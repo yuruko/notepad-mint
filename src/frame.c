@@ -7,12 +7,14 @@
  * aero snap and double-click-to-maximize keep working. the window menu is our popup (menu.c). */
 #include "mp.h"
 
-/* off until ci shows a single title bar (tools/frame_probe.ps1 builds a probe with /DFRAME_CUSTOM=1). the first try
- * drew two: the only WM_NCCALCSIZE sent by CreateWindowExW has wParam FALSE, FrameNcCalc handed that one to
- * DefWindowProc untouched, and nothing recalculated the frame before the first resize (see NOTES.md).
- * with it off the native title bar is used, drawn by windows in the system caption font. */
+/* on: the title bar text uses the chrome font (the editor font minus CHROME_PT_LESS), like the menu bar and the status bar.
+ * the first try drew two title bars: the only WM_NCCALCSIZE sent by CreateWindowExW has wParam FALSE, FrameNcCalc handed
+ * that one to DefWindowProc untouched, and nothing recalculated the frame before the first resize. fixed by FrameNcCalc
+ * treating both forms and mp_main forcing one more recalculation (SWP_FRAMECHANGED) right after the window is created.
+ * verified with tools\frame_test.ps1 (hit tests, maximize / restore, double click, drag, aero snap, minimize, close).
+ * build with /DFRAME_CUSTOM=0 (tools\probe.bat) to get the native caption back: windows then draws it in the system font. */
 #ifndef FRAME_CUSTOM
-#define FRAME_CUSTOM 0
+#define FRAME_CUSTOM 1
 #endif
 
 int FrameEnabled(void) { return FRAME_CUSTOM; }

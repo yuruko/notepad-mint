@@ -709,6 +709,8 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK:
     case WM_LBUTTONUP:
+    case WM_RBUTTONUP:
+    case WM_NCRBUTTONDOWN:
     case WM_CAPTURECHANGED:
         if (FrameMsg(h, m, w, l)) return 0;
         break;
@@ -903,6 +905,8 @@ int mp_main(void)
     g_accel = CreateAcceleratorTableW(g_acc, COUNTOF(g_acc));
     if (!CreateWindowExW(WS_EX_ACCEPTFILES, APP_CLASS, APP_NAME, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                          CW_USEDEFAULT, 0, S(900), S(620), NULL, NULL, hi, NULL)) return 1;
+    if (FrameEnabled())                                        /* title strip: one more WM_NCCALCSIZE, the wParam TRUE kind */
+        SetWindowPos(g_hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     ShowMain();
 
     CmdLineFile(arg, PATH_CAP);

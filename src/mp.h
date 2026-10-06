@@ -171,8 +171,8 @@ void  StatusSet(HWND sb, int idx, const WCHAR *text);
 void  StatusRefont(HWND sb);
 
 /* ------------------------------------------------------------- frame.c ---- */
-/* the main window's title strip (drawn by us, in the chrome font). experimental and OFF (see FRAME_CUSTOM in frame.c):
- * every function below is then a no-op / falls through to the default window behaviour and FrameHeight() is 0 */
+/* the main window's title strip (drawn by us, in the chrome font; on by default, see FRAME_CUSTOM in frame.c).
+ * with FRAME_CUSTOM 0 every function below is a no-op / falls through to the default window behaviour and FrameHeight() is 0 */
 int      FrameEnabled(void);
 int      FrameHeight(void);
 void     FrameRefont(HWND h);
