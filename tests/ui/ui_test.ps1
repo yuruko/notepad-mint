@@ -1563,7 +1563,7 @@ function Test-T18 {
 }
 
 # =========================================================================================================== T19
-# the main window's chrome: no frame around the editor but a 10 px padding inside it, the chrome font is static, the title strip fades the accent in
+# the main window's chrome: no frame around the editor but an 8 px padding inside it, the chrome font is static, the title strip fades the accent in
 function Chrome-Kid($app, [string]$cls) { foreach ($k in [U]::Kids([long]$app.Main)) { if ([U]::Cls($k) -eq $cls) { return [long]$k } }; return [long]0 }
 function Accent-Colours() {                                                      # the accents of the two themes, from the g_themes table in ui.c (first colour of each theme)
     $t = [IO.File]::ReadAllText((Join-Path $Src 'ui.c'))
@@ -1583,13 +1583,13 @@ function Strip-Pixel($app, [int]$x, [int]$y) {                                  
 }
 function Test-T19 {
     $app = Start-App
-    $dpi = [U]::Dpi([long]$app.Main); $pad = [int][Math]::Round(10 * $dpi / 96, [MidpointRounding]::AwayFromZero)
+    $dpi = [U]::Dpi([long]$app.Main); $pad = [int][Math]::Round(8 * $dpi / 96, [MidpointRounding]::AwayFromZero)
     $bar = Chrome-Kid $app 'mp_menubar'; $st = Chrome-Kid $app 'mp_status'; $ed = Get-Edit $app
     $b = [U]::WRect($bar); $s = [U]::WRect($st); $e = [U]::WRect($ed); $w = [U]::WRect([long]$app.Main)
     Ck 'T19.1 no frame around the editor: it fills the space between the menu bar and the status bar' (($e[1] -eq $b[3]) -and ($e[3] -eq $s[1]) -and ($e[0] -eq $b[0]) -and ($e[2] -eq $b[2])) ('menu bar ' + ($b -join ',') + ' editor ' + ($e -join ',') + ' status bar ' + ($s -join ','))
     Reset-Doc $app 'x'
     $p = [long](Snd $ed 0xD6 0 0)                                                # EM_POSFROMCHAR of the first character: the client position of the text
-    Ck 'T19.2 the text starts 10 px (dpi scaled) from the editor''s top left corner: the padding' ((($p -band 0xFFFF) -eq $pad) -and ((($p -shr 16) -band 0xFFFF) -eq $pad)) ('first character at ' + ($p -band 0xFFFF) + ',' + (($p -shr 16) -band 0xFFFF) + ', wanted ' + $pad + ',' + $pad)
+    Ck 'T19.2 the text starts 8 px (dpi scaled) from the editor''s top left corner: the padding' ((($p -band 0xFFFF) -eq $pad) -and ((($p -shr 16) -band 0xFFFF) -eq $pad)) ('first character at ' + ($p -band 0xFFFF) + ',' + (($p -shr 16) -band 0xFFFF) + ', wanted ' + $pad + ',' + $pad)
 
     $h0 = @(($b[3] - $b[1]), ($s[3] - $s[1]))                                    # the chrome font is static: zooming the editor leaves the bars alone
     foreach ($i in 1..4) { Cmd $app 'IDM_ZOOM_IN'; Start-Sleep -Milliseconds 150 }
