@@ -1,0 +1,18 @@
+notepad mint - sample document
+the quick brown fox jumps over the lazy dog 0123456789
+	tab indented line (tab stops should be 8 columns wide)
+paths: D:\notefrog\build\test_multi.txt   c:\windows\system32   (backslashes, not yen)
+日本語のテキスト: こんにちは世界  漢字かな交じり文
+中文简体: 你好，世界   繁體中文: 你好，世界
+한국어: 안녕하세요 세계
+русский: Привет, мир! Съешь ещё этих мягких французских булок
+ελληνικά: Γειά σου Κόσμε
+עברית: שלום עולם   (hebrew, right to left)
+العربية: مرحبا بالعالم   (arabic, right to left, shaped)
+ไทย: สวัสดีชาวโลก   हिन्दी: नमस्ते दुनिया
+emoji: 😀 🐸 ✨ ❤  combining: e + ́ = é   zalgo: Z̷a̷l̷g̷o̷
+box: ┌─┬─┐ │ │ │ └─┴─┘   math: ∑ ∫ ∂ √ ∞ ≠ ≤ ≥
+
+int main(void) {
+    return 0;
+}

@@ -1,0 +1,100 @@
+# shot.ps1 - launch notepad mint, optionally drive it with keys, screenshot it, kill it.
+#   -Out      png path
+#   -Arg      command line argument handed to the exe (a file to open)
+#   -Keys     SendKeys string(s), separated by '|' ; each step waits -Step ms. use "{WAIT:500}" for an extra pause
+#   -PadR/-PadB  grow the capture rect to include popups that hang outside the window
+#   -Keep     don't kill the process afterwards
+param(
+    [string]$Out = (Join-Path $PSScriptRoot "..\build\shot.png"),
+    [string]$Arg = "",
+    [string]$Keys = "",
+    [int]$Delay = 1200,
+    [int]$Step = 450,
+    [int]$PadR = 0,
+    [int]$PadB = 0,
+    [switch]$Keep,
+    [string]$Exe = (Join-Path $PSScriptRoot "..\build\notepad mint.exe")
+)
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class W {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte sc, uint fl, UIntPtr ex);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
+  [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  public static bool Force(IntPtr h) {
+    for (int i = 0; i < 5; i++) {
+      IntPtr fg = GetForegroundWindow(); uint pid;
+      uint fgT = GetWindowThreadProcessId(fg, out pid); uint me = GetCurrentThreadId();
+      keybd_event(0x7E, 0, 0, UIntPtr.Zero); keybd_event(0x7E, 0, 2, UIntPtr.Zero);
+      if (fgT != me) AttachThreadInput(me, fgT, true);
+      BringWindowToTop(h); SetForegroundWindow(h);
+      if (fgT != me) AttachThreadInput(me, fgT, false);
+      System.Threading.Thread.Sleep(150);
+      if (GetForegroundWindow() == h) return true;
+    }
+    return false;
+  }
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int sz);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+}
+"@
+[void][W]::SetProcessDPIAware()
+
+Get-Process -Name "notepad mint" -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Milliseconds 200
+if ($Arg -ne "") { $p = Start-Process -FilePath $Exe -ArgumentList ('"' + $Arg + '"') -PassThru } else { $p = Start-Process -FilePath $Exe -PassThru }
+Start-Sleep -Milliseconds $Delay
+$p.Refresh()
+$h = $p.MainWindowHandle
+if ($h -eq [IntPtr]::Zero) { Write-Output "no main window (process exited? HasExited=$($p.HasExited))"; exit 1 }
+[void][W]::ShowWindow($h, 9)
+[void][W]::SetWindowPos($h, [IntPtr]::new(-1), 0, 0, 0, 0, 3)   # topmost, no move/size
+$fgok = [W]::Force($h)
+if (-not $fgok) { Write-Output "WARNING: could not get the window into the foreground" }
+Start-Sleep -Milliseconds 300
+
+if ($Keys -ne "") {
+    foreach ($k in $Keys.Split('|')) {
+        if ($k -match '^\{WAIT:(\d+)\}$') { Start-Sleep -Milliseconds ([int]$Matches[1]); continue }
+        if (-not [W]::Force($h)) { Write-Output "WARNING: lost foreground before '$k'" }
+        if ($k -match '^\{(ALT|CTRL|CTRLSHIFT):(0x[0-9A-Fa-f]+|.)\}$') {      # slow, real key events (SendKeys fires them with no gap); key = char or 0xVK
+            $mods = @(); if ($Matches[1] -eq 'ALT') { $mods = @(0x12) } elseif ($Matches[1] -eq 'CTRL') { $mods = @(0x11) } else { $mods = @(0x11, 0x10) }
+            $ks = [string]$Matches[2]
+            if ($ks.Length -gt 1) { $vk = [byte][Convert]::ToInt32($ks.Substring(2), 16) } else { $vk = [byte][char]($ks.ToUpper()) }
+            foreach ($m in $mods) { [W]::keybd_event([byte]$m, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60 }
+            [W]::keybd_event($vk, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 40
+            [W]::keybd_event($vk, 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60
+            [array]::Reverse($mods); foreach ($m in $mods) { [W]::keybd_event([byte]$m, 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 40 }
+            Start-Sleep -Milliseconds $Step
+            continue
+        }
+        [System.Windows.Forms.SendKeys]::SendWait($k)
+        Start-Sleep -Milliseconds $Step
+    }
+}
+
+[void][W]::Force($h)
+$r = New-Object W+RECT
+[void][W]::DwmGetWindowAttribute($h, 9, [ref]$r, 16)
+$w = $r.R - $r.L + $PadR
+$ht = $r.B - $r.T + $PadB
+$bmp = New-Object System.Drawing.Bitmap($w, $ht)
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($r.L, $r.T, 0, 0, (New-Object System.Drawing.Size($w, $ht)))
+$g.Dispose()
+$bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
+$bmp.Dispose()
+Write-Output ("saved {0}  ({1}x{2})  title='{3}' responding={4}" -f $Out, $w, $ht, $p.MainWindowTitle, $p.Responding)
+
+if (-not $Keep) { Get-Process -Name "notepad mint" -ErrorAction SilentlyContinue | Stop-Process -Force }

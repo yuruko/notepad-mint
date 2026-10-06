@@ -1,0 +1,9 @@
+# build output (build.bat recreates it)
+build/
+*.obj
+*.res
+*.pdb
+*.ilk
+*.map
+*.exe
+dbg.log
