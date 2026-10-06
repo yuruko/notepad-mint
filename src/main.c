@@ -49,14 +49,6 @@ static int IniGet(const WCHAR *sec, const WCHAR *key, int def)
     return b[0] ? wtoi(b) : def;
 }
 
-static COLORREF IniColor(const WCHAR *sec, const WCHAR *key, COLORREF def)
-{
-    WCHAR b[32];
-    COLORREF c;
-    GetPrivateProfileStringW(sec, key, L"", b, 32, g_ini);
-    return (b[0] && ParseColor(b, &c)) ? c : def;
-}
-
 static void IniPutInt(const WCHAR *sec, const WCHAR *key, int v)
 {
     WCHAR b[16];
@@ -65,6 +57,15 @@ static void IniPutInt(const WCHAR *sec, const WCHAR *key, int v)
 }
 
 static int Clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+/* the editor colours come with the theme: g_pf.fg / bg are derived, never saved */
+static void ThemeUse(int theme)
+{
+    ThemeSet(theme);
+    g_pf.theme = ThemeGet();
+    g_pf.fg = C_EDIT_FG;
+    g_pf.bg = C_EDIT_BG;
+}
 
 static void PrefsLoad(void)
 {
@@ -76,10 +77,10 @@ static void PrefsLoad(void)
     g_pf.cur     = g_pf.pt;                                          /* the working size always starts at the chosen one */
     g_pf.bold    = IniGet(L"editor", L"bold", 0) != 0;
     g_pf.italic  = IniGet(L"editor", L"italic", 0) != 0;
-    g_pf.fg      = IniColor(L"editor", L"text", g_pf.fg);
-    g_pf.bg      = IniColor(L"editor", L"background", g_pf.bg);
     g_pf.wrap    = IniGet(L"editor", L"wrap", 0) != 0;
     g_pf.statusbar = IniGet(L"view", L"statusbar", 1) != 0;
+    GetPrivateProfileStringW(L"view", L"theme", L"dark", f, 32, g_ini);
+    ThemeUse(wcmpi(f, L"light") == 0 ? THEME_LIGHT : THEME_DARK);       /* before any window exists: classes take g_brFace */
     g_pf.winx    = IniGet(L"window", L"x", 0);
     g_pf.winy    = IniGet(L"window", L"y", 0);
     g_pf.winw    = IniGet(L"window", L"w", 0);
@@ -111,7 +112,6 @@ void AppSavePrefs(void)
     static const BYTE bom[2] = { 0xFF, 0xFE };
     HANDLE f;
     DWORD wr;
-    WCHAR c[8];
 
     CapturePlacement();
     CreateDirectoryW(g_iniDir, NULL);
@@ -122,10 +122,11 @@ void AppSavePrefs(void)
     IniPutInt(L"editor", L"size", g_pf.pt);
     IniPutInt(L"editor", L"bold", g_pf.bold);
     IniPutInt(L"editor", L"italic", g_pf.italic);
-    FormatColor(g_pf.fg, c);  WritePrivateProfileStringW(L"editor", L"text", c, g_ini);
-    FormatColor(g_pf.bg, c);  WritePrivateProfileStringW(L"editor", L"background", c, g_ini);
+    WritePrivateProfileStringW(L"editor", L"text", NULL, g_ini);          /* old custom colours: the theme decides now */
+    WritePrivateProfileStringW(L"editor", L"background", NULL, g_ini);
     IniPutInt(L"editor", L"wrap", g_pf.wrap);
     IniPutInt(L"view", L"statusbar", g_pf.statusbar);
+    WritePrivateProfileStringW(L"view", L"theme", g_pf.theme == THEME_LIGHT ? L"light" : L"dark", g_ini);
     IniPutInt(L"window", L"x", g_pf.winx);
     IniPutInt(L"window", L"y", g_pf.winy);
     IniPutInt(L"window", L"w", g_pf.winw);
@@ -454,6 +455,29 @@ static void Reopen(void)
     OpenDoc(g_doc.path, e);
 }
 
+/* our top-level windows on this thread (the main window, a modeless find dialog): frame colours + a full repaint */
+static BOOL CALLBACK RethemeWnd(HWND h, LPARAM l)
+{
+    WCHAR cn[32];
+    (void)l;
+    GetClassNameW(h, cn, 32);
+    if (wcmp(cn, APP_CLASS) != 0 && !(cn[0] == 'm' && cn[1] == 'p' && cn[2] == '_')) return TRUE;   /* ime windows etc. */
+    if ((GetWindowLongPtrW(h, GWL_STYLE) & WS_CAPTION) == WS_CAPTION) DarkFrame(h, h == GetActiveWindow());
+    RedrawWindow(h, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+    return TRUE;
+}
+
+/* view > theme. everything we draw reads the palette at paint time, so a repaint is enough after this */
+static void ApplyTheme(int theme)
+{
+    ThemeUse(theme);
+    SetClassLongW(g_hwnd, GCL_HBRBACKGROUND, (LONG)(LONG_PTR)g_brFace);   /* the class brush erases the main window */
+    EditApplyColors();
+    DarkScroll(g_edit);
+    EnumThreadWindows(GetCurrentThreadId(), RethemeWnd, 0);           /* menu bar + status bar repaint as children */
+    AppSavePrefs();
+}
+
 static const WCHAR g_ucc[17] = {
     0x200E, 0x200F, 0x200D, 0x200C, 0x202A, 0x202B, 0x202D, 0x202E, 0x202C,
     0x206E, 0x206F, 0x206B, 0x206A, 0x206D, 0x206C, 0x001E, 0x001F
@@ -509,6 +533,8 @@ static void Cmd(int id)
     case IDM_ZOOM_IN:       EditZoomStep(1); break;
     case IDM_ZOOM_OUT:      EditZoomStep(-1); break;
     case IDM_ZOOM_RESET:    EditZoomReset(); break;
+    case IDM_THEME_DARK:    ApplyTheme(THEME_DARK); break;
+    case IDM_THEME_LIGHT:   ApplyTheme(THEME_LIGHT); break;
 
     case IDM_HELP_TOPICS:   HelpDlg(g_hwnd); break;
     case IDM_HELP_ABOUT:    AboutDlg(g_hwnd); break;
@@ -578,6 +604,8 @@ static unsigned MenuState(int id)
     case IDM_ZOOM_IN:       return EditZoomCan(1) ? 0 : MS_GRAY;
     case IDM_ZOOM_OUT:      return EditZoomCan(-1) ? 0 : MS_GRAY;
     case IDM_ZOOM_RESET:    return g_pf.cur != g_pf.pt ? 0 : MS_GRAY;
+    case IDM_THEME_DARK:    return g_pf.theme == THEME_DARK ? on : 0;
+    case IDM_THEME_LIGHT:   return g_pf.theme == THEME_LIGHT ? on : 0;
     case IDM_SYS_RESTORE: case IDM_SYS_MOVE: case IDM_SYS_SIZE:
     case IDM_SYS_MIN: case IDM_SYS_MAX: case IDM_SYS_CLOSE:
         return FrameSysState(id);

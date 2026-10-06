@@ -108,13 +108,13 @@ static void Paint(HWND h)
     Panels(&rc, p);
     for (i = 0; i < SB_COUNT; i++) {
         BOOL click = (i != SB_POS);
-        COLORREF c = (click && i == g_hotp) ? C_ACCENT : C_TEXT;
+        COLORREF c = (click && i == g_hotp) ? C_ACCENT_FG : C_TEXT;
         Bevel(mdc, &p[i], BV_FLAT_DN);
         r = p[i]; r.left += S(7); r.right -= S(3);
         TextC(mdc, g_txt[i], -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, c);
     }
 
-    /* size grip: staggered 2x2 dots, light with a dark shadow */
+    /* size grip: staggered 2x2 dots, light with a dark shadow (the outer bevel colours: visible in both themes) */
     for (row = 0; row < 3; row++) {
         for (col = row; col < 3; col++) {
             gx = rc.right - S(4) - col * S(4);

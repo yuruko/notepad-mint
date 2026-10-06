@@ -1,4 +1,4 @@
-/* menu.c - hand-drawn menu bar + popup menus (classic 2000-era look, dark + mint).
+/* menu.c - hand-drawn menu bar + popup menus (classic 2000-era look, dark or light + mint).
  *
  * no native menus anywhere: the bar is a child window, popups are tiny
  * WS_EX_NOACTIVATE windows, and a private message loop drives hover / keyboard /
@@ -78,16 +78,22 @@ static const MenuItem miZoom[] = {
     IT(L"zoom &out",              L"ctrl+minus", IDM_ZOOM_OUT),
     IT(L"&restore default zoom",  L"ctrl+0",     IDM_ZOOM_RESET),
 };
+static const MenuItem miTheme[] = {
+    IT(L"&dark",               NULL, IDM_THEME_DARK),
+    IT(L"&light",              NULL, IDM_THEME_LIGHT),
+};
 static const MenuItem miFormat[] = {
     IT(L"&word wrap",          NULL, IDM_FMT_WRAP),
-    IT(L"&font && colors...",  NULL, IDM_FMT_FONT),
+    IT(L"&font...",            NULL, IDM_FMT_FONT),
     SEP,
     SUB(L"line &ending",       &g_mdEol),
     SUB(L"e&ncoding",          &g_mdEnc),
 };
+static const MenuDef mdTheme  = { miTheme,  COUNTOF(miTheme)  };
 static const MenuItem miView[] = {
     SUB(L"&zoom",              &g_mdZoom),
     IT(L"&status bar",         NULL, IDM_VIEW_STATUS),
+    SUB(L"&theme",             &mdTheme),
 };
 static const MenuItem miHelp[] = {
     IT(L"&help topics",        NULL, IDM_HELP_TOPICS),
@@ -279,7 +285,7 @@ static void BarPaint(HWND h)
         r.top = S(1); r.bottom = rc.bottom - 3;
         if (on) FillC(mdc, &r, C_ACCENT);
         TextC(mdc, g_ent[i].title, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-              on ? C_FACE : (i == g_hot ? C_ACCENT : C_TEXT));
+              on ? C_ON_ACCENT : (i == g_hot ? C_ACCENT_FG : C_TEXT));
     }
     BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY);
     SelectObject(mdc, of);
@@ -352,7 +358,7 @@ static void PopDraw(Pop *p, HDC dc)
             unsigned st = ItemState(it);
             BOOL gray = (st & MS_GRAY) ? TRUE : FALSE;
             BOOL sel = (i == p->sel) && !gray;
-            COLORREF fg = gray ? C_DIM : (sel ? C_FACE : C_TEXT);
+            COLORREF fg = gray ? C_DIM : (sel ? C_ON_ACCENT : C_TEXT);     /* text, marks and the submenu arrow alike */
             RECT tr;
 
             if (sel) FillC(dc, &r, C_ACCENT);
@@ -386,7 +392,7 @@ static LRESULT CALLBACK PopProc(HWND h, UINT m, WPARAM w, LPARAM l)
     switch (m) {
     case WM_NCCREATE:
         SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW *)l)->lpCreateParams);
-        return TRUE;
+        break;                                             /* DefWindowProcW still has to see it */
     case WM_ERASEBKGND:
         return 1;
     case WM_MOUSEACTIVATE:

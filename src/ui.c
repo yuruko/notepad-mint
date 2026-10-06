@@ -1,4 +1,4 @@
-/* ui.c - dark classic look: bevels, dwm frame, custom button, dialog scaffolding */
+/* ui.c - classic look in two themes: palettes, bevels, dwm frame, custom button, dialog scaffolding */
 #include "mp.h"
 
 #define UI_FACE  L"Segoe UI"
@@ -13,16 +13,17 @@ Palette   g_pal;
 /* ------------------------------------------------------------ themes ---- */
 /* dark: everything derived from the #161418 face + the mint; the editor is black.
  * light: the classic win2000 gray (#d4d0c8 face, white fields); the mint stays the highlight fill, a dark
- * mint is used where the accent is text or a thin line on a light surface; the editor is white. */
+ * mint is used where the accent is text or a thin line on a light surface; the editor is white.
+ * light contrast (wcag): text >= 13.6, dark mint text on face 5.0, dim on face 3.4, shadow #737373 on face 3.1 */
 static const Palette g_themes[2] = {
     { RGB(0x9d, 0xf5, 0xbd), RGB(0x9d, 0xf5, 0xbd), RGB(0x16, 0x14, 0x18),
       RGB(0x16, 0x14, 0x18), RGB(0x21, 0x1e, 0x24), RGB(0x10, 0x0f, 0x12),
       RGB(0x55, 0x4f, 0x5c), RGB(0x36, 0x32, 0x3c), RGB(0x05, 0x04, 0x06), RGB(0x0c, 0x0b, 0x0e),
       RGB(0xff, 0xff, 0xff), RGB(0x80, 0x7a, 0x88),
       RGB(0xff, 0xff, 0xff), RGB(0x00, 0x00, 0x00) },
-    { RGB(0x9d, 0xf5, 0xbd), RGB(0x0e, 0x6a, 0x39), RGB(0x00, 0x00, 0x00),
+    { RGB(0x9d, 0xf5, 0xbd), RGB(0x0b, 0x60, 0x33), RGB(0x00, 0x00, 0x00),
       RGB(0xd4, 0xd0, 0xc8), RGB(0xe4, 0xe1, 0xda), RGB(0xff, 0xff, 0xff),
-      RGB(0xff, 0xff, 0xff), RGB(0xe9, 0xe7, 0xe2), RGB(0x40, 0x40, 0x40), RGB(0x80, 0x80, 0x80),
+      RGB(0xff, 0xff, 0xff), RGB(0xe9, 0xe7, 0xe2), RGB(0x40, 0x40, 0x40), RGB(0x73, 0x73, 0x73),
       RGB(0x00, 0x00, 0x00), RGB(0x6d, 0x6d, 0x6d),
       RGB(0x00, 0x00, 0x00), RGB(0xff, 0xff, 0xff) },
 };
@@ -287,13 +288,13 @@ static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
     WCHAR text[128];
     int n = GetWindowTextW(h, text, 128), t = BtnType(h);
     BOOL en = IsWindowEnabled(h) ? TRUE : FALSE;
-    COLORREF tc = !en ? C_DIM : (s->hot ? C_ACCENT : C_TEXT);
+    COLORREF tc = !en ? C_DIM : (s->hot ? C_ACCENT_FG : C_TEXT);
     HGDIOBJ of = SelectObject(dc, s->font ? s->font : g_fontUI);
 
     FillC(dc, &rc, C_FACE);
     if (t == BS_PUSHBUTTON || t == BS_DEFPUSHBUTTON) {
         RECT r = rc, in, tr;
-        if (s->isdef) { Frame(dc, &r, C_ACCENT, C_ACCENT); InflateRect(&r, -1, -1); }
+        if (s->isdef) { Frame(dc, &r, C_ACCENT_FG, C_ACCENT_FG); InflateRect(&r, -1, -1); }
         Bevel(dc, &r, s->down ? BV_SUNKEN : BV_RAISED);
         in = r;
         InflateRect(&in, -2, -2);
@@ -313,12 +314,12 @@ static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
         if (t == BS_AUTORADIOBUTTON) {
             HGDIOBJ op = SelectObject(dc, GetStockObject(DC_PEN));
             HGDIOBJ ob = SelectObject(dc, GetStockObject(DC_BRUSH));
-            SetDCPenColor(dc, C_HI);
+            SetDCPenColor(dc, g_theme == THEME_DARK ? C_HI : C_LO2);      /* the ring: the darker edge in the light theme */
             SetDCBrushColor(dc, C_FIELD);
             Ellipse(dc, box.left, box.top, box.right, box.bottom);
             if (s->check) {
-                SetDCPenColor(dc, en ? C_ACCENT : C_DIM);
-                SetDCBrushColor(dc, en ? C_ACCENT : C_DIM);
+                SetDCPenColor(dc, en ? C_ACCENT_FG : C_DIM);
+                SetDCBrushColor(dc, en ? C_ACCENT_FG : C_DIM);
                 Ellipse(dc, box.left + S(4), box.top + S(4), box.right - S(3), box.bottom - S(3));
             }
             SelectObject(dc, op);
@@ -328,7 +329,7 @@ static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
             in = box;
             InflateRect(&in, -2, -2);
             FillC(dc, &in, C_FIELD);
-            if (s->check) CheckGlyph(dc, box.left, box.top, en ? C_ACCENT : C_DIM);
+            if (s->check) CheckGlyph(dc, box.left, box.top, en ? C_ACCENT_FG : C_DIM);
         }
         tr.left = bx + S(7); tr.top = 0; tr.right = rc.right; tr.bottom = rc.bottom;
         TextC(dc, text, n, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE, tc);
@@ -566,7 +567,7 @@ void DlgRunModal(DlgBase *b)
     b->hwnd = NULL;
 }
 
-/* shared dark behaviour for every dialog window. returns TRUE if handled */
+/* shared themed behaviour for every dialog window. returns TRUE if handled */
 BOOL DlgCommon(DlgBase *b, UINT m, WPARAM w, LPARAM l, LRESULT *ret)
 {
     HDC dc;
@@ -683,7 +684,7 @@ static LRESULT CALLBACK MsgProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-/* dark message box. buttons are 1-based; returns the pressed index (escIdx for esc / close) */
+/* themed message box. buttons are 1-based; returns the pressed index (escIdx for esc / close) */
 int MpAsk(HWND owner, const WCHAR *title, const WCHAR *msg, const WCHAR *b1, const WCHAR *b2, const WCHAR *b3, int escIdx)
 {
     MsgDlg d;
