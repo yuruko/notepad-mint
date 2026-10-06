@@ -111,6 +111,10 @@ public static class U {
     public static bool Visible(long h) { return IsWindow(H(h)) && IsWindowVisible(H(h)); }
     public static bool Enabled(long h) { return IsWindowEnabled(H(h)); }
     public static bool Iconic(long h) { return IsIconic(H(h)); }
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
+    [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr h);
+    public static bool Zoomed(long h) { return IsZoomed(H(h)); }
+    public static int Dpi(long h) { return (int)GetDpiForWindow(H(h)); }
     public static int Id(long h) { return GetDlgCtrlID(H(h)); }
     public static long Item(long d, int id) { return GetDlgItem(H(d), id).ToInt64(); }
     public static uint Tid(long h) { uint p; return GetWindowThreadProcessId(H(h), out p); }
