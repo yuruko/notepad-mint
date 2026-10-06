@@ -263,17 +263,26 @@ void AppUpdateStatus(void)
     int line, col;
     if (!g_status || !g_pf.statusbar) return;
     EditCaretPos(&line, &col);
-    wsprintfW(b, L"ln %d, col %d", line, col);
+    wsprintfW(b, L"%d:%d", line, col);
     StatusSet(g_status, SB_POS, b);
     wsprintfW(b, L"%d pt", g_pf.cur);
     StatusSet(g_status, SB_ZOOM, b);
-    StatusSet(g_status, SB_EOL, g_eolName[g_doc.eol]);
-    EncLabel(g_doc.enc, b, COUNTOF(b));
+    StatusSet(g_status, SB_EOL, g_eolShort[g_doc.eol]);
+    EncShort(g_doc.enc, b, COUNTOF(b));
     StatusSet(g_status, SB_ENC, b);
+    {                                                   /* nothing is ever cut off: a text wider than the panels were made for (a long code page name) widens a window that is too narrow */
+        RECT cr, wr;
+        int need = StatusMinWidth();
+        GetClientRect(g_hwnd, &cr);
+        if (cr.right > 0 && cr.right < need && !IsZoomed(g_hwnd) && !IsIconic(g_hwnd)) {
+            GetWindowRect(g_hwnd, &wr);
+            SetWindowPos(g_hwnd, NULL, 0, 0, wr.right - wr.left + (need - cr.right), wr.bottom - wr.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
 }
 
 /* ========================================================== layout ======= */
-static void EditArea(RECT *r)                       /* the area (incl. its sunken frame) the edit lives in */
+static void EditArea(RECT *r)                       /* the area the edit fills (no frame: the padding is inside the control) */
 {
     RECT cr;
     int sh = g_pf.statusbar ? StatusHeight() : 0;
@@ -292,7 +301,7 @@ static void Layout(void)
     GetClientRect(g_hwnd, &cr);
     EditArea(&f);
     if (g_bar) MoveWindow(g_bar, 0, FrameHeight(), cr.right, MenuBarHeight(), TRUE);
-    if (g_edit) MoveWindow(g_edit, f.left + 2, f.top + 2, f.right - f.left - 4, f.bottom - f.top - 4, TRUE);
+    if (g_edit) MoveWindow(g_edit, f.left, f.top, f.right - f.left, f.bottom - f.top, TRUE);
     if (g_status) {
         if (sh) {
             MoveWindow(g_status, 0, cr.bottom - sh, cr.right, sh, TRUE);
@@ -628,10 +637,10 @@ static void Cmd(int id)
     FocusEdit();
 }
 
-/* the chrome (menu bar, popups, status bar) follows the editor font: same face, CHROME_PT_LESS (3) pt smaller, max 14pt */
+/* the chrome (menu bar, popups, status bar, title strip) uses the editor font face at a static size (CHROME_PT) */
 static void ApplyChrome(void)
 {
-    UiSetChromeFont(g_pf.font, g_pf.pt);
+    UiSetChromeFont(g_pf.font);
     if (g_bar) MenuBarRefont(g_bar);
     if (g_status) StatusRefont(g_status);
     FrameRefont(g_hwnd);
@@ -714,7 +723,7 @@ static LRESULT OnCreate(HWND h)
     UiSetDpi(UiDpiForWindow(h));
     DarkFrame(h, 1);
     FontResolve(g_pf.font);
-    UiSetChromeFont(g_pf.font, g_pf.pt);            /* before the bars exist: their heights come from this font */
+    UiSetChromeFont(g_pf.font);                     /* before the bars exist: their heights come from this font */
     g_bar = MenuBarCreate(h, MenuState);
     g_status = StatusCreate(h);
     if (!EditCreate(h)) return -1;
@@ -797,10 +806,7 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC dc = BeginPaint(h, &ps);
-        RECT f;
         FramePaint(h, dc);                                 /* the title strip */
-        EditArea(&f);
-        Bevel(dc, &f, BV_SUNKEN);
         EndPaint(h, &ps);
         return 0; }
     case WM_CTLCOLOREDIT:

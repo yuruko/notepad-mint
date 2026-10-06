@@ -109,8 +109,8 @@ enum { BV_RAISED, BV_SUNKEN, BV_ETCHED, BV_FLAT_UP, BV_FLAT_DN };
 extern HINSTANCE g_hinst;
 extern int       g_dpi;
 extern HFONT     g_fontUI, g_fontUIB;                 /* dialogs: segoe ui 9pt */
-extern HFONT     g_fontMenu;                          /* menu bar / popups / status bar: editor font, CHROME_PT_LESS smaller (max 14pt) */
-#define CHROME_PT_LESS 3                              /* the chrome font is the editor size minus this many points */
+extern HFONT     g_fontMenu;                          /* menu bar / popups / status bar / title strip: the editor font face at a static CHROME_PT */
+#define CHROME_PT 10                                  /* the chrome font size in points: static, it does not follow the editor size */
 extern HBRUSH    g_brFace, g_brField;
 
 int   S(int v);                                       /* scale 96-dpi px -> device px */
@@ -119,7 +119,7 @@ void  UiInit(HINSTANCE hi);
 void  UiSetDpi(int dpi);
 void  ThemeSet(int theme);                            /* THEME_*: switches g_pal + g_brFace / g_brField (no repaint) */
 int   ThemeGet(void);
-void  UiSetChromeFont(const WCHAR *face, int editorPt);   /* rebuilds g_fontMenu; callers then refont the bar + status bar */
+void  UiSetChromeFont(const WCHAR *face);                /* rebuilds g_fontMenu (the editor font face, CHROME_PT points); callers then refont the bar + status bar */
 int   UiSystemDpi(void);
 int   UiDpiForWindow(HWND h);                         /* falls back to g_dpi before windows 10 */
 int   UiMetric(int idx);                              /* GetSystemMetrics at the current dpi */
@@ -199,7 +199,10 @@ enum { EOL_CRLF, EOL_LF, EOL_CR, EOL_COUNT };
 #define ERR_LOSSY    1113                           /* ERROR_NO_UNICODE_TRANSLATION */
 extern const WCHAR *const g_encName[ENC_COUNT];
 extern const WCHAR *const g_eolName[EOL_COUNT];
-void  EncLabel(int enc, WCHAR *out, int cap);       /* status bar text for any encoding id */
+extern const WCHAR *const g_encShort[ENC_COUNT];            /* status bar texts: "utf-8 bom", "crlf" ... */
+extern const WCHAR *const g_eolShort[EOL_COUNT];
+void  EncLabel(int enc, WCHAR *out, int cap);       /* full name of any encoding id (menus, dialogs) */
+void  EncShort(int enc, WCHAR *out, int cap);       /* status bar text for any encoding id */
 int   EncListCount(void);                           /* every encoding the pickers offer */
 int   EncListGet(int i, WCHAR *label, int cap);     /* returns the encoding id, label = "name  description" */
 DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int forceEnc);   /* forceEnc -1 = detect */
@@ -239,6 +242,7 @@ void  AppUpdateTitle(void);
 void  AppUpdateStatus(void);
 
 /* -------------------------------------------------------------- edit.c --- */
+#define EDIT_PAD 8                                    /* padding around the text, 96-dpi pixels (no frame around the editor) */
 HWND   EditCreate(HWND parent);                 /* (re)creates g_edit for g_pf.wrap, carrying text/selection/rtl over */
 void   EditApplyFont(void);                     /* font from g_pf (face, g_pf.cur size, dpi) */
 void   EditApplyColors(void);                   /* bg brush from g_pf.bg, repaint */

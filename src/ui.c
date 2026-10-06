@@ -12,9 +12,9 @@ Palette   g_pal;
 
 /* ------------------------------------------------------------ themes ---- */
 /* dark: everything derived from the #161418 face + the mint; the editor is black.
- * light: a light warm gray (#e4e1da face, white fields); the accent is a DARK green (#0a552d) both as a fill (hover,
- * selection, caret) and as text / thin lines, with white text on it; the editor is white.
- * light contrast (wcag): text >= 14, accent on face >= 7, white on the accent fill ~9, dim #595959 on face ~5.7
+ * light: a light warm gray (#e4e1da face, white fields); the accent is a softer, minty green: #2f7d58 as a fill (hover, caret)
+ * with white text on it, a little darker (#1f6a43) where it is text or a thin line on the face; the editor is white.
+ * light contrast (wcag): text >= 14, accent text / lines on face ~5.0, white on the accent fill ~5.0, dim #595959 on face ~5.7
  * (info labels use it as reading text), shadow #737373 on face ~3.5 */
 static const Palette g_themes[2] = {
     { RGB(0x9d, 0xf5, 0xbd), RGB(0x9d, 0xf5, 0xbd), RGB(0x16, 0x14, 0x18),
@@ -22,7 +22,7 @@ static const Palette g_themes[2] = {
       RGB(0x55, 0x4f, 0x5c), RGB(0x36, 0x32, 0x3c), RGB(0x05, 0x04, 0x06), RGB(0x0c, 0x0b, 0x0e),
       RGB(0xff, 0xff, 0xff), RGB(0x80, 0x7a, 0x88),
       RGB(0xff, 0xff, 0xff), RGB(0x00, 0x00, 0x00) },
-    { RGB(0x0a, 0x55, 0x2d), RGB(0x0a, 0x55, 0x2d), RGB(0xff, 0xff, 0xff),
+    { RGB(0x2f, 0x7d, 0x58), RGB(0x1f, 0x6a, 0x43), RGB(0xff, 0xff, 0xff),
       RGB(0xe4, 0xe1, 0xda), RGB(0xf0, 0xee, 0xe9), RGB(0xff, 0xff, 0xff),
       RGB(0xff, 0xff, 0xff), RGB(0xf3, 0xf1, 0xed), RGB(0x40, 0x40, 0x40), RGB(0x73, 0x73, 0x73),
       RGB(0x00, 0x00, 0x00), RGB(0x59, 0x59, 0x59),
@@ -56,8 +56,7 @@ static DpiSysFn pDpiSys;
 static AdjDpiFn pAdjDpi;
 static MetricFn pMetric;
 
-static WCHAR g_chromeFace[32] = L"Consolas";   /* menu bar / popups / status bar font: the editor font, CHROME_PT_LESS smaller */
-static int   g_chromePt = 10;                  /* = the default 13pt editor size - CHROME_PT_LESS (UiSetChromeFont overwrites it at startup) */
+static WCHAR g_chromeFace[32] = L"Consolas";   /* menu bar / popups / status bar / title strip font: the editor font face, CHROME_PT points */
 
 int S(int v)    { return MulDiv(v, g_dpi, 96); }
 int UnS(int px) { return MulDiv(px, 96, g_dpi); }
@@ -116,7 +115,7 @@ static void MakeDialogFonts(void)
 static void MakeMenuFont(void)
 {
     if (g_fontMenu) DeleteObject(g_fontMenu);
-    g_fontMenu = Face(g_chromeFace, g_chromePt, FW_NORMAL);    /* main window chrome */
+    g_fontMenu = Face(g_chromeFace, CHROME_PT, FW_NORMAL);    /* main window chrome */
 }
 
 static void MakeFonts(void)
@@ -125,14 +124,10 @@ static void MakeFonts(void)
     MakeMenuFont();
 }
 
-/* chrome font = the editor's font face, CHROME_PT_LESS (3) pt smaller than its size, never above 14pt */
-void UiSetChromeFont(const WCHAR *face, int editorPt)
+/* chrome font = the editor's font face at a static size (CHROME_PT): zooming the editor does not touch the menu bar, status bar or title */
+void UiSetChromeFont(const WCHAR *face)
 {
-    int pt = editorPt - CHROME_PT_LESS;
-    if (pt > 14) pt = 14;
-    if (pt < 8) pt = 8;
     wcopy(g_chromeFace, face, 32);
-    g_chromePt = pt;
     MakeMenuFont();
 }
 

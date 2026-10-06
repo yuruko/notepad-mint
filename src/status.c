@@ -1,15 +1,24 @@
-/* status.c - classic status bar: ln/col | font size | line ending | encoding. no size grip: the window is resized by its frame.
+/* status.c - classic status bar: line:column | font size | line ending | encoding. no size grip: the window is resized by its frame.
  * the size / line-ending / encoding panels are clickable (they pop a menu). drawn in the chrome font (g_fontMenu, the same
- * font as the menu bar), so the panel widths are measured from the text they can show rather than fixed. */
+ * font as the menu bar). a panel is never narrower than its text: its width is the widest text it can normally show (so the
+ * panels do not jump around when a value changes) or, for an unusual one (a long code page name), the text it shows right now.
+ * StatusMinWidth() is what the main window's minimum size and AppUpdateStatus keep the window wide enough for, so nothing is
+ * ever cut off or ellipsized. */
 #include "mp.h"
 
 static HWND  g_sb;
 static WCHAR g_txt[SB_COUNT][64];
 static int   g_sbH, g_hotp = -1;
-static int   g_pw[SB_COUNT];                    /* device-px widths of the clickable panels (SB_POS takes the rest) */
+static int   g_floor[SB_COUNT];                 /* device px: the widest text the panel can normally show, padding included */
+static int   g_need[SB_COUNT];                  /* device px: the text it shows now, padding included */
 
-/* names the encoding panel can show besides g_encName[]: the widest code page labels */
-static const WCHAR *const g_wide[] = { L"ks_c_5601-1987", L"x-mac-cyrillic", L"windows-1252", L"iso-8859-8-i" };
+/* names the encoding panel can show besides g_encShort[]: the widest code page names */
+static const WCHAR *const g_wide[] = { L"ks_c_5601-1987", L"x-mac-cyrillic", L"x-mac-icelandic", L"windows-1252", L"iso-8859-8-i" };
+
+static int PadL(void) { return S(8); }
+static int PadR(void) { return S(8); }
+static int TextWidth(HDC dc, const WCHAR *t) { return TextW(dc, t, -1) + PadL() + PadR(); }
+static int PanelW(int i) { return g_need[i] > g_floor[i] ? g_need[i] : g_floor[i]; }
 
 static void Measure(void)
 {
@@ -20,13 +29,14 @@ static void Measure(void)
 
     GetTextMetricsW(dc, &tm);
     g_sbH = tm.tmHeight + S(8);
-    g_pw[SB_POS] = 0;
-    g_pw[SB_ZOOM] = TextW(dc, L"96 pt", -1) + S(14);
-    for (m = 0, i = 0; i < EOL_COUNT; i++) { w = TextW(dc, g_eolName[i], -1); if (w > m) m = w; }
-    g_pw[SB_EOL] = m + S(14);
-    for (m = 0, i = 0; i < ENC_COUNT; i++) { w = TextW(dc, g_encName[i], -1); if (w > m) m = w; }
-    for (i = 0; i < COUNTOF(g_wide); i++) { w = TextW(dc, g_wide[i], -1); if (w > m) m = w; }
-    g_pw[SB_ENC] = m + S(14);
+    g_floor[SB_POS] = TextWidth(dc, L"99999999:99999");              /* line:column of a very big file */
+    g_floor[SB_ZOOM] = TextWidth(dc, L"96 pt");
+    for (m = 0, i = 0; i < EOL_COUNT; i++) { w = TextWidth(dc, g_eolShort[i]); if (w > m) m = w; }
+    g_floor[SB_EOL] = m;
+    for (m = 0, i = 0; i < ENC_COUNT; i++) { w = TextWidth(dc, g_encShort[i]); if (w > m) m = w; }
+    for (i = 0; i < COUNTOF(g_wide); i++) { w = TextWidth(dc, g_wide[i]); if (w > m) m = w; }
+    g_floor[SB_ENC] = m;
+    for (i = 0; i < SB_COUNT; i++) g_need[i] = TextWidth(dc, g_txt[i]);
     SelectObject(dc, of);
     ReleaseDC(NULL, dc);
 }
@@ -37,11 +47,13 @@ int StatusHeight(void)
     return g_sbH;
 }
 
-/* narrowest client width that still leaves room for the position panel */
+/* narrowest client width at which every panel shows its whole text */
 int StatusMinWidth(void)
 {
+    int i, w = S(4);
     if (!g_sbH) Measure();
-    return g_pw[SB_ZOOM] + g_pw[SB_EOL] + g_pw[SB_ENC] + S(1) + S(110);
+    for (i = 0; i < SB_COUNT; i++) w += PanelW(i);
+    return w;
 }
 
 void StatusRefont(HWND sb)
@@ -55,6 +67,13 @@ void StatusSet(HWND sb, int idx, const WCHAR *text)
     if (idx < 0 || idx >= SB_COUNT) return;
     if (wcmp(g_txt[idx], text) == 0) return;
     wcopy(g_txt[idx], text, 64);
+    if (g_sbH) {
+        HDC dc = GetDC(NULL);
+        HGDIOBJ of = SelectObject(dc, g_fontMenu);
+        g_need[idx] = TextWidth(dc, g_txt[idx]);
+        SelectObject(dc, of);
+        ReleaseDC(NULL, dc);
+    }
     InvalidateRect(sb, NULL, FALSE);
 }
 
@@ -65,7 +84,7 @@ static void Panels(const RECT *rc, RECT out[SB_COUNT])
     if (!g_sbH) Measure();
     for (i = SB_COUNT - 1; i >= SB_ZOOM; i--) {
         out[i].right = x;
-        x -= g_pw[i];
+        x -= PanelW(i);
         out[i].left = x;
         out[i].top = S(2); out[i].bottom = rc->bottom - S(1);
     }
@@ -101,15 +120,15 @@ static void Paint(HWND h)
     old = SelectObject(mdc, bmp);
     of = SelectObject(mdc, g_fontMenu);
 
-    FillC(mdc, &rc, C_FACE);                                 /* no line on top: the editor's frame above is the one border */
+    FillC(mdc, &rc, C_FACE);
 
     Panels(&rc, p);
     for (i = 0; i < SB_COUNT; i++) {
         BOOL hot = (i != SB_POS && i == g_hotp);             /* the clickable panels: hover = the accent as the background */
         Bevel(mdc, &p[i], BV_FLAT_DN);
         if (hot) { r = p[i]; InflateRect(&r, -1, -1); FillC(mdc, &r, C_ACCENT); }
-        r = p[i]; r.left += S(7); r.right -= S(3);
-        TextC(mdc, g_txt[i], -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, hot ? C_ON_ACCENT : C_TEXT);
+        r = p[i]; r.left += PadL(); r.right -= PadR();
+        TextC(mdc, g_txt[i], -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, hot ? C_ON_ACCENT : C_TEXT);
     }
 
     BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY);
@@ -143,9 +162,6 @@ static LRESULT CALLBACK StatusProc(HWND h, UINT m, WPARAM w, LPARAM l)
         g_hotp = -1;
         InvalidateRect(h, NULL, FALSE);
         return 0;
-    case WM_SETCURSOR:
-        if (g_hotp >= 0 && LOWORD(l) == HTCLIENT) { SetCursor(LoadCursorW(NULL, IDC_HAND)); return TRUE; }
-        break;
     case WM_LBUTTONDOWN: {
         int i = PanelAt(h, GET_X_LPARAM(l), GET_Y_LPARAM(l));
         if (i >= SB_ZOOM) {

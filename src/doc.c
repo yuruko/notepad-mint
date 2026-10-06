@@ -10,6 +10,8 @@
 
 const WCHAR *const g_encName[ENC_COUNT] = { L"utf-8", L"utf-8 with bom", L"utf-16 le", L"utf-16 be", L"ansi" };
 const WCHAR *const g_eolName[EOL_COUNT] = { L"windows (crlf)", L"unix (lf)", L"macintosh (cr)" };
+const WCHAR *const g_encShort[ENC_COUNT] = { L"utf-8", L"utf-8 bom", L"utf-16 le", L"utf-16 be", L"ansi" };     /* the status bar: as short as it gets */
+const WCHAR *const g_eolShort[EOL_COUNT] = { L"crlf", L"lf", L"cr" };
 
 /* ------------------------------------------------------ code page table -- */
 typedef struct { int cp; const WCHAR *name, *desc; } CpInfo;
@@ -94,6 +96,18 @@ void EncLabel(int enc, WCHAR *out, int cap)
     c = CpFind(enc);
     if (c) { wcopy(out, c->name, cap); return; }
     wsprintfW(buf, L"code page %d", enc);
+    wcopy(out, buf, cap);
+}
+
+/* the status bar's text for any encoding id: the short names, a code page by its name ("cp 1234" when the table has none) */
+void EncShort(int enc, WCHAR *out, int cap)
+{
+    const CpInfo *c;
+    WCHAR buf[24];
+    if (enc >= 0 && enc < ENC_COUNT) { wcopy(out, g_encShort[enc], cap); return; }
+    c = CpFind(enc);
+    if (c) { wcopy(out, c->name, cap); return; }
+    wsprintfW(buf, L"cp %d", enc);
     wcopy(out, buf, cap);
 }
 

@@ -252,117 +252,10 @@ void FontResolve(WCHAR *face)
     wcopy(face, L"Courier New", 32);
 }
 
-/* ------------------------------------------------ accent selection + caret -- */
-/* the stock edit draws the selection in the system highlight colour (no way to change it for one process) and its caret
- * is a plain inverting bar. so, while there IS a selection, WM_PAINT is answered here: the control paints itself into a
- * bitmap (WM_PRINTCLIENT: text, stock selection), then every selected run of a line that needs no shaping is painted over
- * in the accent colours at the positions the control reports (EM_POSFROMCHAR), and the bitmap is blitted. lines with right
- * to left text keep the stock colour: rebuilding their (visually split) selection outside the control would not match it.
- * everything else, complex scripts and surrogate pairs included, is drawn with the same gdi call the control uses.
- * the caret is a bitmap caret whose bits are accent xor background: a caret is drawn by inverting the pixels under it,
- * which gives exactly the accent on the editor background */
-static int IsBidi(WCHAR c)                                          /* right to left scripts and the bidi controls */
-{
-    return (c >= 0x0590 && c <= 0x08FF) || (c >= 0x200E && c <= 0x200F) || (c >= 0x202A && c <= 0x202E) ||
-           (c >= 0x2066 && c <= 0x2069) || (c >= 0xFB1D && c <= 0xFDFF) || (c >= 0xFE70 && c <= 0xFEFF);
-}
-
-static void PaintSelection(HWND h, HDC dc, DWORD s, DWORD e)
-{
-    HLOCAL hl;
-    const WCHAR *t;
-    RECT fr, r;
-    int n, first, rows, lh, k, line, ls, le, a, b, i, j;
-    HGDIOBJ of;
-
-    SendMessageW(h, EM_GETRECT, 0, (LPARAM)&fr);
-    t = TextLock(&hl, &n);
-    if (!t) return;
-    lh = LineHeight();
-    first = (int)SendMessageW(h, EM_GETFIRSTVISIBLELINE, 0, 0);
-    rows = (fr.bottom - fr.top) / lh + 2;
-    of = SelectObject(dc, g_font);
-    SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, C_ON_ACCENT);
-    IntersectClipRect(dc, fr.left, fr.top, fr.right, fr.bottom);
-    for (k = 0, line = first; k < rows; k++, line++) {
-        ls = (int)SendMessageW(h, EM_LINEINDEX, (WPARAM)line, 0);
-        if (ls < 0 || (DWORD)ls >= e) break;                        /* past the last line / past the selection */
-        le = ls + (int)SendMessageW(h, EM_LINELENGTH, (WPARAM)ls, 0);
-        if (le > n) le = n;
-        a = (int)s > ls ? (int)s : ls;
-        b = (int)e < le ? (int)e : le;
-        if (a >= b) continue;
-        for (i = ls; i < le; i++) if (IsBidi(t[i])) break;
-        if (i < le) continue;                                       /* right-to-left text: the stock colour stays on that line */
-        for (i = a; i < b; i = j) {
-            LRESULT p0 = SendMessageW(h, EM_POSFROMCHAR, (WPARAM)i, 0);
-            int x0 = (short)LOWORD(p0), y = (short)HIWORD(p0), x1;
-            j = i + 1;
-            if (t[i] != '\t') {
-                while (j < b && t[j] != '\t') j++;                  /* a run without tabs: laid out like the control does it */
-                x1 = x0 + TextW(dc, t + i, j - i);
-            } else {                                                /* a selected tab is a blank block up to the next character */
-                x1 = j < le ? (short)LOWORD(SendMessageW(h, EM_POSFROMCHAR, (WPARAM)j, 0)) : x0 + lh / 2;
-            }
-            if (GetPixel(dc, x1, y + lh / 2) == GetSysColor(COLOR_HIGHLIGHT)) x1++;   /* the control's own highlight is a pixel wider than its text: no stock-blue sliver at the end of a run */
-            r.left = x0; r.right = x1; r.top = y; r.bottom = y + lh;
-            FillC(dc, &r, C_ACCENT);
-            if (t[i] != '\t') ExtTextOutW(dc, x0, y, 0, NULL, t + i, (UINT)(j - i), NULL);
-        }
-    }
-    SelectObject(dc, of);
-    LocalUnlock(hl);
-}
-
-static BOOL SelPaint(HWND h)                                        /* TRUE = the paint was done here (a selection exists) */
-{
-    PAINTSTRUCT ps;
-    RECT cr;
-    DWORD s = 0, e = 0;
-    HDC dc, mdc;
-    HBITMAP bmp;
-    HGDIOBJ ob;
-    int w, hh;
-
-    if (!g_font || (GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_RTLREADING)) return FALSE;
-    SendMessageW(h, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    if (s == e) return FALSE;
-    dc = BeginPaint(h, &ps);
-    w = ps.rcPaint.right - ps.rcPaint.left;
-    hh = ps.rcPaint.bottom - ps.rcPaint.top;
-    if (w > 0 && hh > 0) {
-        mdc = CreateCompatibleDC(dc);
-        bmp = CreateCompatibleBitmap(dc, w, hh);
-        ob = SelectObject(mdc, bmp);
-        SetViewportOrgEx(mdc, -ps.rcPaint.left, -ps.rcPaint.top, NULL);   /* the bitmap is just the invalid part; everything below uses window coordinates */
-        GetClientRect(h, &cr);
-        FillC(mdc, &cr, g_pf.bg);                                   /* the margins */
-        SendMessageW(h, WM_PRINTCLIENT, (WPARAM)mdc, PRF_CLIENT | PRF_ERASEBKGND);
-        PaintSelection(h, mdc, s, e);
-        SetViewportOrgEx(mdc, 0, 0, NULL);
-        BitBlt(dc, ps.rcPaint.left, ps.rcPaint.top, w, hh, mdc, 0, 0, SRCCOPY);
-        SelectObject(mdc, ob);
-        DeleteObject(bmp);
-        DeleteDC(mdc);
-    }
-    EndPaint(h, &ps);
-    return TRUE;
-}
-
-/* the control highlights a CHANGED selection by drawing it straight onto the window in the stock colour (no WM_PAINT),
- * so after anything that can change the selection, repaint it through SelPaint right away */
-static void RepaintSel(HWND h)
-{
-    DWORD s = 0, e = 0;
-    if (g_inBars) return;
-    SendMessageW(h, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    if (s != e) {
-        InvalidateRect(h, NULL, FALSE);
-        UpdateWindow(h);
-    }
-}
-
+/* ----------------------------------------------------------------- caret -- */
+/* the stock edit draws the selection in the system highlight colour: that stays (an overpaint in the accent flickered). the caret is a
+ * bitmap caret whose bits are accent xor background: a caret is drawn by inverting the pixels under it, which gives exactly the accent
+ * on the editor background */
 static HBITMAP g_caretBmp;
 static int     g_caretW, g_caretH;
 static COLORREF g_caretC;
@@ -402,6 +295,22 @@ static void AccentCaret(HWND h)                                     /* replaces 
     if (s == e) ShowCaret(h);                                       /* with a selection the control keeps the caret hidden */
 }
 
+/* the padding around the text (EDIT_PAD, no frame): the formatting rectangle, shrunk from the client area on all four sides (a rectangle set
+ * with EM_SETRECT replaces the margins, so the left / right ones are part of it; EM_SETMARGINS keeps them for whatever the control redoes by
+ * itself). the control resets that rectangle to the client area on every size change, so this runs after those too */
+static void EditPad(HWND h)
+{
+    RECT r;
+    int pad = S(EDIT_PAD);
+    SendMessageW(h, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(pad, pad));
+    GetClientRect(h, &r);
+    if (r.bottom - r.top > 2 * pad + 8 && r.right - r.left > 2 * pad + 8) {
+        r.left += pad; r.right -= pad;
+        r.top += pad; r.bottom -= pad;
+        SendMessageW(h, EM_SETRECTNP, 0, (LPARAM)&r);
+    }
+}
+
 void EditApplyFont(void)
 {
     LOGFONTW lf;
@@ -423,7 +332,7 @@ void EditApplyFont(void)
     g_font = nf;
     if (g_edit) {
         SendMessageW(g_edit, WM_SETFONT, (WPARAM)nf, TRUE);
-        SendMessageW(g_edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(S(4), S(4)));
+        EditPad(g_edit);
         EditScrollSoon();
     }
     if (old) DeleteObject(old);
@@ -573,9 +482,6 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         break;
-    case WM_PAINT:
-        if (SelPaint(h)) return 0;                             /* a selection: painted in the accent colours (see above) */
-        break;
     case WM_CHAR:
         if (w == 0x7F) { DelWord(-1); return 0; }              /* ctrl+backspace arrives as DEL */
         break;
@@ -607,19 +513,11 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
 
     switch (m) {                                                /* anything that can change the room the text needs */
     case WM_SIZE: case WM_SETFONT: case WM_SETTEXT:
+        if (m != WM_SETTEXT) EditPad(h);                        /* (the control puts its formatting rectangle back to the client area) */
         EditScrollSoon();
         break;
     }
     if (m == WM_SETFOCUS || m == WM_SETFONT) AccentCaret(h);    /* the control has just made its own caret: swap in the accent one */
-    switch (m) {                                                /* anything that can change the selection: repaint it in the accent colours */
-    case EM_SETSEL: case EM_REPLACESEL: case WM_KEYDOWN: case WM_CHAR: case WM_LBUTTONDOWN: case WM_LBUTTONUP:
-    case WM_LBUTTONDBLCLK: case WM_CUT: case WM_PASTE: case WM_CLEAR: case WM_UNDO: case WM_SETFOCUS: case WM_KILLFOCUS:
-        RepaintSel(h);
-        break;
-    case WM_MOUSEMOVE:
-        if (w & 1) RepaintSel(h);                               /* dragging a selection */
-        break;
-    }
     switch (m) {                                                /* anything that can move the caret / change the text */
     case WM_KEYDOWN: case WM_KEYUP: case WM_CHAR:
     case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_TIMER:

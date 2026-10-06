@@ -1,13 +1,13 @@
-/* frame.c - the main window's title strip, drawn by us in the chrome font (g_fontMenu: the editor font, CHROME_PT_LESS smaller).
+/* frame.c - the main window's title strip, drawn by us in the chrome font (g_fontMenu: the editor font face, CHROME_PT points).
  *
  * the window keeps the system's thick frame on the left / right / bottom (resizing, aero snap, shadow and animations
  * stay native); only the caption moves into the client area: WM_NCCALCSIZE hands the client the whole top edge, we
- * paint the icon, the title (accent while active) and our own minimize / maximize / close buttons there, and
+ * paint the icon, the title (white / black while active) and our own minimize / maximize / close buttons there, and
  * WM_NCHITTEST answers HTTOP along the top edge and HTCAPTION over the rest of the strip, so resizing, dragging,
  * aero snap and double-click-to-maximize keep working. the window menu is our popup (menu.c). */
 #include "mp.h"
 
-/* on: the title bar text uses the chrome font (the editor font minus CHROME_PT_LESS), like the menu bar and the status bar.
+/* on: the title bar text uses the chrome font (CHROME_PT), like the menu bar and the status bar.
  * the first try drew two title bars: the only WM_NCCALCSIZE sent by CreateWindowExW has wParam FALSE, FrameNcCalc handed
  * that one to DefWindowProc untouched, and nothing recalculated the frame before the first resize. fixed by FrameNcCalc
  * treating both forms and mp_main forcing one more recalculation (SWP_FRAMECHANGED) right after the window is created.
@@ -154,6 +154,34 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
     DeleteObject(pen);
 }
 
+/* the strip's background: the face colour with a fade of the accent over it, 20% at the left edge down to 0% where the window buttons start
+ * (one fill per distinct colour: at most 52) */
+static COLORREF Tint(COLORREF face, COLORREF acc, int a)         /* a = 0..255: how much of the accent */
+{
+    int r = GetRValue(face) + (GetRValue(acc) - GetRValue(face)) * a / 255;
+    int g = GetGValue(face) + (GetGValue(acc) - GetGValue(face)) * a / 255;
+    int b = GetBValue(face) + (GetBValue(acc) - GetBValue(face)) * a / 255;
+    return RGB(r, g, b);
+}
+
+static void FillStrip(HDC dc, int cw, int ch, int fadeEnd)
+{
+    RECT r;
+    COLORREF face = C_FACE, last = face, c;
+    int x, from = 0;
+    r.left = 0; r.top = 0; r.right = cw; r.bottom = ch;
+    FillC(dc, &r, face);
+    if (fadeEnd > cw) fadeEnd = cw;
+    for (x = 0; x <= fadeEnd; x++) {
+        c = x < fadeEnd ? Tint(face, C_ACCENT, 51 * (fadeEnd - x) / fadeEnd) : face;      /* 51 / 255 = 20% */
+        if (c != last || x == fadeEnd) {
+            if (last != face) { r.left = from; r.right = x; FillC(dc, &r, last); }
+            from = x;
+            last = c;
+        }
+    }
+}
+
 /* called from the main window's WM_PAINT: the colours are read here, so a theme switch only needs a repaint */
 void FramePaint(HWND h, HDC dc)
 {
@@ -174,15 +202,16 @@ void FramePaint(HWND h, HDC dc)
     ob = SelectObject(mdc, bmp);
     of = SelectObject(mdc, g_fontMenu);
 
-    r.left = 0; r.top = 0; r.right = cw; r.bottom = ch;
-    FillC(mdc, &r, C_FACE);
+    BtnRect(FB_MIN, cw, &r);
+    FillStrip(mdc, cw, ch, r.left);
     if (!g_icon) g_icon = (HICON)LoadImageW(g_hinst, MAKEINTRESOURCEW(1), IMAGE_ICON, isz, isz, LR_DEFAULTCOLOR);
     if (g_icon) DrawIconEx(mdc, S(10), (ch - isz) / 2, g_icon, isz, isz, 0, NULL, DI_NORMAL);
 
     GetWindowTextW(h, t, COUNTOF(t));
     BtnRect(FB_MIN, cw, &r);
     tr.left = IconRight() + S(4); tr.right = r.left - S(8); tr.top = 0; tr.bottom = ch;
-    TextC(mdc, t, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX, g_active ? C_ACCENT_FG : C_DIM);
+    TextC(mdc, t, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+          g_active ? (ThemeGet() == THEME_DARK ? RGB(0xff, 0xff, 0xff) : RGB(0, 0, 0)) : C_DIM);      /* plain white / black: readable on the accent fade */
 
     for (b = 0; b < FB_COUNT; b++) {
         BtnRect(b, cw, &r);

@@ -436,6 +436,7 @@ typedef struct {
 #define EM_GETSEL 0x00B0
 #define EM_SETSEL 0x00B1
 #define EM_GETRECT 0x00B2
+#define EM_SETRECTNP 0x00B4
 #define EM_SCROLL 0x00B5
 #define EM_LINESCROLL 0x00B6
 #define EM_SCROLLCARET 0x00B7
