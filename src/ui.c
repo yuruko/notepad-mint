@@ -8,6 +8,38 @@ HINSTANCE g_hinst;
 int       g_dpi = 96;
 HFONT     g_fontUI, g_fontUIB, g_fontMenu;
 HBRUSH    g_brFace, g_brField;
+Palette   g_pal;
+
+/* ------------------------------------------------------------ themes ---- */
+/* dark: everything derived from the #161418 face + the mint; the editor is black.
+ * light: the classic win2000 gray (#d4d0c8 face, white fields); the mint stays the highlight fill, a dark
+ * mint is used where the accent is text or a thin line on a light surface; the editor is white. */
+static const Palette g_themes[2] = {
+    { RGB(0x9d, 0xf5, 0xbd), RGB(0x9d, 0xf5, 0xbd), RGB(0x16, 0x14, 0x18),
+      RGB(0x16, 0x14, 0x18), RGB(0x21, 0x1e, 0x24), RGB(0x10, 0x0f, 0x12),
+      RGB(0x55, 0x4f, 0x5c), RGB(0x36, 0x32, 0x3c), RGB(0x05, 0x04, 0x06), RGB(0x0c, 0x0b, 0x0e),
+      RGB(0xff, 0xff, 0xff), RGB(0x80, 0x7a, 0x88),
+      RGB(0xff, 0xff, 0xff), RGB(0x00, 0x00, 0x00) },
+    { RGB(0x9d, 0xf5, 0xbd), RGB(0x0e, 0x6a, 0x39), RGB(0x00, 0x00, 0x00),
+      RGB(0xd4, 0xd0, 0xc8), RGB(0xe4, 0xe1, 0xda), RGB(0xff, 0xff, 0xff),
+      RGB(0xff, 0xff, 0xff), RGB(0xe9, 0xe7, 0xe2), RGB(0x40, 0x40, 0x40), RGB(0x80, 0x80, 0x80),
+      RGB(0x00, 0x00, 0x00), RGB(0x6d, 0x6d, 0x6d),
+      RGB(0x00, 0x00, 0x00), RGB(0xff, 0xff, 0xff) },
+};
+static int    g_theme;
+static HBRUSH g_brTheme[2][2];              /* [theme][face, field]: made once, never deleted (window classes keep them) */
+
+void ThemeSet(int theme)
+{
+    g_theme = theme == THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
+    g_pal = g_themes[g_theme];
+    if (!g_brTheme[g_theme][0]) g_brTheme[g_theme][0] = CreateSolidBrush(C_FACE);
+    if (!g_brTheme[g_theme][1]) g_brTheme[g_theme][1] = CreateSolidBrush(C_FIELD);
+    g_brFace = g_brTheme[g_theme][0];
+    g_brField = g_brTheme[g_theme][1];
+}
+
+int ThemeGet(void) { return g_theme; }
 
 typedef long (WINAPI *DwmSetFn)(HWND, DWORD, const void *, DWORD);
 typedef long (WINAPI *ThemeFn)(HWND, LPCWSTR, LPCWSTR);
@@ -167,10 +199,12 @@ void Tri(HDC dc, int x, int y, int sz, int dir, COLORREF c)
 }
 
 /* ------------------------------------------------------ dwm / uxtheme -- */
+/* the frame follows the theme. title text = the accent while active, dim otherwise; the border stays neutral gray */
 void DarkFrame(HWND h, int active)
 {
-    BOOL dark = TRUE;
-    COLORREF cap = C_FACE, txt = C_TEXT, bor = active ? C_HI : C_HI2;   /* neutral border: no accent color on the frame */
+    BOOL dark = g_theme == THEME_DARK;
+    COLORREF cap = C_FACE, txt = active ? C_ACCENT_FG : C_DIM;
+    COLORREF bor = dark ? (active ? C_HI : C_HI2) : (active ? C_LO2 : RGB(0xa8, 0xa5, 0x9e));
     int corner = DWMWCP_DONOTROUND;
     if (!pDwmSet) return;
     pDwmSet(h, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof dark);
@@ -182,7 +216,7 @@ void DarkFrame(HWND h, int active)
 
 void DarkScroll(HWND h)
 {
-    if (pSetTheme) pSetTheme(h, L"DarkMode_Explorer", NULL);
+    if (pSetTheme) pSetTheme(h, g_theme == THEME_DARK ? L"DarkMode_Explorer" : L"Explorer", NULL);
 }
 
 void RegClass(const WCHAR *name, WNDPROC proc, UINT style, HBRUSH bg)
@@ -704,8 +738,7 @@ void UiInit(HINSTANCE hi)
 
     g_dpi = UiSystemDpi();
     MakeFonts();
-    g_brFace = CreateSolidBrush(C_FACE);
-    g_brField = CreateSolidBrush(C_FIELD);
+    ThemeSet(g_theme);                                  /* main calls ThemeSet again once the settings are loaded */
 
     RegClass(L"mp_btn", BtnProc, CS_DBLCLKS, NULL);
     RegClass(L"mp_msg", MsgProc, 0, NULL);

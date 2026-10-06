@@ -10,20 +10,34 @@
 #define PATH_CAP     1024
 
 /* ------------------------------------------------------------- palette --
- * classic 2000-era chrome (bevels, flat menu bar, sunken fields) in dark:
- * everything is derived from the #161418 app background + the #9df5bd mint. */
-#define C_ACCENT   RGB(0x9d, 0xf5, 0xbd)
-#define C_BG       RGB(0x16, 0x14, 0x18)   /* default editor background + chrome face */
-#define C_FG       RGB(0xff, 0xff, 0xff)   /* default editor text */
-#define C_FACE     C_BG
-#define C_FACE2    RGB(0x21, 0x1e, 0x24)   /* raised surfaces: buttons, popups */
-#define C_FIELD    RGB(0x10, 0x0f, 0x12)   /* sunken surfaces: list boxes, small edits */
-#define C_HI       RGB(0x55, 0x4f, 0x5c)   /* bevel: outer light */
-#define C_HI2      RGB(0x36, 0x32, 0x3c)   /* bevel: inner light */
-#define C_LO       RGB(0x05, 0x04, 0x06)   /* bevel: outer dark */
-#define C_LO2      RGB(0x0c, 0x0b, 0x0e)   /* bevel: inner dark */
-#define C_TEXT     RGB(0xff, 0xff, 0xff)
-#define C_DIM      RGB(0x80, 0x7a, 0x88)   /* disabled / secondary text */
+ * classic 2000-era chrome (bevels, flat menu bar, sunken fields) in one of two themes: dark (the default:
+ * #161418 chrome, black editor) or light (win2000 gray chrome, white editor), both with the #9df5bd mint.
+ * the C_* names are RUNTIME values (ThemeSet in ui.c switches them): never use them in a static initializer,
+ * a case label or any constant expression, and never keep a brush made from them across a theme switch
+ * (g_brFace / g_brField always hold the current theme's brushes: read them at use time). */
+typedef struct Palette {
+    COLORREF accent, accentFg, onAccent;    /* mint fill / mint as text or a thin line on a surface / text on a mint fill */
+    COLORREF face, face2, field;            /* chrome face, raised surfaces (buttons, popups), sunken fields (lists, small edits) */
+    COLORREF hi, hi2, lo, lo2;              /* bevels: outer light, inner light, outer dark, inner dark */
+    COLORREF text, dim;                     /* chrome text, disabled / secondary text */
+    COLORREF editFg, editBg;                /* the editor area */
+} Palette;
+extern Palette g_pal;
+#define C_ACCENT    (g_pal.accent)
+#define C_ACCENT_FG (g_pal.accentFg)
+#define C_ON_ACCENT (g_pal.onAccent)
+#define C_FACE      (g_pal.face)
+#define C_FACE2     (g_pal.face2)
+#define C_FIELD     (g_pal.field)
+#define C_HI        (g_pal.hi)
+#define C_HI2       (g_pal.hi2)
+#define C_LO        (g_pal.lo)
+#define C_LO2       (g_pal.lo2)
+#define C_TEXT      (g_pal.text)
+#define C_DIM       (g_pal.dim)
+#define C_EDIT_FG   (g_pal.editFg)
+#define C_EDIT_BG   (g_pal.editBg)
+enum { THEME_DARK, THEME_LIGHT };
 
 /* --------------------------------------------------------- command ids -- */
 enum {
@@ -35,7 +49,7 @@ enum {
     IDM_EOL_CRLF = 311, IDM_EOL_LF, IDM_EOL_CR,
     IDM_ENC_UTF8 = 321, IDM_ENC_UTF8BOM, IDM_ENC_UTF16LE, IDM_ENC_UTF16BE, IDM_ENC_ANSI, IDM_ENC_OTHER, IDM_ENC_REOPEN,
     IDM_RTL = 340, IDM_UCC_BASE = 350,                /* IDM_UCC_BASE + n inserts unicode control char n (0..16) */
-    IDM_VIEW_STATUS = 401, IDM_ZOOM_IN, IDM_ZOOM_OUT, IDM_ZOOM_RESET,
+    IDM_VIEW_STATUS = 401, IDM_ZOOM_IN, IDM_ZOOM_OUT, IDM_ZOOM_RESET, IDM_THEME_DARK, IDM_THEME_LIGHT,
     IDM_HELP_TOPICS = 501, IDM_HELP_ABOUT,
     IDM_SYS_RESTORE = 601, IDM_SYS_MOVE, IDM_SYS_SIZE, IDM_SYS_MIN, IDM_SYS_MAX, IDM_SYS_CLOSE   /* title bar menu */
 };
@@ -100,6 +114,8 @@ int   S(int v);                                       /* scale 96-dpi px -> devi
 int   UnS(int px);                                    /* device px -> 96-dpi px */
 void  UiInit(HINSTANCE hi);
 void  UiSetDpi(int dpi);
+void  ThemeSet(int theme);                            /* THEME_*: switches g_pal + g_brFace / g_brField (no repaint) */
+int   ThemeGet(void);
 void  UiSetChromeFont(const WCHAR *face, int editorPt);   /* rebuilds g_fontMenu; callers then refont the bar + status bar */
 int   UiSystemDpi(void);
 int   UiDpiForWindow(HWND h);                         /* falls back to g_dpi before windows 10 */
@@ -193,7 +209,8 @@ typedef struct Prefs {
     WCHAR    font[32];
     int      pt, bold, italic;                  /* the size picked in the font dialog (saved); ctrl+0 returns to it */
     int      cur;                               /* working size: ctrl+plus / ctrl+minus / ctrl+wheel move it (not saved) */
-    COLORREF fg, bg;
+    int      theme;                             /* THEME_DARK / THEME_LIGHT (saved) */
+    COLORREF fg, bg;                            /* editor colours: always the theme's (C_EDIT_FG / C_EDIT_BG), not saved */
     int      wrap, statusbar;
     int      winx, winy, winw, winh, maximized;
     int      matchCase, wrapAround;

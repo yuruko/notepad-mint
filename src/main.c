@@ -20,8 +20,8 @@ static void PrefsDefaults(void)
     wcopy(g_pf.font, L"Consolas", 32);
     g_pf.pt = 13;
     g_pf.cur = 13;
-    g_pf.fg = C_FG;
-    g_pf.bg = C_BG;
+    g_pf.fg = C_EDIT_FG;
+    g_pf.bg = C_EDIT_BG;
     g_pf.statusbar = 1;
     g_pf.wrapAround = 1;
     g_pf.marginL = 750; g_pf.marginT = 1000; g_pf.marginR = 750; g_pf.marginB = 1000;
