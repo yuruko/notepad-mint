@@ -45,10 +45,10 @@ static const MenuItem miEol[] = {
     IT(L"&classic mac (cr)",  NULL, IDM_EOL_CR),
 };
 static const MenuItem miEnc[] = {
-    IT(L"&utf-8",          NULL, IDM_ENC_UTF8),
-    IT(L"utf-8 with &bom", NULL, IDM_ENC_UTF8BOM),
-    IT(L"utf-16 &le",      NULL, IDM_ENC_UTF16LE),
-    IT(L"utf-16 b&e",      NULL, IDM_ENC_UTF16BE),
+    IT(L"&utf8",           NULL, IDM_ENC_UTF8),
+    IT(L"utf8 &bom",       NULL, IDM_ENC_UTF8BOM),
+    IT(L"utf16 &le",       NULL, IDM_ENC_UTF16LE),
+    IT(L"utf16 b&e",       NULL, IDM_ENC_UTF16BE),
     IT(L"&ansi",           NULL, IDM_ENC_ANSI),
     SEP,
     IT(L"&other code page...",       NULL, IDM_ENC_OTHER),

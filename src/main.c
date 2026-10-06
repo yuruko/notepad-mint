@@ -265,8 +265,6 @@ void AppUpdateStatus(void)
     EditCaretPos(&line, &col);
     wsprintfW(b, L"%d:%d", line, col);
     StatusSet(g_status, SB_POS, b);
-    wsprintfW(b, L"%dpt", g_pf.cur);
-    StatusSet(g_status, SB_ZOOM, b);
     StatusSet(g_status, SB_EOL, g_eolShort[g_doc.eol]);
     EncShort(g_doc.enc, b, COUNTOF(b));
     StatusSet(g_status, SB_ENC, b);

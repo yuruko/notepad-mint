@@ -1,7 +1,7 @@
-/* status.c - classic status bar: line:column | font size | line ending | encoding. no size grip: the window is resized by its frame.
- * the size / line-ending / encoding panels are clickable (they pop a menu). drawn in the chrome font (g_fontMenu, the same
- * font as the menu bar). a panel is never narrower than its text: its width is the widest text it can normally show (so the
- * panels do not jump around when a value changes) or, for an unusual one (a long code page name), the text it shows right now.
+/* status.c - classic status bar: line:column | line ending | encoding. no size grip: the window is resized by its frame.
+ * the line-ending / encoding panels are clickable (they pop a menu). drawn in the chrome font (g_fontMenu, the same
+ * font as the menu bar). a panel is never narrower than its text: the line ending panel is as wide as the widest of its three
+ * texts (so it does not jump around), the encoding panel is exactly as wide as the text it shows right now.
  * StatusMinWidth() is what the main window's minimum size and AppUpdateStatus keep the window wide enough for, so nothing is
  * ever cut off or ellipsized. */
 #include "mp.h"
@@ -12,8 +12,6 @@ static int   g_sbH, g_hotp = -1;
 static int   g_floor[SB_COUNT];                 /* device px: the widest text the panel can normally show, padding included */
 static int   g_need[SB_COUNT];                  /* device px: the text it shows now, padding included */
 
-/* the widest code page names (hyphens counted: the basis of the panel width, see Measure) */
-static const WCHAR *const g_wide[] = { L"ks_c_5601-1987", L"x-mac-cyrillic", L"x-mac-icelandic", L"windows-1252", L"iso-8859-8-i" };
 
 static int PadL(void) { return S(8); }
 static int PadR(void) { return S(8); }
@@ -30,11 +28,9 @@ static void Measure(void)
     GetTextMetricsW(dc, &tm);
     g_sbH = tm.tmHeight + S(8);
     g_floor[SB_POS] = TextWidth(dc, L"99999999:99999");              /* line:column of a very big file */
-    g_floor[SB_ZOOM] = TextWidth(dc, L"96pt");
     for (m = 0, i = 0; i < EOL_COUNT; i++) { w = TextWidth(dc, g_eolShort[i]); if (w > m) m = w; }
     g_floor[SB_EOL] = m;
-    for (m = 0, i = 0; i < COUNTOF(g_wide); i++) { w = TextWidth(dc, g_wide[i]); if (w > m) m = w; }
-    g_floor[SB_ENC] = m * 53 / 100;                                /* deliberately about half of what the widest name needs (maintainer's request): "utf8" fits, a longer name widens the panel (nothing is cut off) */
+    g_floor[SB_ENC] = 0;                                           /* fully dynamic (maintainer's request): the width is the text's width, whatever it is */
     for (i = 0; i < SB_COUNT; i++) g_need[i] = TextWidth(dc, g_txt[i]);
     SelectObject(dc, of);
     ReleaseDC(NULL, dc);
@@ -81,7 +77,7 @@ static void Panels(const RECT *rc, RECT out[SB_COUNT])
 {
     int x = rc->right - S(1), i;                  /* the same 1px margin as on the left */
     if (!g_sbH) Measure();
-    for (i = SB_COUNT - 1; i >= SB_ZOOM; i--) {
+    for (i = SB_COUNT - 1; i >= SB_EOL; i--) {
         out[i].right = x;
         x -= PanelW(i);
         out[i].left = x;
@@ -166,7 +162,7 @@ static LRESULT CALLBACK StatusProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_LBUTTONDOWN: {
         int i = PanelAt(h, GET_X_LPARAM(l), GET_Y_LPARAM(l));
-        if (i >= SB_ZOOM) {
+        if (i >= SB_EOL) {
             RECT rc, p[SB_COUNT];
             POINT pt;
             GetClientRect(h, &rc);
@@ -174,7 +170,7 @@ static LRESULT CALLBACK StatusProc(HWND h, UINT m, WPARAM w, LPARAM l)
             pt.x = p[i].left; pt.y = 0;
             ClientToScreen(h, &pt);
             g_hotp = -1;
-            MenuPopup(GetParent(h), i == SB_ZOOM ? &g_mdZoom : (i == SB_EOL ? &g_mdEol : &g_mdEnc), pt.x, pt.y, 1);
+            MenuPopup(GetParent(h), i == SB_EOL ? &g_mdEol : &g_mdEnc, pt.x, pt.y, 1);
         }
         return 0; }
     }

@@ -168,7 +168,7 @@ BOOL  MenuActive(void);
 void  MenuCancel(void);
 
 /* ------------------------------------------------------------ status.c -- */
-enum { SB_POS, SB_ZOOM, SB_EOL, SB_ENC, SB_COUNT };
+enum { SB_POS, SB_EOL, SB_ENC, SB_COUNT };
 HWND  StatusCreate(HWND parent);
 int   StatusHeight(void);
 int   StatusMinWidth(void);
