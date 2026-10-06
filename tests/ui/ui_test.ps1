@@ -1611,11 +1611,21 @@ function Test-T19 {
             $bw = [int](($w[2] - $w[0] - [U]::CRect([long]$app.Main)[2]) / 2)                  # the sizing border left of the client area (the strip starts after it)
             $left = Strip-Pixel $app ($bw + 2) 3
             Ck ('T19.4 ' + $th + ': the title strip starts with ' + $pL + '% of the accent at its left edge (rgb ' + ($want -join ',') + ')') (Near $left $want 6) ('actual ' + $left.Info)
-            $btn = [int](($w[2] - $w[0]) - 3 * [Math]::Round(46 * $dpi / 96) - 4)
+            $btn = [int](($w[2] - $w[0]) - 3 * [Math]::Round(38 * $dpi / 96) - 4)
             $right = Strip-Pixel $app $btn 3
             Ck ('T19.5 ' + $th + ': ... and fades to ' + $pR + '% of it where the window buttons start (rgb ' + ($want4 -join ',') + ')') (Near $right $want4 3) ('actual ' + $right.Info)
             $under = Strip-Pixel $app ($btn + 8) 3                                       # inside the minimize button, away from its glyph: transparent at rest, the strip shows through
             Ck ('T19.6 ' + $th + ': ... and stays ' + $pR + '% under the window buttons (they are transparent at rest: no seam)') (Near $under $want4 3) ('actual ' + $under.Info)
+            [void](Snd $app.Main 0x6 0 0)                                                # WM_ACTIVATE(WA_INACTIVE): the fade has 7 points less of the accent at both ends (clamped at 0)
+            $iL = 17; $iR = 0; $qL = 7; $qR = 0
+            if ($th -eq 'light') { $iL = 30; $iR = 5; $qL = 12; $qR = 2 }
+            $wantIL = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * $iL / 255) })
+            $wantIR = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * $iR / 255) })
+            $okL = WaitFor { Near (Strip-Pixel $app ($bw + 2) 3) $wantIL 5 } 3000
+            Ck ('T19.7 ' + $th + ': an inactive window: ' + $qL + '% of the accent at the left edge (rgb ' + ($wantIL -join ',') + ')') $okL ('actual ' + (Strip-Pixel $app ($bw + 2) 3).Info)
+            Ck ('T19.8 ' + $th + ': ... and ' + $qR + '% where the window buttons start (rgb ' + ($wantIR -join ',') + ')') (Near (Strip-Pixel $app $btn 3) $wantIR 3) ('actual ' + (Strip-Pixel $app $btn 3).Info)
+            [void](Snd $app.Main 0x6 1 0)                                                # active again
+            Ck ('T19.9 ' + $th + ': active again: back to ' + $pL + '% at the left edge') (WaitFor { Near (Strip-Pixel $app ($bw + 2) 3) $want 6 } 3000) ('actual ' + (Strip-Pixel $app ($bw + 2) 3).Info)
         }
     } else { Skip 'T19.4 / T19.5 title strip pixels' 'could not parse the g_themes palette table in src\ui.c' }
 }

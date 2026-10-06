@@ -66,14 +66,14 @@ $h = $p.MainWindowHandle
 if ($h -eq [IntPtr]::Zero) { Write-Output "FAIL no main window"; exit 1 }
 [void][F]::ShowWindow($h, 9); [void][F]::SetForegroundWindow($h); Start-Sleep -Milliseconds 400
 
-# ---- geometry: the strip is the top of the client area; buttons are 46 px (96 dpi) wide, right aligned
+# ---- geometry: the strip is the top of the client area; buttons are 38 px (96 dpi) wide, right aligned
 $rc = New-Object F+RECT; [void][F]::GetClientRect($h, [ref]$rc)
 $pt = New-Object F+POINT; $pt.X = 0; $pt.Y = 0; [void][F]::ClientToScreen($h, [ref]$pt)
 $cx0 = $pt.X; $cy0 = $pt.Y; $cw = $rc.R
 $dpi = [int][F]::GetDpiForWindow($h)
 if ($dpi -lt 96) { $dpi = 96 }
-$btn = [int](46 * $dpi / 96)
-$capH = [int](25 * $dpi / 96)                       # FrameHeight(): at least 25 px (96 dpi); the 11 px chrome font is below that
+$btn = [int](38 * $dpi / 96)
+$capH = [int](24 * $dpi / 96)                       # FrameHeight(): at least 24 px (96 dpi); the 11 px chrome font is below that
 $yMid = $cy0 + [int]($capH / 2)
 $rc2 = New-Object F+RECT; [void][F]::GetClientRect($h, [ref]$rc2); $cw = $rc2.R
 $xClose = $cx0 + $cw - [int]($btn / 2)

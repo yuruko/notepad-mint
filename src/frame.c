@@ -24,7 +24,7 @@ enum { FB_MIN, FB_MAX, FB_CLOSE, FB_COUNT };
 static int   g_capH, g_hot = -1, g_down = -1, g_active = 1, g_track;
 static HICON g_icon;
 
-static int BtnW(void) { return S(46); }
+static int BtnW(void) { return S(38); }                 /* (was 46) */
 static int Edge(void) { return UiMetric(SM_CYFRAME) + UiMetric(SM_CXPADDEDBORDER); }     /* the system's sizing border */
 
 static void Metrics(void)
@@ -36,7 +36,7 @@ static void Metrics(void)
     SelectObject(dc, of);
     ReleaseDC(NULL, dc);
     g_capH = tm.tmHeight + S(10);
-    if (g_capH < S(25)) g_capH = S(25);                      /* (was 30: the strip is 5 px lower than it was) */
+    if (g_capH < S(24)) g_capH = S(24);                      /* (was 30: the strip is 6 px lower than it was) */
 }
 
 int FrameHeight(void)
@@ -110,7 +110,7 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
     COLORREF bg = C_FACE, fg = g_active ? C_TEXT : C_DIM;
     HPEN pen;
     HGDIOBJ op;
-    int cx = (r->left + r->right) / 2, cy = (r->top + r->bottom) / 2, g = S(5), d = S(2), pw = S(1);
+    int cx = (r->left + r->right) / 2, cy = (r->top + r->bottom) / 2, g = S(4), d = S(2), pw = S(1);   /* glyph half size (was 5) */
 
     if (b == FB_CLOSE && (hot || down)) {                            /* the system's close red, in both themes */
         bg = down ? RGB(0xf1, 0x70, 0x7a) : RGB(0xe8, 0x11, 0x23);
@@ -156,10 +156,12 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
 
 /* the strip's background: the face colour with a fade of the accent over it, FADE_FROM % at the left edge down to FADE_TO % where the window
  * buttons start, and FADE_TO % under the buttons (their normal state is transparent, so the strip reads as one piece). the light theme
- * has FADE_LIGHT_PLUS points more at both ends (the dark accent needs more to show on the light face). one fill per distinct colour */
+ * has FADE_LIGHT_PLUS points more at both ends (the dark accent needs more to show on the light face), and an inactive window has
+ * FADE_INACTIVE_MINUS points less at both ends (clamped at 0). one fill per distinct colour */
 #define FADE_FROM 14
 #define FADE_TO   4
 #define FADE_LIGHT_PLUS 5
+#define FADE_INACTIVE_MINUS 7
 static COLORREF Tint(COLORREF face, COLORREF acc, int a)         /* a = 0..255: how much of the accent */
 {
     int r = GetRValue(face) + (GetRValue(acc) - GetRValue(face)) * a / 255;
@@ -171,7 +173,10 @@ static COLORREF Tint(COLORREF face, COLORREF acc, int a)         /* a = 0..255: 
 static void FillStrip(HDC dc, int cw, int ch, int fadeEnd)
 {
     RECT r;
-    int pf = FADE_FROM + (ThemeGet() == THEME_LIGHT ? FADE_LIGHT_PLUS : 0), pt = FADE_TO + (ThemeGet() == THEME_LIGHT ? FADE_LIGHT_PLUS : 0);
+    int adj = (ThemeGet() == THEME_LIGHT ? FADE_LIGHT_PLUS : 0) - (g_active ? 0 : FADE_INACTIVE_MINUS);
+    int pf = FADE_FROM + adj, pt = FADE_TO + adj;
+    if (pf < 0) pf = 0;
+    if (pt < 0) pt = 0;
     COLORREF base = Tint(C_FACE, C_ACCENT, pt * 255 / 100), last = base, c;
     int x, from = 0;
     r.left = 0; r.top = 0; r.right = cw; r.bottom = ch;
