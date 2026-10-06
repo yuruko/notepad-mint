@@ -31,12 +31,13 @@ and what was never verified; this file is what is still open, plus the rules for
 - **locally**: `tools\verify.bat` (build + warning scan, imports, layout check, unit tests, smoke test), `tools\verify.bat ui` adds the message-driven gui suite (`tests\ui\ui_test.ps1`, private desktop, nothing shows),
   `tools\verify.bat frame` adds the title strip test with real mouse input. `tools\shot.ps1` takes screenshots (`-Keys` or `-Cmd <IDM_ id>`), `tools\cc.bat file.c` compile-checks one file,
   `tools\probe.bat <cl switches>` builds an experimental copy into `build\probe` without touching the real build.
-- **ci**: `.github/workflows/build.yml` (windows-latest, msvc x86): build with a warning scan, import check, layout check, unit tests, smoke test with a screenshot artifact, debug build with a warning scan.
+- **ci is switched off** (the maintainer builds and tests locally; only the cloud agent needs ci): the workflow is parked as `.github/workflows/build.yml.disabled` (github ignores it). it does, on windows-latest with msvc x86:
+  build with a warning scan, import check, layout check, unit tests, smoke test with a screenshot artifact, debug build with a warning scan. the cloud agent can turn it on by renaming it back to `build.yml`.
 - **linux-side syntax check** (optional, fast): `tools/linux_check.sh`.
 
 ## 2. open items (none blocks the build)
 
-1. **ci has not run yet.** the workflow was rewritten and every script it calls was run locally, but nobody has pushed it: push and read the first windows-latest result (the smoke test is `continue-on-error` until it proves stable there).
+1. **the parked ci workflow never ran.** every script it calls was run locally, but its yaml is unproven (and the smoke step is `continue-on-error`): if it is ever turned on, expect to fix it on the first windows-latest run.
 2. **big files are slow to open** because of the stock edit control, not our code: setting the text makes the control build its line index and measure every line (about 44 us per line, ~0.65 s per mb: 20 mb = 13 s,
    50 mb = 31 s, the window shows "not responding" meanwhile). profiled: `DocRead` takes 62 ms for 20 mb, the bar logic ~0 ms, and `WM_SETTEXT` and `EM_SETHANDLE` cost the same.
    fixes would be a chunked loader that pumps messages and shows progress, or our own text view instead of the native edit.
@@ -54,5 +55,5 @@ and what was never verified; this file is what is still open, plus the rules for
 - [x] `build.bat` clean (zero /W3 warnings), imports only kernel32 / user32 / gdi32, `src/stubs.c` gone
 - [x] every menu item does what notepad's does (plus the extras in `README.md`): driven by `tests\ui`, see `NOTES.md`
 - [x] `NOTES.md` / `README.md` updated
-- [ ] ci green on windows-latest (never run: item 1 above)
+- [x] ci: switched off on purpose (only the cloud agent needs it); the local equivalent is `tools\verify.bat ui`, all green
 - [ ] a pr description that says, per item, how it was verified: the table in `NOTES.md` ("status") is that list; `main` was not pushed (nothing was force-pushed)

@@ -33,7 +33,7 @@ needs visual studio's c++ build tools (x86 target) and the windows sdk (python 3
     tools\verify.bat ui       ... plus the message-driven gui tests (tests\ui\ui_test.ps1)
     tools\verify.bat frame    ... plus the title strip test (tools\frame_test.ps1: real mouse input, it moves the mouse for a few seconds)
 
-the same pieces run in ci (`.github/workflows/build.yml`, windows-latest, msvc x86), except the gui and title strip tests.
+github ci is switched off (only the cloud agent needs it): the workflow with the same steps (minus the gui and title strip tests) is parked as `.github/workflows/build.yml.disabled`, rename it to `build.yml` to turn it on.
 `tools\` also has `shot.ps1` (launch, send keys or a menu command, screenshot), `cc.bat` (compile-check one file), `probe.bat` (experimental build) and `make_icon.ps1` (builds the icon).
 
 ## notes

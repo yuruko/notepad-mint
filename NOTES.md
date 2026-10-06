@@ -44,7 +44,7 @@ build.bat      `build.bat` from the project root (x64-hosted x86 cl/ml/link via 
                `dbg` arg = symbols + build\dbg.log tracing.
                `SRCS=...` env var overrides the c file list (interim builds)
 tools/         shot.ps1 (launch + keys / -Cmd + screenshot), crop.ps1, px.ps1, cc.bat (compile-check one file), cc_asm.bat, fonttest.*,
-               probe.bat (experimental build into build\probe, e.g. `/DFRAME_CUSTOM=0`), frame_test.ps1 (title strip: real mouse input), smoke.ps1 (ci smoke test),
+               probe.bat (experimental build into build\probe, e.g. `/DFRAME_CUSTOM=0`), frame_test.ps1 (title strip: real mouse input), smoke.ps1 (smoke test, used by verify.bat and the parked ci workflow),
                check_imports.ps1 (kernel32 / user32 / gdi32 only), layout_check/ (w32.h vs the real sdk), linux_check.sh (syntax check on linux)
 tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `tests\unit\build.bat`), ui/ (message-driven gui tests), sample files
 ```
@@ -97,7 +97,7 @@ every menu item is implemented (no placeholders left, `src/stubs.c` is gone). th
 how each part was verified (everything below ran locally; `tools\verify.bat ui` repeats all of it except the title strip and the screenshots):
 | what | how | result |
 |---|---|---|
-| build | `build.bat`, log scanned for warnings (also in ci) | clean, 192 kb |
+| build | `build.bat`, log scanned for warnings | clean, 192 kb |
 | imports | `tools\check_imports.ps1` (reads the pe import table) | kernel32 / user32 / gdi32 only, 155 functions |
 | `src/w32.h` against the real sdk | `tools\layout_check` (two translation units + a linker pass; fails on a broken copy: tested) | 33 structs, 240 fields, 436 constants, 14 macros (140 vectors), 54 typedefs, 185 api prototypes: 0 mismatches |
 | doc / search / util logic | `tests\unit` (no crt, like the app) | 375 checks: encodings x line endings round trips, bom, utf-16 without bom, invalid utf-8, lossy writes, 1 mb round trips, find / replace-all, wildcard, paths, default name. 1 skipped (accented latin needs cp 1252, this box is cp 932) |
@@ -106,7 +106,7 @@ how each part was verified (everything below ran locally; `tools\verify.bat ui` 
 | looked at in screenshots | dark and light main window, find, replace, go to, open, save as, font, about, menus, rtl, new-window cascade, 50 mb file | as intended |
 | ctrl+backspace / ctrl+delete, rtl toggle, new window cascade, settings.ini round trip | by hand with `tools\shot.ps1` | work |
 | print | the page wrap logic was property tested against a reference model (6.9 m cases); page setup opens and closes (gui test) | **no job was ever sent to a printer or pdf driver**: unverified |
-| ci | the scripts it runs were run locally | **the workflow itself has not run on github yet** (it was only rewritten) |
+| ci | switched off on purpose (only the cloud agent needs it): the workflow is parked as `.github/workflows/build.yml.disabled`; the scripts it calls were run locally | the workflow itself never ran on github |
 five read-only reviews of find / filedlg / fontdlg / print / the theme code found about 30 candidate defects. each was re-checked before touching code: two were refuted by measurement (listbox type-ahead
 needs no `WM_CHARTOITEM` handler, and Enter on a focused non-default button does not press ok), the real ones were fixed (see git log). known limits are in `TODO.md`.
 

@@ -1,3 +1,6 @@
+# DISABLED on purpose: github only runs *.yml / *.yaml files in this folder, so this one is parked as build.yml.disabled.
+# only the cloud agent (which cannot run the app) needs ci; the maintainer builds and tests locally with tools\verify.bat ui.
+# to turn it on again: rename this file back to build.yml (git mv .github/workflows/build.yml.disabled .github/workflows/build.yml).
 name: build
 
 on:
