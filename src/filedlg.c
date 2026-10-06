@@ -60,8 +60,19 @@ static int Trim(WCHAR *t)
     return n - i;
 }
 
+/* strips one pair of surrounding double quotes (a pasted "copy as path"); TRUE when there was one */
+static BOOL Unquote(WCHAR *t)
+{
+    int n = wlen(t);
+    if (n < 2 || t[0] != '"' || t[n - 1] != '"') return FALSE;
+    memmove(t, t + 1, (size_t)(n - 2) * sizeof(WCHAR));
+    t[n - 2] = 0;
+    return TRUE;
+}
+
 /* a typed name -> full path: drive / unc names as they are, "\x" on the current folder's root, the rest joined to
- * the current folder. GetFullPathNameW then folds "." / "..". FALSE when it would not fit PATH_CAP */
+ * the current folder. GetFullPathNameW then folds "." / "..". FALSE when it would not fit PATH_CAP, or when the name
+ * is relative while the drive list is shown (nothing to join it to, and the process cwd is not what the user sees) */
 static BOOL Resolve(const FileDlg *d, const WCHAR *in, WCHAR *out)
 {
     WCHAR t[PATH_CAP];
@@ -69,8 +80,10 @@ static BOOL Resolve(const FileDlg *d, const WCHAR *in, WCHAR *out)
     int n = wlen(in), rl;
     DWORD r;
 
-    if (!d->dir[0] || (in[0] && in[1] == ':') || (IsSep(in[0]) && IsSep(in[1]))) {
+    if ((in[0] && in[1] == ':') || (IsSep(in[0]) && IsSep(in[1]))) {
         src = in;
+    } else if (!d->dir[0]) {
+        return FALSE;
     } else if (IsSep(in[0])) {
         rl = RootLen(d->dir);
         if (rl + n >= PATH_CAP) return FALSE;
@@ -253,6 +266,7 @@ static BOOL PathGo(FileDlg *d, BOOL force)
     GetWindowTextW(d->path, t, PATH_CAP);
     Trim(t);
     if (!force && wcmpi(t, d->dir) == 0) return TRUE;
+    Unquote(t);                                                 /* a pasted "copy as path" */
     if (!t[0]) return Go(d, L"", NULL, FALSE);
     if (!Resolve(d, t, full)) { Ask(d, t, L"path does not exist. check the path and try again.", FALSE); return FALSE; }
     return Go(d, full, NULL, FALSE);
@@ -273,9 +287,9 @@ static int SelItem(FileDlg *d, WCHAR *t)
 /* "*.log" or "c:\logs\*.log": a new filter (and folder) */
 static void Filter(FileDlg *d, const WCHAR *t)
 {
-    WCHAR part[PATH_CAP], full[PATH_CAP], old[FILTER_CAP];
+    WCHAR part[PATH_CAP], full[PATH_CAP], old[FILTER_CAP], lab[FILTER_CAP];
     const WCHAR *nm = PathName(t);
-    int n = (int)(nm - t);
+    int n = (int)(nm - t), i;
 
     if (n > 0) {
         memcpy(part, t, (size_t)n * sizeof(WCHAR));
@@ -287,6 +301,9 @@ static void Filter(FileDlg *d, const WCHAR *t)
     wcopy(old, d->filter, FILTER_CAP);
     wcopy(d->filter, nm, FILTER_CAP);
     if (!Go(d, full, NULL, FALSE)) { wcopy(d->filter, old, FILTER_CAP); return; }
+    for (i = 0; d->filter[i]; i++) lab[i] = wlow(d->filter[i]);   /* the "files of type" button shows the typed pattern */
+    lab[i] = 0;
+    SetWindowTextW(d->typeBtn, lab);
     SetWindowTextW(d->name, nm);
     SendMessageW(d->name, EM_SETSEL, 0, -1);
 }
@@ -296,16 +313,11 @@ static void Accept(FileDlg *d, const WCHAR *raw)
 {
     WCHAR t[PATH_CAP], full[PATH_CAP], dir[PATH_CAP];
     const WCHAR *nm;
-    BOOL quoted = FALSE;
-    int n;
+    BOOL quoted, dot;
 
     wcopy(t, raw, PATH_CAP);
-    n = Trim(t);
-    if (n >= 2 && t[0] == '"' && t[n - 1] == '"') {            /* "name": taken as it is (no .txt added) */
-        t[n - 1] = 0;
-        memmove(t, t + 1, (size_t)(n - 1) * sizeof(WCHAR));
-        quoted = TRUE;
-    }
+    Trim(t);
+    quoted = Unquote(t);                                        /* "name": taken as it is (no .txt added) */
     if (!t[0]) { SetFocus(d->name); return; }
     if (HasAny(t, L"*?")) { Filter(d, t); return; }
     if (!Resolve(d, t, full)) { Ask(d, t, L"the file name is not valid.", FALSE); return; }
@@ -315,18 +327,20 @@ static void Accept(FileDlg *d, const WCHAR *raw)
     }
     nm = PathName(full);
     if (!nm[0] || HasAny(nm, L"<>|\":")) { Ask(d, t, L"the file name is not valid.", FALSE); return; }
+    dot = HasAny(PathName(t), L".");              /* the typed name decides: resolving drops a trailing dot ("foo." is "foo", not "foo.txt") */
 
     if (d->save) {
-        if (!quoted && !HasAny(nm, L".")) {                     /* notepad: no dot in the name => .txt */
+        if (!quoted && !dot) {                                  /* notepad: no dot in the name => .txt */
             if (wlen(full) + 4 >= PATH_CAP) { Ask(d, t, L"the file name is too long.", FALSE); return; }
             wcat(full, L".txt", PATH_CAP);
         }
         PathDir(full, dir, PATH_CAP);
         if (!IsDir(dir)) { Ask(d, dir, L"path does not exist. check the path and try again.", FALSE); return; }
+        if (IsDir(full)) { Ask(d, full, L"the file name is not valid.", FALSE); return; }   /* a folder has that name (after the .txt) */
         if (GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES &&
             Ask(d, full, L"already exists. do you want to replace it?", TRUE) != 1) return;
     } else if (GetFileAttributesW(full) == INVALID_FILE_ATTRIBUTES) {
-        if (!HasAny(nm, L".") && wlen(full) + 4 < PATH_CAP) wcat(full, L".txt", PATH_CAP);   /* "readme" finds readme.txt */
+        if (!dot && wlen(full) + 4 < PATH_CAP) wcat(full, L".txt", PATH_CAP);   /* "readme" finds readme.txt */
         if (GetFileAttributesW(full) == INVALID_FILE_ATTRIBUTES || IsDir(full)) {
             Ask(d, t, L"file not found. check the file name and try again.", FALSE);
             return;
@@ -346,7 +360,7 @@ static void Activate(FileDlg *d)
     if (k == K_DRIVE) {
         Go(d, t, NULL, FALSE);
     } else if (k == K_DIR) {
-        if (wlen(d->dir) + wlen(t) + 2 > PATH_CAP) return;
+        if (wlen(d->dir) + wlen(t) + 2 > PATH_CAP) { Ask(d, t, L"the file name is too long.", FALSE); return; }
         wcopy(p, d->dir, PATH_CAP);
         PathJoin(p, t, PATH_CAP);
         Go(d, p, NULL, FALSE);
@@ -518,6 +532,11 @@ static void OnOk(FileDlg *d)
     }
     if (FocusClick(d->b.hwnd) || !PathGo(d, FALSE)) return;     /* a look-in path typed but not entered yet counts */
     GetWindowTextW(d->name, t, PATH_CAP);
+    if (!Trim(t)) {                                             /* no name typed: a folder / drive picked in the list is entered */
+        k = SelItem(d, t);
+        if (k == K_DIR || k == K_DRIVE) { Activate(d); return; }
+        t[0] = 0;                                               /* (SelItem left the item's text in t) */
+    }
     Accept(d, t);
 }
 

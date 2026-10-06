@@ -62,7 +62,7 @@ static BOOL CdRun(HWND owner, PRINTDLGW *pd, PAGESETUPDLGW *ps)
         if (er != PDERR_PRINTERNOTFOUND && er != PDERR_DNDMMISMATCH && er != PDERR_DEFAULTDIFFERENT) break;
         ForgetPrinter();
     }
-    if (!er || er == PDERR_NODEFAULTPRN) return FALSE;      /* cancelled / no printer (comdlg32 has said so itself) */
+    if (!er || er == PDERR_NODEFAULTPRN || er == PDERR_NODEVICES) return FALSE;     /* cancelled / no printer (comdlg32 has said so itself) */
     wsprintfW(msg, L"cannot use the printer (error 0x%lx).", er);
     MpAsk(owner, APP_NAME, msg, L"ok", NULL, NULL, 1);
     return FALSE;
@@ -133,10 +133,45 @@ static BOOL RowFill(Rows *r, int need)
     return TRUE;
 }
 
+/* cjk text has no spaces to break at, so besides a space a row may also end right after a cjk char (kana, han, hangul,
+ * full / half width forms, and the cjk punctuation block u+3000..303f so that a row can end after a comma, a full stop
+ * or a closing bracket), but never before closing punctuation, a small kana, the prolonged sound mark or a voiced /
+ * iteration mark, and never right after an opening bracket. the lists are the common ones, not all of unicode. every
+ * char IsCjk accepts is outside the surrogate range, so a break after one never splits a surrogate pair */
+static BOOL IsCjk(WCHAR c)
+{
+    return (c >= 0x3000 && c <= 0x30FF) || (c >= 0x3400 && c <= 0x9FFF) || (c >= 0xAC00 && c <= 0xD7A3) ||
+           (c >= 0xF900 && c <= 0xFAFF) || (c >= 0xFF00 && c <= 0xFFEF);
+}
+
+/* may a row end with `a` and the next one start with `b`? */
+static BOOL CjkBreak(WCHAR a, WCHAR b)
+{
+    if (!IsCjk(a)) return FALSE;
+    switch (a) {                    /* opening brackets: a row must not end with one */
+    case 0x3008: case 0x300A: case 0x300C: case 0x300E: case 0x3010: case 0x3014: case 0x3016: case 0x3018: case 0x301A:
+    case 0x301D: case 0xFF08: case 0xFF3B: case 0xFF5B:
+        return FALSE;
+    }
+    switch (b) {                    /* a row must not start with: */
+    case '.': case ',': case ':': case ';': case '!': case '?': case ')': case ']': case '}':
+    case 0x2019: case 0x201D: case 0x2025: case 0x2026:     /* closing quotes, two dot leader, ellipsis */
+    case 0x3001: case 0x3002: case 0xFF0C: case 0xFF0E: case 0xFF01: case 0xFF1F: case 0xFF1A: case 0xFF1B:     /* , . full width , . ! ? : ; */
+    case 0x3009: case 0x300B: case 0x300D: case 0x300F: case 0x3011: case 0x3015: case 0x3017: case 0x3019:     /* closing brackets */
+    case 0x301B: case 0x301E: case 0x301F: case 0xFF09: case 0xFF3D: case 0xFF5D:
+    case 0x3005: case 0x301C: case 0x30FB: case 0x30FC: case 0x30FD: case 0x30FE:       /* iteration mark, wave dash, middle dot, prolonged sound mark, katakana iteration marks */
+    case 0x3099: case 0x309A: case 0x309B: case 0x309C: case 0x309D: case 0x309E: case 0xFF9E: case 0xFF9F:     /* voiced marks, hiragana iteration marks */
+    case 0x3041: case 0x3043: case 0x3045: case 0x3047: case 0x3049: case 0x3063: case 0x3083: case 0x3085: case 0x3087: case 0x308E: case 0x3095: case 0x3096:  /* small hiragana */
+    case 0x30A1: case 0x30A3: case 0x30A5: case 0x30A7: case 0x30A9: case 0x30C3: case 0x30E3: case 0x30E5: case 0x30E7: case 0x30EE: case 0x30F5: case 0x30F6:  /* small katakana */
+        return FALSE;
+    }
+    return TRUE;
+}
+
 /* the next row: *s / *k (valid until the next call). 1 = a row, 0 = no rows left, -1 = failure */
 static int RowNext(Rows *r, const WCHAR **s, int *k)
 {
-    int need = r->chunk, fit = 0, j, i;
+    int need = r->chunk, fit = 0, j, i, c;
     SIZE sz;
     RowDrop(r, r->used);
     r->used = 0;
@@ -169,9 +204,17 @@ static int RowNext(Rows *r, const WCHAR **s, int *k)
         j = r->wb[fit] == ' ' ? fit + 1 : fit;              /* break after the last space that fits */
         while (j > 0 && r->wb[j - 1] != ' ') j--;
         for (i = 0; i < j && r->wb[i] == ' '; i++) {}
-        if (j && (i < j || i >= fit)) {                     /* after a word, or a run of spaces wider than the row */
+        if (i == j && i < fit) j = 0;                       /* indentation alone doesn't count (a run of spaces wider than the row does) */
+        for (c = fit; c > j && !CjkBreak(r->wb[c - 1], r->wb[c]); c--) {}      /* the farthest cjk break that fits */
+        if (c > j && j) {                                   /* a space break right of the middle of the row (in pixels) is kept */
+            if (!GetTextExtentExPointW(r->dc, r->wb, j, 0, NULL, NULL, &sz)) return -1;
+            if (sz.cx * 2 >= r->width) c = j;
+        }
+        if (c > j) {                                        /* after a cjk char: never half a surrogate pair */
+            j = c;
+        } else if (j) {                                     /* after a word, or a run of spaces wider than the row */
             r->skip = 1;
-        } else {                                            /* no space (indentation alone doesn't count): hard break */
+        } else {                                            /* no break at all: hard break */
             j = fit > 0 ? fit : 1;                          /* always at least one char, never half a surrogate pair */
             if (j < r->wn && LO_SUR(r->wb[j]) && HI_SUR(r->wb[j - 1])) j = j > 1 ? j - 1 : 2;
         }
@@ -207,8 +250,13 @@ static BOOL PageBegin(HDC dc, HFONT font, const RECT *box, int vert, int lh, con
     return TRUE;
 }
 
+/* the error of a failed gdi / spooler call that says the user cancelled: the "save print output as" box of a pdf
+ * printer, or the job deleted from the queue */
+static BOOL UserCancelled(DWORD er) { return er == ERROR_PRINT_CANCELLED || er == ERROR_CANCELLED; }
+
 /* one print job: `copies` collated copies of pages from..to. 1 = printed, 0 = failed (the job is aborted),
- * -1 = the user cancelled it before it started (e.g. the "save print output as" box of a pdf printer) */
+ * -1 = aborted, nothing to report: the user cancelled it (before it started or by deleting the job) or the
+ * page range lies past the last page, so there was nothing to print */
 static int PrintJob(HDC dc, const WCHAR *text, int n, int copies, int from, int to)
 {
     const WCHAR *name = g_doc.path[0] ? PathName(g_doc.path) : L"untitled", *s = NULL;
@@ -218,7 +266,8 @@ static int PrintJob(HDC dc, const WCHAR *text, int n, int copies, int from, int 
     Rows r;
     HFONT font;
     HGDIOBJ old;
-    int lpx, lpy, hz, vt, pw, ph, ox, oy, lh, rows, copy, page, row, k = 0, got, out, ok, started;
+    DWORD er = 0;                   /* GetLastError() right after a failed StartPage / EndPage / EndDoc (0 = another kind of failure) */
+    int lpx, lpy, hz, vt, pw, ph, ox, oy, lh, rows, copy, page, row, k = 0, got, out, ok, started, printed = 0;
 
     lpx = GetDeviceCaps(dc, LOGPIXELSX);
     lpy = GetDeviceCaps(dc, LOGPIXELSY);
@@ -268,7 +317,7 @@ static int PrintJob(HDC dc, const WCHAR *text, int n, int copies, int from, int 
     di.lpszDocName = name;
     started = StartDocW(dc, &di) > 0;
     ok = started;
-    if (!started && (GetLastError() == ERROR_CANCELLED || GetLastError() == ERROR_PRINT_CANCELLED)) ok = -1;
+    if (!started && UserCancelled(GetLastError())) ok = -1;
     for (copy = 0; started && ok && copy < copies; copy++) {
         r.pos = r.open = r.wn = r.used = r.skip = 0;
         for (page = 1; ok && page <= to; page++) {
@@ -276,19 +325,31 @@ static int PrintJob(HDC dc, const WCHAR *text, int n, int copies, int from, int 
             if (got < 0) { ok = FALSE; break; }
             if (!got && page > 1) break;                    /* a page starts only when it has a row (page 1 always) */
             out = page >= from;                             /* pages before the range are laid out, not printed */
-            if (out) ok = PageBegin(dc, font, &box, vt, lh, name, page);
+            if (out) {
+                ok = PageBegin(dc, font, &box, vt, lh, name, page);
+                if (!ok) er = GetLastError();               /* read at once: nothing below may overwrite it */
+            }
             for (row = 0; ok && got > 0; ) {
                 if (out && k > 0) TextOutW(dc, box.left, box.top + row * lh, s, k);
                 if (++row >= rows) break;
                 got = RowNext(&r, &s, &k);
                 if (got < 0) ok = FALSE;
             }
-            if (ok && out) ok = EndPage(dc) > 0;
+            if (ok && out) {
+                ok = EndPage(dc) > 0;
+                if (ok) printed++; else er = GetLastError();
+            }
             if (!got) break;
         }
     }
-    if (started && ok) ok = EndDoc(dc) > 0;
-    if (started && !ok) AbortDoc(dc);
+    if (started && ok) {
+        if (!printed) { AbortDoc(dc); ok = -1; }            /* the range starts past the last page: don't spool an empty job */
+        else { ok = EndDoc(dc) > 0; if (!ok) er = GetLastError(); }
+    }
+    if (started && !ok) {
+        AbortDoc(dc);
+        if (UserCancelled(er)) ok = -1;                     /* the user deleted the job: not an error to report */
+    }
     SelectObject(dc, old);
     DeleteObject(font);
     mem_free(r.wb);
@@ -306,7 +367,9 @@ void PrintDoc(HWND owner)
     memset(&pd, 0, sizeof pd);
     pd.lStructSize = sizeof pd;
     pd.hwndOwner = owner;
-    pd.Flags = PD_RETURNDC | PD_NOSELECTION | PD_USEDEVMODECOPIESANDCOLLATE;
+    /* no "print to file" box: PrintJob never sets DOCINFO.lpszOutput, so a ticked box would still print on the printer
+     * (the pdf / xps printers ask for their file name themselves) */
+    pd.Flags = PD_RETURNDC | PD_NOSELECTION | PD_USEDEVMODECOPIESANDCOLLATE | PD_HIDEPRINTTOFILE | PD_DISABLEPRINTTOFILE;
     pd.nFromPage = 1;
     pd.nToPage = 1;
     pd.nMinPage = 1;
