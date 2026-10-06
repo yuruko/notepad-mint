@@ -73,7 +73,7 @@ $cx0 = $pt.X; $cy0 = $pt.Y; $cw = $rc.R
 $dpi = [int][F]::GetDpiForWindow($h)
 if ($dpi -lt 96) { $dpi = 96 }
 $btn = [int](46 * $dpi / 96)
-$capH = [int](30 * $dpi / 96)                       # FrameHeight(): at least 30 px (96 dpi); the chrome font at 13 pt is below that
+$capH = [int](25 * $dpi / 96)                       # FrameHeight(): at least 25 px (96 dpi); the 11 px chrome font is below that
 $yMid = $cy0 + [int]($capH / 2)
 $rc2 = New-Object F+RECT; [void][F]::GetClientRect($h, [ref]$rc2); $cw = $rc2.R
 $xClose = $cx0 + $cw - [int]($btn / 2)

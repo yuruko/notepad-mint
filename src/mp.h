@@ -245,7 +245,7 @@ void  AppUpdateTitle(void);
 void  AppUpdateStatus(void);
 
 /* -------------------------------------------------------------- edit.c --- */
-#define EDIT_PAD 8                                    /* padding around the text, 96-dpi pixels (no frame around the editor) */
+#define EDIT_PAD 10                                   /* padding around the text, 96-dpi pixels (no frame around the editor) */
 HWND   EditCreate(HWND parent);                 /* (re)creates g_edit for g_pf.wrap, carrying text/selection/rtl over */
 void   EditApplyFont(void);                     /* font from g_pf (face, g_pf.cur size, dpi) */
 void   EditApplyColors(void);                   /* bg brush from g_pf.bg, repaint */

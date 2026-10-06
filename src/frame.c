@@ -35,8 +35,8 @@ static void Metrics(void)
     GetTextMetricsW(dc, &tm);
     SelectObject(dc, of);
     ReleaseDC(NULL, dc);
-    g_capH = tm.tmHeight + S(12);
-    if (g_capH < S(30)) g_capH = S(30);
+    g_capH = tm.tmHeight + S(10);
+    if (g_capH < S(25)) g_capH = S(25);                      /* (was 30: the strip is 5 px lower than it was) */
 }
 
 int FrameHeight(void)
