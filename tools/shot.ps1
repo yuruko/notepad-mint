@@ -3,7 +3,9 @@
 #   -Arg      command line argument handed to the exe (a file to open)
 #   -Keys     SendKeys string(s), separated by '|' ; each step waits -Step ms. use "{WAIT:500}" for an extra pause
 #   -PadR/-PadB  grow the capture rect to include popups that hang outside the window
+#   -Cmd / -Mouse "x,y" / -Burst N / -Drag "x1,y1,x2,y2" [-DragHold]   a menu command by id, a parked mouse (hover), N captures in a row, a real mouse drag (selection)
 #   -Keep     don't kill the process afterwards
+# NB: it kills EVERY process named "notepad mint" before and after (the gui tests' temp copies too): never run it while tests\ui\ui_test.ps1 is running.
 param(
     [string]$Out = (Join-Path $PSScriptRoot "..\build\shot.png"),
     [string]$Arg = "",
@@ -16,6 +18,8 @@ param(
     [int]$Cmd = 0,               # post WM_COMMAND with this IDM_* id (see src\mp.h) to the main window before the keys
     [string]$Mouse = "",         # "x,y": park the real mouse there (device px from the window's top-left, as in the screenshot) just before the capture
     [int]$Burst = 0,             # N > 0: take N captures 90 ms apart as <Out>_0.png ... (a blinking caret shows in some of them)
+    [string]$Drag = "",          # "x1,y1,x2,y2": a real left-button drag between the two points (device px from the window's top-left), before the capture
+    [switch]$DragHold,           # with -Drag: take the capture while the button is still down (the selection is being dragged), release afterwards
     [switch]$Keep,
     [string]$Exe = (Join-Path $PSScriptRoot "..\build\notepad mint.exe")
 )
@@ -50,6 +54,7 @@ public class W {
   }
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, uint d, UIntPtr ex);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int sz);
@@ -98,6 +103,17 @@ if ($Keys -ne "") {
 if ([W]::FgPid() -ne $p.Id) { [void][W]::Force($h) }
 $r = New-Object W+RECT
 [void][W]::DwmGetWindowAttribute($h, 9, [ref]$r, 16)
+$dragUp = $false
+if ($Drag -match '^(\d+),(\d+),(\d+),(\d+)$') {                     # selecting with the mouse: down, 12 small moves, up (or not, with -DragHold)
+    $x1 = $r.L + [int]$Matches[1]; $y1 = $r.T + [int]$Matches[2]; $x2 = $r.L + [int]$Matches[3]; $y2 = $r.T + [int]$Matches[4]
+    [void][W]::SetCursorPos($x1, $y1); Start-Sleep -Milliseconds 150
+    [W]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 100
+    for ($s = 1; $s -le 12; $s++) {
+        [void][W]::SetCursorPos($x1 + [int](($x2 - $x1) * $s / 12), $y1 + [int](($y2 - $y1) * $s / 12)); Start-Sleep -Milliseconds 30
+    }
+    Start-Sleep -Milliseconds 200
+    if ($DragHold) { $dragUp = $true } else { [W]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 200 }
+}
 if ($Mouse -match '^(\d+),(\d+)$') {                                # hover states: the real cursor, a few moves so the window sees it arrive
     $mx = $r.L + [int]$Matches[1]; $my = $r.T + [int]$Matches[2]
     [void][W]::SetCursorPos($mx - 5, $my - 5); Start-Sleep -Milliseconds 120
@@ -117,6 +133,7 @@ for ($i = 0; $i -lt $shots; $i++) {
     $bmp.Dispose()
     if ($i -lt $shots - 1) { Start-Sleep -Milliseconds 90 }
 }
+if ($dragUp) { [W]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
 Write-Output ("saved {0}  ({1}x{2})  title='{3}' responding={4}" -f $Out, $w, $ht, $p.MainWindowTitle, $p.Responding)
 
 if (-not $Keep) { Get-Process -Name "notepad mint" -ErrorAction SilentlyContinue | Stop-Process -Force }

@@ -1,15 +1,19 @@
 # notepad mint
 
-free replacement for notepad.exe: dark, mint accent, no ai / sign-in / telemetry. plain text only.
+free replacement for notepad.exe: dark (default) or light, mint / dark green accent, no ai / sign-in / telemetry. plain text only.
 written in raw c + **32-bit x86** masm. no crt, no libs, no windows.h (every win32 decl is in `src/w32.h`).
-exe imports only kernel32/user32/gdi32; dwmapi/uxtheme (dark frame, dark scrollbars), shell32 (drag & drop) and
-comdlg32 (page setup / print only) are loaded at run time. one 32-bit exe runs on 32-bit windows, 64-bit windows and arm.
+exe imports only kernel32/user32/gdi32; dwmapi/uxtheme (dark frame, scrollbar themes), shell32 (drag & drop, the about link) and
+comdlg32 (open / save as, page setup, print) are loaded at run time. one 32-bit exe runs on 32-bit windows, 64-bit windows and arm.
 
 ## user requirements (verbatim intent)
 - name everywhere (title, about, version info, exe, appdata dir): **"notepad mint"**, lowercase aesthetic. exe = `build\notepad mint.exe`
 - function EXACTLY like notepad.exe (same menus/layout/status bar/dialog wording) + nice extras + custom theming
-- colors: **two themes only, dark (default) and light**, switched from view > theme and saved as `[view] theme=dark|light`. mint accent `#9df5bd` in both; dark chrome `#161418` with a **black** editor,
-  light = win2000 gray chrome with a **white** editor. custom text / background colours were removed (maintainer's decision): `g_pf.fg / bg` come from the theme and are never saved
+- colors: **two themes only, dark (default) and light**, switched from view > theme and saved as `[view] theme=dark|light`. dark: mint accent `#9df5bd`, chrome `#161418`, **black** editor.
+  light: a **dark green accent `#0a552d`** (the title strip's green, a little darker; white text on it), one light face `#e4e1da` shared by the title strip, menu bar, status bar and dialogs, **white** editor.
+  (the face value is a guess at "the app background must match the status bar": every chrome part already used one colour, it was just too dark.)
+  custom text / background colours were removed (maintainer's decision): `g_pf.fg / bg` come from the theme and are never saved
+- **hover = accent as the BACKGROUND** (with on-accent text), never the accent as text colour: menu bar items, popup items, status bar panels, push buttons, check / radio labels, the about link, the title strip's buttons.
+  **selected text and the caret use the accent too.** **one border only** between the menu bar and the editor and between the editor and the status bar (the editor's 2px sunken frame; the bars draw no line of their own)
 - default font consolas 13pt (fallback lucida console / courier new); the font dialog is **font only** (face, size 10..96, bold, italic, preview, reset)
 - windows-2000-esque as far as possible: native frame, classic bevels, flat menu bar, sunken fields; dark (default) or light. **no size grip** on the status bar (removed on request): the window resizes by its frame
 - **no accent-colored window border** (frame border is a neutral dark gray)
@@ -38,7 +42,7 @@ src/edit.c     native EDIT wrapper: create/recreate (word wrap), subclass, font+
 src/main.c     entry `start`, main window, commands, file flow, settings, accelerators, command line
 src/about.c    about box + help topics
 src/frame.c    the custom title strip (icon, title in the chrome font, min / max / close, hit testing, window menu)
-src/find.c (+ search.c: the pure, unit-tested search / replace-all code), filedlg.c, fontdlg.c, print.c   find/replace + go to, open / save as / encoding dialogs, font dialog, print / page setup
+src/find.c (+ search.c: the pure, unit-tested search / replace-all code), filedlg.c, fontdlg.c, print.c   find/replace + go to, the native open / save as dialogs (comdlg32) + our encoding picker, font dialog, print / page setup
 src/notepad_mint.rc + .manifest   icon id 1, versioninfo, manifest (per-monitor-v2 dpi, supportedOS, asInvoker)
 build.bat      `build.bat` from the project root (x64-hosted x86 cl/ml/link via vcvarsamd64_x86; from git bash: `cmd.exe /c "<abs path>\build.bat"`).
                `dbg` arg = symbols + build\dbg.log tracing.
@@ -51,7 +55,17 @@ tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `
 
 ## decisions / design notes
 - edit control = native EDIT (multiline, ES_NOHIDESEL). text kept utf-16 + CRLF inside; DocRead normalises, DocWrite converts.
-  word wrap toggle = recreate the edit control (like notepad). colors via WM_CTLCOLOREDIT. selection color stays system blue (unavoidable with native edit).
+  word wrap toggle = recreate the edit control (like notepad). colors via WM_CTLCOLOREDIT.
+- **accent selection** (`edit.c` `SelPaint` / `PaintSelection` / `RepaintSel`): the stock control can only draw the system selection colour, so while a selection exists `WM_PAINT` is answered by us:
+  the control paints itself into an off-screen bitmap (`WM_PRINTCLIENT`), then every selected run is overpainted in the accent (fill + on-accent text, positions from `EM_POSFROMCHAR`, tabs and partial lines included),
+  and the bitmap is blitted once (no flicker). the stock control paints a *changed* selection directly (it never goes through our `WM_PAINT`), so `RepaintSel` forces a repaint after every message that can change the selection.
+  **limit:** a line that contains right-to-left text keeps the stock blue (its runs are not contiguous on screen), and so does the whole editor while `WS_EX_RTLREADING` is on. single-line edits in dialogs keep the stock colour too.
+- **accent caret** (`AccentCaret`): a bitmap caret whose bits are `(editor background xor accent)`, because the caret is drawn with xor: on the editor background it comes out exactly as the accent (measured `#0a552d` in light).
+  re-made on `WM_SETFOCUS`, `WM_SETFONT` and when the theme changes (`EditApplyColors`).
+- **dirty state by content** (`main.c` `g_clean`, `CleanMark`, `TextChanged`, `AppIsDirty`): the stock modified flag is sticky, so typing and deleting again, or undoing back to the original, would still ask to save.
+  the clean state (what was loaded / saved, or blank for a new document) is kept as length + two 32-bit hashes (no 64-bit math, nothing is copied for a big file); a compare only happens when the control's flag is set and the length is back to the clean one.
+  a new encoding / line ending is a change unless the document is empty and unsaved. `CleanMark` runs in `OnCreate`, `OpenDoc`, `WriteDoc`, `FileNew`. the title's `*` and the close prompt both use `AppIsDirty`.
+- ctrl+a is an accelerator: in the find dialog it selects inside the focused text box, otherwise in the editor.
 - scrollbars only when needed (edit.c `UpdateBars`): a native multiline edit always shows its bars (greyed). we show/hide them with `ShowScrollBar` after text / size / font changes
   (`EditScrollSoon` posts `WM_BARS` so the control finishes its own layout first). pitfalls found the hard way: (1) a hidden bar (WS_xSCROLL cleared) is no longer maintained by the control,
   so its range can't be read -> vertical need = `EM_GETLINECOUNT` vs lines that fit (`EM_GETRECT` / line height); horizontal need = show the bar with redraw off, read `GetScrollInfo`, hide again if unneeded;
@@ -77,10 +91,18 @@ tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `
   resize. fix: `FrameNcCalc` handles both forms, and `mp_main` forces one more recalculation with `SetWindowPos(SWP_FRAMECHANGED)` right after creating the window. the sizing border stays the system's
   (resize, aero snap, shadow), the strip answers HTCAPTION / HTTOP / HTTOPLEFT / HTTOPRIGHT, the three buttons are HTCLIENT (own mouse handling: no windows 11 snap-layout flyout on the maximize button).
   verified with `tools\frame_test.ps1` (real mouse input: hit tests, maximize / restore, double click, drag, win+left snap, minimize, close).
-- file dialogs: custom dark dialogs (path edit, up, listbox, file name, type + encoding + line ending dropdowns made of mp_btn + MenuPopup). default ext .txt rule like notepad.
+- file dialogs (maintainer's request: native ones): open / save as are `GetOpenFileNameW` / `GetSaveFileNameW` from comdlg32, loaded on first use (`PickFile` in `filedlg.c`), titles "open" / "save as", filter text documents / all files,
+  default extension `.txt`, start folder = the current file's folder, else the last folder picked. a native dialog follows the system theme: it **can't be darkened**, so it is light in both themes.
+  there is **no encoding / line ending picker in them any more**: both come from the format menu and the status bar panels (`FileDlgSave(owner, path, cap)` takes no enc / eol). `EncDlg` (code page list) stays ours.
+  while one is up the modeless find dialog is disabled too (replace all must not edit the document under it). if comdlg32 can't be loaded the app says so in a message box and does nothing.
 - prefs: `%APPDATA%\notepad mint\settings.ini` (utf-16 ini so any font name works). window placement saved. new windows cascade.
 - dpi: manifest per-monitor-v2; everything scaled through `S()`; WM_DPICHANGED rebuilds fonts. win10-only dpi apis are looked up at run time.
-- accent usage: menu/popup highlight = mint fill + dark text, hot text = mint, default button frame = mint. NOT the window border.
+- accent usage: menu bar / popup items, status bar panels, push buttons and check / radio labels fill with the accent (text in `C_ON_ACCENT`) when hovered or keyboard-selected; the default button frame is the accent.
+  light mode: accent = accentFg = `#0a552d` (text on the light face and lines use the same green, onAccent is white). NOT the window border.
+- scrollbars: dark keeps `SetWindowTheme(h, L"DarkMode_Explorer", NULL)` (thin dark bars, arrows only on hover); light uses `SetWindowTheme(h, L"", L"")` = the **classic scrollbar with always visible arrow buttons**
+  (the explorer-themed light bar has no arrows at all; the maintainer likes the classic one: keep). both in `DarkScroll` (ui.c), re-applied on a theme switch.
+- dialogs and message boxes carry the app icon (`DlgOpen` sends `WM_SETICON` big + small from resource 1). the about box has a link, "yuru.be" (`about.c`, class `mp_link`, `ShellExecuteW` found with `GetProcAddress`)
+  that opens https://yuru.be (hover = accent background like every other control).
 - fonts: dialogs use segoe ui 9pt, DEFAULT_CHARSET. **measured on this ja-JP machine: tahoma + microsoft sans serif draw '\' as a yen sign
   in every charset, segoe ui/arial do it with ANSI_CHARSET** (tools\fonttest.c). consolas/verdana/courier new/lucida console are fine.
 - system locale of the dev/user machine is ja-JP (ansi code page 932): "ansi" in this app = shift-jis there.
@@ -115,7 +137,9 @@ needs no `WM_CHARTOITEM` handler, and Enter on a focused non-default button does
 - `cmd.exe /c build.bat` needs the absolute path. screenshots: tools\shot.ps1 (CopyFromScreen of the dwm frame bounds; forces the window to the foreground
   with AttachThreadInput; the keys go to the real foreground window, so runs are flaky if something steals focus).
 - `tools\shot.ps1` and `tools\frame_test.ps1` steal the foreground (and the mouse): the user's own typing can land in the test window (it happened: stray text showed up in the editor).
-  `tests\ui\ui_test.ps1` does not: it runs the app on a private desktop (`CreateDesktop`) and uses window messages only. `shot.ps1 -Cmd <IDM_ id>` posts a menu command by id.
+  `tests\ui\ui_test.ps1` does not: it runs the app on a private desktop (`CreateDesktop`) and uses window messages only. `shot.ps1 -Cmd <IDM_ id>` posts a menu command by id; `-Mouse "x,y"` parks the real mouse (hover states),
+  `-Burst N` takes N captures in a row (blinking caret), `-Drag "x1,y1,x2,y2" [-DragHold]` drags the real mouse (selection painting). **`shot.ps1` kills every process named "notepad mint" at the start and the end,
+  the gui tests' temp copies included: never run it while the gui suite runs** (and not while the user has a notepad mint open).
 - batch files: the current directory is not on the command lookup path here, so every `cmd /c` / `call` uses an absolute path (`tools\verify.bat` builds one from `%~dp0`);
   `a && b & c` runs `c` unconditionally (use parentheses).
 - the unit tests, layout_check, probe builds and the gui suite all write under `build\` (git-ignored) and never touch `build\notepad mint.exe` except `build.bat` itself.
