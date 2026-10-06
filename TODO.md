@@ -3,6 +3,38 @@
 this file is the work order for whoever continues the project (people or agents). read `README.md` and `NOTES.md` first (design + decisions),
 then `src/mp.h` (all shared declarations), `src/ui.c` (dialog scaffolding, `MsgDlg` at the bottom is the canonical dialog), `src/edit.c`, `src/main.c`.
 
+## status of this branch (read first): partly written, NOT built, NOT integrated
+
+an agent session wrote most of the files below but was stopped before integration. **nothing on this branch has been compiled by msvc or run.**
+the only checks that ran were a linux-side clang syntax check (`tools/linux_check.sh`) and, for the first two commits only, ci (green). the head commit is a wip snapshot and **will not link**: ci on it is expected red.
+
+| item | state |
+|---|---|
+| `tools/linux_check.sh` | done, works (catches crt calls and 64-bit helpers; verified on a deliberately bad file) |
+| `WildMatch` (`util.c`), search decls in `mp.h` | written; the `WildMatch` commit passed msvc ci |
+| dark / light theme foundation (`mp.h` `g_pal`, `C_*` are now runtime values, `ThemeSet` / `DarkFrame` in `ui.c`, accent title text via dwm) | committed; ci never ran on it. menu / status / about / main edits for it are in the wip commit, unreviewed |
+| `src/find.c`, `src/search.c` | written, unreviewed, never compiled by msvc. `FindInText` / `ReplaceAllText` are not unit tested yet |
+| `src/filedlg.c` | written, unreviewed, never compiled by msvc |
+| `src/fontdlg.c` | written, unreviewed, never compiled by msvc. spec changed: font only (see "new requirements") |
+| `src/print.c` | written, unreviewed, never compiled by msvc; the gate currently fails (`ERROR_PRINT_CANCELLED`, `PD_PAGENUMS`, `IDC_WAIT` undeclared) |
+| `src/frame.c` | modified in the working tree, uncommitted work from the title-strip investigation; root cause not written up, `FRAME_CUSTOM` still 0, no ci evidence |
+| `tests/unit/` | partial (`unit.c`, `build.bat`), not wired into ci, never run |
+| `tools/layout_check`, ci hardening, smoke test, import assertion, zero-warning assertion | **not started** (section 4 is still entirely owed) |
+| `src/stubs.c` | **still present**: it duplicates the real modules, so the head does not link. delete it once the modules compile |
+| `NOTES.md` / `README.md` | **not updated** ("not written yet" lists are stale) |
+
+### what to do next, in order
+1. `tools/pending/` holds the `w32.h` declaration fragments the agents wrote (`w32_filedlg.h`, `w32_fontdlg.h`, `w32_print.h`, `w32_theme.h`, `w32_frame.h`) and two proposed `main.c` diffs (`find_main.diff`, `frame_main.diff`). merge the declarations into `src/w32.h` (check for duplicates and exact 32-bit sdk signatures / values: the print gate failure above is a missing `PD_PAGENUMS` / `IDC_WAIT` / `ERROR_PRINT_CANCELLED`), apply the diffs only if still wanted, then delete `tools/pending/`.
+2. delete `src/stubs.c`, run `tools/linux_check.sh` until clean, push, and iterate on ci until the msvc build has zero /W3 warnings.
+3. review each new module against its section below (none has been reviewed), then section 4 (layout_check, unit tests, smoke test, imports + warnings assertions in the workflow).
+4. update `NOTES.md` (status, theme, title-strip findings) and `README.md`, then open the pr against `main` with per-item verification.
+
+### new requirements from the maintainer (these override the sections below where they conflict)
+- **only two themes: dark (default) and light**, switched from view > theme, saved as `[view] theme=dark|light`. the editor area is **black in dark and white in light**. **custom text / background colours are removed**: the font dialog (2.3) is font only (title "font": face, size 10..96, bold, italic, preview, reset; no colour column, sliders, hex edits or presets). `g_pf.fg` / `g_pf.bg` are derived from the theme and not saved.
+- the `C_*` colours are runtime values (`g_pal`): never use them in static initialisers / constant expressions or cache a brush made from them. `C_ACCENT_FG` = accent as text or a line, `C_ON_ACCENT` = text on an accent fill.
+- **title bar text in the accent colour while the window is active** (done via dwm text colour in `DarkFrame`, unverified) **and in the app's own font**: the latter needs the custom title strip (section 3, `src/frame.c`) and stays off until ci evidence shows a single title bar and working buttons / maximize / snap.
+- do not touch the scrollbar auto-hide logic in `src/edit.c` / `src/main.c` (the maintainer is doing it locally); keep the theme hunks in `main.c` small so the merge is easy.
+
 ## 0. hard rules (breaking any of these breaks the build or the product)
 
 - **raw c17 + x86 masm, 32-bit only.** no crt, no `windows.h`, no third-party code. the exe links with `/NODEFAULTLIB`, so any crt call
