@@ -387,13 +387,12 @@ static BOOL WriteDoc(const WCHAR *path, int enc, int eol)
 static BOOL FileSave(BOOL saveAs)
 {
     WCHAR path[PATH_CAP];
-    int enc = g_doc.enc, eol = g_doc.eol;
     wcopy(path, g_doc.path, PATH_CAP);
     if (saveAs || !path[0]) {
         if (!path[0]) wcopy(path, g_doc.name, PATH_CAP);     /* an unsaved document: the dialog proposes its default name (".txt" is added) */
-        if (!FileDlgSave(g_hwnd, path, PATH_CAP, &enc, &eol)) return FALSE;
+        if (!FileDlgSave(g_hwnd, path, PATH_CAP)) return FALSE;
     }
-    return WriteDoc(path, enc, eol);
+    return WriteDoc(path, g_doc.enc, g_doc.eol);             /* the encoding / line ending are the document's: format menu or the status bar panels */
 }
 
 /* TRUE when the current document may be replaced / closed (saved, or the user said don't save) */
