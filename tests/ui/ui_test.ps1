@@ -268,7 +268,7 @@ $IDF = Read-Consts (Join-Path $Src 'find.c') $IDM                               
 $IDO = Read-Consts (Join-Path $Src 'filedlg.c') $IDM                             # ID_PATH ... ID_ENCLIST, MI_*
 $IDT = Read-Consts (Join-Path $Src 'fontdlg.c') $IDM                             # ID_LIST ... ID_RESET
 $IDE = Read-Consts (Join-Path $Src 'edit.c') $IDM                                # IDC_EDIT
-foreach ($need in @(@('IDM', $IDM, 'IDM_EDIT_FIND'), @('find.c', $IDF, 'ID_REPLACEALL'), @('filedlg.c', $IDO, 'MI_EOL'), @('fontdlg.c', $IDT, 'ID_RESET'), @('edit.c', $IDE, 'IDC_EDIT'))) {
+foreach ($need in @(@('IDM', $IDM, 'IDM_EDIT_FIND'), @('find.c', $IDF, 'ID_REPLACEALL'), @('filedlg.c', $IDO, 'ID_ENCLIST'), @('fontdlg.c', $IDT, 'ID_RESET'), @('edit.c', $IDE, 'IDC_EDIT'))) {
     if (-not $need[1].ContainsKey($need[2])) { Write-Output ('FATAL cannot parse ' + $need[0] + ': ' + $need[2] + ' missing'); exit 2 }
 }
 $mpText = [IO.File]::ReadAllText((Join-Path $Src 'mp.h'))
@@ -709,147 +709,262 @@ function CkBytes([string]$n, $exp, [string]$path, [int]$ms = 2500) {            
     else { Fail $n ('expected ' + @($exp).Count + ' bytes [' + (Hex $exp 20) + ' ...] actual ' + @($act).Count + ' bytes [' + (Hex $act 20) + ' ...]') }
 }
 
+# ------------------------------------------------------------------------------------ native open / save as (comdlg32)
+# open and save as are the windows file dialogs (GetOpenFileNameW / GetSaveFileNameW): a top-level window of class #32770 owned by the main
+# window, running inside the app's own process (the app's own boxes are mp_msg, its own dialogs mp_*). their texts are localized: nothing
+# below looks at a caption or a label, only at classes, control ids, ownership and what the app does afterwards. a message box / task dialog
+# the file dialog puts up (file not found, replace the file?) is another #32770, owned by the file dialog.
+# the file name field is an Edit: in the open dialog inside a ComboBoxEx32 (control id 1148) > ComboBox, in the save as dialog (id 1001) inside
+# a ComboBox of its DirectUI view; the address band has a hidden Edit too. ok / open / save = the child with control id 1, cancel = id 2.
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class Nd {
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+    public static long Owner(long h) { return GetWindow(new IntPtr(h), 4).ToInt64(); }       // GW_OWNER (0 = unowned)
+}
+'@
+$TDM_CLICK_BUTTON = 0x466                                                        # WM_USER + 102: the overwrite prompt of save as is a task dialog, its buttons have no control ids
+$IDYES = 6; $IDNO = 7
+function Nat-Owned($app, [long]$owner) {                                         # the visible top-level #32770 windows of the app that are owned by $owner
+    foreach ($w in @([U]::Tops($app.Pid, $true))) { if ([U]::Cls($w) -eq '#32770' -and [Nd]::Owner($w) -eq $owner) { [long]$w } }
+}
+function Nat-Name([long]$dlg) {                                                  # the file name field (an Edit): the known ids first, else the first visible Edit; 0 when there is none
+    $first = [long]0
+    foreach ($k in [U]::Kids($dlg)) {
+        if ([U]::Cls($k) -ne 'Edit' -or -not [U]::Visible($k)) { continue }      # (the address band has a hidden one)
+        if (@(1148, 1001) -contains [U]::Id($k)) { return [long]$k }
+        if (-not $first) { $first = [long]$k }
+    }
+    return $first
+}
+function Nat-Find($app) {                                                        # the file dialog if one is up (0 if none): a visible #32770 owned by the main window that has a name field
+    foreach ($w in @(Nat-Owned $app $app.Main)) { if (Nat-Name $w) { return [long]$w } }
+    return [long]0
+}
+function Nat-Wait($app, [int]$ms = 20000) {                                      # waits for it (the first one of a process can be slow); throws (= a clear FAIL) when it never shows
+    $h = WaitFor { Nat-Find $app } $ms
+    if (-not $h) { throw 'the file dialog (a #32770 owned by the main window, with a file name field) did not appear' }
+    if ($Dump) { Dump-Tree ([long]$h) }
+    return [long]$h
+}
+function Nat-Text([long]$dlg) { [U]::GetText((Nat-Name $dlg)) }                  # what the name field holds
+function Nat-Type([long]$dlg, [string]$t) { [U]::SetText((Nat-Name $dlg), $t) }  # WM_SETTEXT on it
+function Nat-Press([long]$dlg, [int]$id) {                                       # BM_CLICK (posted) on the button with that control id: 1 = open / save, 2 = cancel
+    $b = [U]::Item($dlg, $id)
+    if (-not $b) { throw ('the file dialog has no button with control id ' + $id) }
+    [void](WaitFor { [U]::Enabled([long]$b) } 2000)
+    [void][U]::Post([long]$b, $BM_CLICK, 0, 0)
+}
+function Nat-Closed($app, [long]$dlg) {                                          # the dialog goes away; when it does not, the leftovers are closed so that the next step starts clean
+    if (Gone $dlg 8000) { return $true }
+    foreach ($b in @(Nat-Owned $app $dlg)) { [void][U]::Post([long]$b, $TDM_CLICK_BUTTON, $IDNO, 0) }     # (a task dialog ignores WM_CLOSE: answer it "no")
+    Close-Dialogs $app
+    return $false
+}
+function Nat-Box($app, [long]$dlg, [int]$ms = 5000) {                            # the message box / task dialog the file dialog put up (a #32770 owned by it); 0 when none shows within $ms
+    return [long](WaitFor { @(Nat-Owned $app $dlg) | Select-Object -First 1 } $ms)
+}
+function Nat-Answer([long]$box, [int]$id) {                                      # press the button with that id (IDOK 1, IDYES 6, IDNO 7) of such a box: a message box has real control ids, a task dialog is clicked with TDM_CLICK_BUTTON; returns whether the box went away
+    $b = [U]::Item($box, $id)
+    if ($b) { [void][U]::Post([long]$b, $BM_CLICK, 0, 0) } else { [void][U]::Post($box, $TDM_CLICK_BUTTON, $id, 0) }
+    return (Gone $box 3000)
+}
+
 # ============================================================================================================ T5
-function Test-T5 {                                                               # open
-    $app = Start-App                                                             # untitled; the app's cwd is $work (what the open dialog starts in)
+function Test-T5 {                                                               # open: the native comdlg32 dialog
+    # first, while this exe copy has not handed a start folder to windows yet, the dialog starts in the folder of the open file. (windows honors the first start folder
+    # an exe passes in and swaps a repeat of it for the last folder picked; that folder is remembered for every instance of the exe name, but not when it is under
+    # %TEMP%, where the test files live.) so another instance picks a file from the src folder; then a fresh instance that opened its file from the command line must
+    # still come up in tests: a bare file name resolves there only if the app passed that folder in
+    $seed = Start-App
+    Cmd $seed 'IDM_FILE_OPEN'
+    $dlgS = Nat-Wait $seed
+    Nat-Type $dlgS (Join-Path $Src 'mp.h')
+    Nat-Press $dlgS $IDOK
+    Ck 'T5.0 (setup) another instance picks a file from the src folder (a folder windows remembers)' (Wait-Title $seed 'mp.h - notepad mint' 8000) ('title [' + (Title $seed) + ']')
+    Stop-App $seed
+    $app3 = Start-App $sampleWrap
+    [void](Wait-Title $app3 'wordwrap-sample.txt - notepad mint' 8000)
+    Cmd $app3 'IDM_FILE_OPEN'
+    $dlg3 = Nat-Wait $app3
+    Nat-Type $dlg3 'multilingual-sample.txt'
+    Nat-Press $dlg3 $IDOK
+    Ck 'T5.0a the open dialog starts in the folder of the open file: a bare file name opens (title "multilingual-sample.txt - notepad mint")' (Wait-Title $app3 'multilingual-sample.txt - notepad mint' 8000) ('title [' + (Title $app3) + ']')
+    CkEdText 'T5.0b ... and the editor text equals that file' $app3 (Expected-Text $sampleMulti)
+    Stop-App $app3
+
+    $app = Start-App                                                             # untitled
     Cmd $app 'IDM_FILE_OPEN'
-    $dlg = Wait-Win $app 'mp_file' 'open'
-    Pass 'T5.1 open dialog opens (class mp_file, title "open")'
-    $look = Get-Field $dlg $IDO.ID_PATH
-    Ck 'T5.2 the look-in edit starts at the current directory' ($look -ieq $work) ('look-in [' + $look + '] expected [' + $work + ']')
-    Set-Field $dlg $IDO.ID_NAME $sampleWrap
-    Press $dlg $IDOK
-    Ck 'T5.3 ok on the full path of wordwrap-sample.txt closes the dialog' (Gone $dlg) 'the dialog is still visible'
-    Ck 'T5.4 the title becomes "wordwrap-sample.txt - notepad mint"' (Wait-Title $app 'wordwrap-sample.txt - notepad mint') ('title [' + (Title $app) + ']')
-    CkEdText 'T5.5 the editor text equals the file (utf-8, LF -> CRLF)' $app (Expected-Text $sampleWrap)
+    $dlg = Nat-Wait $app
+    Pass 'T5.1 open dialog opens (a native #32770 owned by the main window, with a file name field)'
+    Ck 'T5.2 it is modal: the main window is disabled while it is up' (-not [U]::Enabled($app.Main)) 'the main window is enabled'
+    CkEq 'T5.3 the file name field starts empty (open proposes nothing)' '' (Nat-Text $dlg)
+    Nat-Type $dlg $sampleWrap
+    Nat-Press $dlg $IDOK
+    Ck 'T5.4 ok on the full path of wordwrap-sample.txt closes the dialog' (Nat-Closed $app $dlg) 'the dialog is still visible'
+    Ck 'T5.5 the title becomes "wordwrap-sample.txt - notepad mint"' (Wait-Title $app 'wordwrap-sample.txt - notepad mint' 8000) ('title [' + (Title $app) + ']')
+    CkEdText 'T5.6 the editor text equals the file (utf-8, LF -> CRLF)' $app (Expected-Text $sampleWrap)
+    Ck 'T5.7 the main window is enabled again and the document is not modified' ([bool](WaitFor { [U]::Enabled($app.Main) } 2000) -and -not (Ed-Modified $app)) 'the main window is disabled or the document is modified'
 
     Cmd $app 'IDM_FILE_OPEN'
-    $dlg = Wait-Win $app 'mp_file' 'open'
-    CkEq 'T5.6 the dialog starts in the folder of the open file' ((Split-Path $sampleWrap -Parent).ToLowerInvariant()) ((Get-Field $dlg $IDO.ID_PATH).ToLowerInvariant())
-    Set-Field $dlg $IDO.ID_NAME 'no_such_file_xyz.txt'
-    Press $dlg $IDOK
-    $box = Wait-Box $app 'open'
-    Ck 'T5.7 a missing file name: the message box says "file not found"' ($box.Text -like '*file not found*') ('box text [' + (Show $box.Text) + ']')
-    Ck 'T5.8 ... the box closes with ok' (Box-Press $box $IDOK) 'box still visible'
-    Ck 'T5.9 ... the open dialog stays' ([U]::Visible($dlg)) 'the dialog went away'
-    CkEq 'T5.10 ... and the title is unchanged' 'wordwrap-sample.txt - notepad mint' (Title $app)
-    Set-Field $dlg $IDO.ID_NAME $Tests
-    Press $dlg $IDOK
-    Ck 'T5.11 a directory path navigates: the look-in edit shows that folder' ([bool](WaitFor { (Get-Field $dlg $IDO.ID_PATH) -ieq $Tests } 2000)) ('look-in [' + (Get-Field $dlg $IDO.ID_PATH) + '] expected [' + $Tests + ']')
-    Ck 'T5.12 ... the dialog stays open and the name box is cleared' ([U]::Visible($dlg) -and (Get-Field $dlg $IDO.ID_NAME) -eq '') ('name box [' + (Get-Field $dlg $IDO.ID_NAME) + ']')
-    $lb = Ctl $dlg $IDO.ID_LIST
-    Ck 'T5.13 ... and the list now shows that folder (the two samples + the ui and unit folders)' ((Snd $lb $LB_GETCOUNT) -ge 4) ('list has ' + (Snd $lb $LB_GETCOUNT) + ' items')
-    Ck 'T5.14 ... including multilingual-sample.txt' (([U]::SndStr($lb, $LB_FINDSTRINGEXACT, -1, 'multilingual-sample.txt')) -ge 0) 'LB_FINDSTRINGEXACT did not find it'
-    Set-Field $dlg $IDO.ID_NAME 'multilingual-sample.txt'
-    Press $dlg $IDOK
-    Ck 'T5.15 ok on a bare file name resolves it in the folder shown: title "multilingual-sample.txt - notepad mint"' (Wait-Title $app 'multilingual-sample.txt - notepad mint') ('title [' + (Title $app) + ']')
-    CkEdText 'T5.16 ... and the editor text equals that file' $app (Expected-Text $sampleMulti)
+    $dlg = Nat-Wait $app
+    Nat-Type $dlg $sampleMulti
+    Nat-Press $dlg $IDOK
+    Ck 'T5.8 opening another file replaces the document: title "multilingual-sample.txt - notepad mint"' (Wait-Title $app 'multilingual-sample.txt - notepad mint' 8000) ('title [' + (Title $app) + ']')
+    CkEdText 'T5.9 ... and the editor text equals that file' $app (Expected-Text $sampleMulti)
+    [void](Nat-Closed $app $dlg)                                                 # (a failed open must not leave a dialog in the way of the next step)
 
+    Cmd $app 'IDM_FILE_OPEN'
+    $dlg = Nat-Wait $app
+    Nat-Type $dlg 'no_such_file_xyz.txt'
+    Nat-Press $dlg $IDOK
+    $box = Nat-Box $app $dlg
+    Ck 'T5.10 a file that does not exist: the dialog puts up a message of its own (a #32770 owned by it)' ($box -ne 0) 'no message appeared within 5 s'
+    if ($box) { Ck 'T5.11 ... it closes with ok' (Nat-Answer $box $IDOK) 'the message is still visible' }
+    Ck 'T5.12 ... the open dialog stays' ([U]::Visible($dlg)) 'the dialog went away'
+    CkEq 'T5.13 ... and the title is unchanged' 'multilingual-sample.txt - notepad mint' (Title $app)
     $t0 = Title $app; $x0 = Ed-Text $app
-    Cmd $app 'IDM_FILE_OPEN'
-    $dlg = Wait-Win $app 'mp_file' 'open'
-    Set-Field $dlg $IDO.ID_NAME $sampleWrap                                      # typed, then cancelled
-    Press $dlg $IDCANCEL
-    Ck 'T5.17 cancel closes the dialog' (Gone $dlg) 'the dialog is still visible'
+    Nat-Type $dlg $sampleWrap                                                    # typed, then cancelled
+    Nat-Press $dlg $IDCANCEL
+    Ck 'T5.14 cancel closes the dialog' (Nat-Closed $app $dlg) 'the dialog is still visible'
     Start-Sleep -Milliseconds 250
-    CkEq 'T5.18 ... the title is unchanged' $t0 (Title $app)
-    CkText 'T5.19 ... the text is unchanged' $x0 (Ed-Text $app)
+    CkEq 'T5.15 ... the title is unchanged' $t0 (Title $app)
+    CkText 'T5.16 ... the text is unchanged' $x0 (Ed-Text $app)
+    Cmd $app 'IDM_FILE_OPEN'
+    $dlg = Nat-Wait $app
+    Pst $dlg $WM_CLOSE 0 0                                                       # what the window's x / alt+f4 sends (Close-Dialogs relies on it)
+    Ck 'T5.17 WM_CLOSE on the dialog cancels it' (Nat-Closed $app $dlg) 'the dialog is still visible'
+    Start-Sleep -Milliseconds 250
+    Ck 'T5.18 ... the document is unchanged and the main window is enabled again' (((Title $app) -ceq $t0) -and [bool](WaitFor { [U]::Enabled($app.Main) } 2000)) ('title [' + (Title $app) + ']')
 
     Ed-Dirty $app 'x'
-    CkEq 'T5.20 an edit puts "*" in front of the title' '*multilingual-sample.txt - notepad mint' (Title $app)
+    CkEq 'T5.19 an edit puts "*" in front of the title' '*multilingual-sample.txt - notepad mint' (Title $app)
     Cmd $app 'IDM_FILE_OPEN'
     $box = Wait-Box $app $AppName
-    CkEq 'T5.21 open while modified asks (box title "notepad mint")' 'do you want to save changes to multilingual-sample.txt?' $box.Text
-    Ck 'T5.22 ... answer cancel (3rd button): the box closes' (Box-Press $box $BOX_BTN3) 'box still visible'
-    Start-Sleep -Milliseconds 300
-    Ck 'T5.23 ... no open dialog follows and the document stays modified' (-not [U]::FindTop($app.Pid, 'mp_file', 'open') -and (Ed-Modified $app)) 'an open dialog appeared or the modified flag was lost'
+    CkEq 'T5.20 open while modified asks (box title "notepad mint")' 'do you want to save changes to multilingual-sample.txt?' $box.Text
+    Ck 'T5.21 ... answer cancel (3rd button): the box closes' (Box-Press $box $BOX_BTN3) 'box still visible'
+    Start-Sleep -Milliseconds 700                                                # (the native dialog takes ~0.2 s to show: long enough to notice one that wrongly follows)
+    Ck 'T5.22 ... no open dialog follows and the document stays modified' (((Nat-Find $app) -eq 0) -and (Ed-Modified $app)) 'an open dialog appeared or the modified flag was lost'
     Cmd $app 'IDM_FILE_OPEN'
     $box = Wait-Box $app $AppName
-    Ck 'T5.24 ... asked again; answer "don''t save" (2nd button): the box closes' (Box-Press $box $BOX_BTN2) 'box still visible'
-    $dlg = Wait-Win $app 'mp_file' 'open'
-    Pass 'T5.25 ... the open dialog follows'
-    Set-Field $dlg $IDO.ID_NAME $sampleWrap
-    Press $dlg $IDOK
-    Ck 'T5.26 the file opens, the unsaved edit is discarded (title "wordwrap-sample.txt - notepad mint")' (Wait-Title $app 'wordwrap-sample.txt - notepad mint') ('title [' + (Title $app) + ']')
-    CkEdText 'T5.27 ... editor text equals the file' $app (Expected-Text $sampleWrap)
-    Ck 'T5.28 ... not modified' (-not (Ed-Modified $app)) 'EM_GETMODIFY is set'
+    Ck 'T5.23 ... asked again; answer "don''t save" (2nd button): the box closes' (Box-Press $box $BOX_BTN2) 'box still visible'
+    $dlg = Nat-Wait $app
+    Pass 'T5.24 ... the open dialog follows'
+    Nat-Type $dlg $sampleWrap
+    Nat-Press $dlg $IDOK
+    Ck 'T5.25 the file opens, the unsaved edit is discarded (title "wordwrap-sample.txt - notepad mint")' (Wait-Title $app 'wordwrap-sample.txt - notepad mint' 8000) ('title [' + (Title $app) + ']')
+    CkEdText 'T5.26 ... editor text equals the file' $app (Expected-Text $sampleWrap)
+    Ck 'T5.27 ... not modified' (-not (Ed-Modified $app)) 'EM_GETMODIFY is set'
+
+    # the path and the encoding the dialog hands over are what "save" writes back to (no dialog: the document has a file now)
+    $txtE = 'caf' + (Chars 0xE9) + ' ' + (Chars 0x65E5, 0x672C, 0x8A9E) + "`r`nsecond line"
+    $u8 = New-Object Text.UTF8Encoding($false)
+    $acpEnc = [Text.Encoding]::GetEncoding([int](Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage').ACP)     # what "ansi" means for the app (the system code page)
+    $bomU8 = [byte[]]@(0xEF, 0xBB, 0xBF); $bomU16 = [byte[]]@(0xFF, 0xFE)
+    $ansiBytes = [byte[]]@(0x61, 0x93, 0xFA, 0x96, 0x7B, 0x0D, 0x0A, 0x62)       # not valid utf-8, and every byte is defined in the common ansi code pages (shift-jis: two kanji), so the text survives the round trip
+    $specs = @(
+        @{ Label = 'a utf-8 with bom'; Name = 'ui_t5_bom.txt'; Raw = [byte[]]($bomU8 + $u8.GetBytes($txtE)); Text = $txtE; Bom = $bomU8; Enc = $u8 },
+        @{ Label = 'a utf-16 le'; Name = 'ui_t5_u16.txt'; Raw = [byte[]]($bomU16 + [Text.Encoding]::Unicode.GetBytes($txtE)); Text = $txtE; Bom = $bomU16; Enc = [Text.Encoding]::Unicode },
+        @{ Label = 'an ansi'; Name = 'ui_t5_ansi.txt'; Raw = $ansiBytes; Text = $null; Bom = [byte[]]@(); Enc = $acpEnc })
+    $k = 28
+    foreach ($s in $specs) {
+        $p = Join-Path $work $s.Name
+        [IO.File]::WriteAllBytes($p, $s.Raw)
+        Cmd $app 'IDM_FILE_OPEN'
+        $dlg = Nat-Wait $app
+        Nat-Type $dlg $p
+        Nat-Press $dlg $IDOK
+        Ck ('T5.' + $k + ' open ' + $s.Label + ' file: the title is its name') (Wait-Title $app ($s.Name + ' - notepad mint') 8000) ('title [' + (Title $app) + ']')
+        if ($s.Text -ne $null) { CkEdText ('T5.' + ($k + 1) + ' ... the editor text is the decoded text (no bom character)') $app $s.Text }
+        else { Ck ('T5.' + ($k + 1) + ' ... the editor text is read with the system code page (no replacement characters)') (-not (Ed-Text $app).Contains([string][char]0xFFFD)) 'the text holds U+FFFD: read as utf-8?' }
+        Ed-Dirty $app 'x'
+        $after = Ed-Text $app
+        Cmd $app 'IDM_FILE_SAVE'
+        CkBytes ('T5.' + ($k + 2) + ' ... save writes it back to the same file, same encoding') ([byte[]]($s.Bom + $s.Enc.GetBytes($after))) $p
+        [void](Snd (Get-Edit $app) $EM_SETMODIFY 0 0)                            # (a failed save must not leave a prompt in the way of the next open)
+        $k += 3
+    }
 }
 
 # ============================================================================================================ T6
-function Test-T6 {                                                               # save as
+function Test-T6 {                                                               # save as: the native comdlg32 dialog
     $app = Start-App
     $text1 = 'h' + (Chars 0xE9) + 'llo ' + (Chars 0x65E5, 0x672C, 0x8A9E) + ' ' + [char]::ConvertFromUtf32(0x1F600) + "`r`n" + 'second line'
     Ed-Set $app $text1
     $base = Join-Path $work 'ui_t6'
     $f = $base + '.txt'
+    $def = Default-Name $app                                                     # the unsaved document's name: what the dialog proposes
 
     Cmd $app 'IDM_FILE_SAVEAS'
-    $dlg = Wait-Win $app 'mp_file' 'save as'
-    Pass 'T6.1 save as dialog opens (class mp_file, title "save as")'
-    Set-Field $dlg $IDO.ID_NAME $base                                            # full path, no extension
-    Press $dlg $IDOK
-    Ck 'T6.2 no extension typed: ".txt" is appended, title becomes "ui_t6.txt - notepad mint"' (Wait-Title $app 'ui_t6.txt - notepad mint') ('title [' + (Title $app) + ']')
-    Ck 'T6.3 the file ui_t6.txt exists' (Test-Path -LiteralPath $f) ('missing: ' + $f)
-    CkBytes 'T6.4 the file holds the text as utf-8 without bom, CRLF line breaks' (U8 $text1) $f
-    Ck 'T6.5 saving cleared the modified flag' (-not (Ed-Modified $app)) 'EM_GETMODIFY is set'
+    $dlg = Nat-Wait $app
+    Pass 'T6.1 save as dialog opens (a native #32770 owned by the main window, with a file name field)'
+    $prop = Nat-Text $dlg
+    Ck 'T6.2 it proposes the default document name (mintXXXX, with or without ".txt")' (($def -ne $null) -and ($prop -cmatch ('^' + [regex]::Escape($def) + '(\.txt)?$'))) ('name field [' + (Show $prop) + '], default name [' + $def + ']')
+    Nat-Type $dlg $base                                                          # full path, no extension
+    Nat-Press $dlg $IDOK
+    Ck 'T6.3 no extension typed: ".txt" is appended, title becomes "ui_t6.txt - notepad mint"' (Wait-Title $app 'ui_t6.txt - notepad mint' 8000) ('title [' + (Title $app) + ']')
+    Ck 'T6.4 the dialog is gone' (Nat-Closed $app $dlg) 'the dialog is still visible'
+    Ck 'T6.5 the file ui_t6.txt exists' (Test-Path -LiteralPath $f) ('missing: ' + $f)
+    CkBytes 'T6.6 the file holds the text as utf-8 without bom, CRLF line breaks' (U8 $text1) $f
+    Ck 'T6.7 saving cleared the modified flag' (-not (Ed-Modified $app)) 'EM_GETMODIFY is set'
 
     $text2 = 'second version ' + (Chars 0x65E5)
     Ed-Set $app $text2
     Cmd $app 'IDM_FILE_SAVEAS'
-    $dlg = Wait-Win $app 'mp_file' 'save as'
-    CkEq 'T6.6 the file name box is prefilled with the current name' 'ui_t6.txt' (Get-Field $dlg $IDO.ID_NAME)
-    Set-Field $dlg $IDO.ID_NAME $f
-    Press $dlg $IDOK
-    $box = Wait-Box $app 'save as'
-    Ck 'T6.7 saving over an existing file asks "already exists. do you want to replace it?"' ($box.Text -like '*already exists. do you want to replace it?*') ('box text [' + (Show $box.Text) + ']')
-    Ck 'T6.8 answer no (2nd button): the box closes' (Box-Press $box $BOX_BTN2) 'box still visible'
+    $dlg = Nat-Wait $app
+    $prop = Nat-Text $dlg
+    Ck 'T6.8 the name field proposes the current file name (ui_t6, with or without ".txt")' ($prop -cmatch '^ui_t6(\.txt)?$') ('name field [' + (Show $prop) + ']')
+    Nat-Type $dlg $f
+    Nat-Press $dlg $IDOK
+    $box = Nat-Box $app $dlg
+    Ck 'T6.9 saving over an existing file asks first (a #32770 owned by the dialog)' ($box -ne 0) 'no confirmation appeared within 5 s'
+    if ($box) { Ck 'T6.10 answer no: the box closes' (Nat-Answer $box $IDNO) 'the box is still visible' }
+    Ck 'T6.11 ... the save as dialog stays open' ([U]::Visible($dlg)) 'the dialog went away'
     Start-Sleep -Milliseconds 250
-    Ck 'T6.9 ... the save as dialog stays open' ([U]::Visible($dlg)) 'the dialog went away'
-    CkBytes 'T6.10 ... and the file on disk is unchanged' (U8 $text1) $f 300
-    Press $dlg $IDOK
-    $box = Wait-Box $app 'save as'
-    Ck 'T6.11 ok again asks again; answer yes (1st button): the box closes' (Box-Press $box $IDOK) 'box still visible'
-    Ck 'T6.12 ... the dialog closes' (Gone $dlg) 'the dialog is still visible'
-    CkBytes 'T6.13 ... and the new text is written' (U8 $text2) $f
+    CkBytes 'T6.12 ... and the file on disk is unchanged' (U8 $text1) $f 300
+    Nat-Press $dlg $IDOK
+    $box = Nat-Box $app $dlg
+    Ck 'T6.13 ok again asks again; answer yes: the box closes' (($box -ne 0) -and (Nat-Answer $box $IDYES)) 'no confirmation appeared, or it is still visible'
+    Ck 'T6.14 ... the dialog closes' (Nat-Closed $app $dlg) 'the dialog is still visible'
+    CkBytes 'T6.15 ... and the new text is written' (U8 $text2) $f
 
-    # encoding + line ending dropdowns: an mp_btn that runs the MenuPopup loop; the pick is driven with posted key messages
+    # the encoding and the line ending are the document's own (format menu / status bar): the dialog has no pickers for them
     $text3 = 'h' + (Chars 0xE9) + "llo`r`nline two"
     Ed-Set $app $text3
+    Cmd $app 'IDM_ENC_UTF16LE'
+    Cmd $app 'IDM_EOL_LF'
     Cmd $app 'IDM_FILE_SAVEAS'
-    $dlg = Wait-Win $app 'mp_file' 'save as'
-    $encBtn = Ctl $dlg $IDO.ID_ENC
-    $eolBtn = Ctl $dlg $IDO.ID_EOL
-    CkEq 'T6.14 the encoding dropdown shows the document encoding' 'utf-8' ([U]::Text($encBtn))
-    CkEq 'T6.15 the line ending dropdown shows the document line ending' 'windows (crlf)' ([U]::Text($eolBtn))
-    $drive = $true
-    Press $dlg $IDO.ID_ENC
-    $pop = WaitFor { [U]::FindTop($app.Pid, 'mp_popup', '') } 2500
-    if (-not $pop) {
-        Skip 'T6.16 encoding dropdown: down x3 + enter picks "utf-16 le"' 'the dropdown popup (class mp_popup) did not appear after BM_CLICK on the encoding button'
-        Skip 'T6.17 line ending dropdown: down x2 + enter picks "unix (lf)"' 'popup not drivable (see T6.16)'
-        $drive = $false
-    } else {
-        for ($i = 0; $i -lt 3; $i++) { Pst $pop $WM_KEYDOWN $VK_DOWN 0 }
-        Pst $pop $WM_KEYDOWN $VK_RETURN 0
-        Ck 'T6.16 encoding dropdown: down x3 + enter picks "utf-16 le" (the button shows it)' ([bool](WaitFor { [U]::Text($encBtn) -ceq 'utf-16 le' } 2500)) ('button text [' + [U]::Text($encBtn) + ']')
-        [void](WaitFor { -not [U]::FindTop($app.Pid, 'mp_popup', '') } 2000)
-        Press $dlg $IDO.ID_EOL
-        $pop = WaitFor { [U]::FindTop($app.Pid, 'mp_popup', '') } 2500
-        if (-not $pop) { Fail 'T6.17 line ending dropdown: down x2 + enter picks "unix (lf)"' 'the popup did not appear'; $drive = $false }
-        else {
-            for ($i = 0; $i -lt 2; $i++) { Pst $pop $WM_KEYDOWN $VK_DOWN 0 }
-            Pst $pop $WM_KEYDOWN $VK_RETURN 0
-            Ck 'T6.17 line ending dropdown: down x2 + enter picks "unix (lf)" (the button shows it)' ([bool](WaitFor { [U]::Text($eolBtn) -ceq 'unix (lf)' } 2500)) ('button text [' + [U]::Text($eolBtn) + ']')
-        }
-    }
-    if ($drive) {
-        $base2 = Join-Path $work 'ui_t6b'
-        Set-Field $dlg $IDO.ID_NAME $base2
-        Press $dlg $IDOK
-        Ck 'T6.18 save: title becomes "ui_t6b.txt - notepad mint"' (Wait-Title $app 'ui_t6b.txt - notepad mint') ('title [' + (Title $app) + ']')
-        $exp16 = [byte[]]([byte[]]@(0xFF, 0xFE) + [Text.Encoding]::Unicode.GetBytes(($text3 -replace "`r`n", "`n")))
-        CkBytes 'T6.19 the file is utf-16 le: FF FE bom, LF only' $exp16 ($base2 + '.txt')
-    } else { Press $dlg $IDCANCEL }
+    $dlg = Nat-Wait $app
+    $base2 = Join-Path $work 'ui_t6b'
+    Nat-Type $dlg $base2
+    Nat-Press $dlg $IDOK
+    Ck 'T6.16 save as with the document set to utf-16 le + unix (lf): title becomes "ui_t6b.txt - notepad mint"' (Wait-Title $app 'ui_t6b.txt - notepad mint' 8000) ('title [' + (Title $app) + ']')
+    $exp16 = [byte[]]([byte[]]@(0xFF, 0xFE) + [Text.Encoding]::Unicode.GetBytes(($text3 -replace "`r`n", "`n")))
+    CkBytes 'T6.17 the file is utf-16 le: FF FE bom, LF only' $exp16 ($base2 + '.txt')
+
+    # a name that has an extension keeps it
+    $fLog = Join-Path $work 'ui_t6c.log'
+    Cmd $app 'IDM_FILE_SAVEAS'
+    $dlg = Nat-Wait $app
+    Nat-Type $dlg $fLog
+    Nat-Press $dlg $IDOK
+    Ck 'T6.18 a name with an extension keeps it (no ".txt" added): title "ui_t6c.log - notepad mint"' (Wait-Title $app 'ui_t6c.log - notepad mint' 8000) ('title [' + (Title $app) + ']')
+    Ck 'T6.19 ... the file ui_t6c.log exists, ui_t6c.log.txt does not' ((Test-Path -LiteralPath $fLog) -and -not (Test-Path -LiteralPath ($fLog + '.txt'))) 'wrong file names on disk'
+
+    # cancel: nothing is written, the document keeps its name and its modified state
+    Ed-Dirty $app 'y'
+    $t0 = Title $app
+    $noFile = Join-Path $work 'ui_t6_cancel'
+    Cmd $app 'IDM_FILE_SAVEAS'
+    $dlg = Nat-Wait $app
+    Nat-Type $dlg $noFile                                                        # typed, then cancelled
+    Nat-Press $dlg $IDCANCEL
+    Ck 'T6.20 cancel closes the dialog' (Nat-Closed $app $dlg) 'the dialog is still visible'
+    Start-Sleep -Milliseconds 300
+    Ck 'T6.21 ... no file is written' (-not (Test-Path -LiteralPath $noFile) -and -not (Test-Path -LiteralPath ($noFile + '.txt'))) 'a file was created'
+    CkEq 'T6.22 ... the title is unchanged' $t0 (Title $app)
+    Ck 'T6.23 ... and the document is still modified' (Ed-Modified $app) 'the modified flag was lost'
 }
 
 # ============================================================================================================ T7
@@ -1198,13 +1313,16 @@ function Test-T13 {                                                             
     $new = $script:n2
     Ck 'T13.3 file > new gives the new document its own default name (a later second, so a different one)' (($new -ne $null) -and ($new -cne $name)) ('before [' + $name + '] after [' + $new + ']')
 
-    Cmd $app 'IDM_FILE_SAVEAS'
-    $dlg = Wait-Win $app 'mp_file' 'save as'
-    CkEq 'T13.4 the save as dialog proposes the default name' $new (Get-Field $dlg $IDO.ID_NAME)
-    Press $dlg $IDOK                                                             # just accept it: ".txt" is added and the dialog's folder (the app's cwd = $work) is used
+    Cmd $app 'IDM_FILE_SAVEAS'                                                   # the native save as dialog (see the helpers above T5)
+    $dlg = Nat-Wait $app
+    $prop = Nat-Text $dlg                                                        # what the name field proposes
+    $esc = [regex]::Escape([string]$new)
+    Ck 'T13.4 the save as dialog proposes the default name (mintXXXX, with or without ".txt")' ($prop -cmatch ('^' + $esc + '(\.txt)?$')) ('name field [' + (Show $prop) + '], default name [' + $new + ']')
+    Nat-Type $dlg (Join-Path $work $prop)                                        # accept the proposal, but in a folder we know (a native dialog starts where windows remembers the last one)
+    Nat-Press $dlg $IDOK                                                         # ".txt" is added when the proposal came without one
     $f = Join-Path $work ($new + '.txt')
-    Ck 'T13.5 accepting it saves "mintXXXX.txt" and the title shows the file name' (Wait-Title $app ($new + '.txt - notepad mint')) ('title [' + (Title $app) + ']')
-    Ck 'T13.6 ... the file exists in the dialog''s folder' (Test-Path -LiteralPath $f) ('missing: ' + $f)
+    Ck 'T13.5 accepting it saves "mintXXXX.txt" and the title shows the file name' (Wait-Title $app ($new + '.txt - notepad mint') 8000) ('title [' + (Title $app) + ']')
+    Ck 'T13.6 ... the file exists in the folder that was picked' (Test-Path -LiteralPath $f) ('missing: ' + $f)
 }
 
 # ====================================================================================================== run them all
