@@ -8,12 +8,14 @@ comdlg32 (page setup / print only) are loaded at run time. one 32-bit exe runs o
 ## user requirements (verbatim intent)
 - name everywhere (title, about, version info, exe, appdata dir): **"notepad mint"**, lowercase aesthetic. exe = `build\notepad mint.exe`
 - function EXACTLY like notepad.exe (same menus/layout/status bar/dialog wording) + nice extras + custom theming
-- colors: accent `#9df5bd`, app/editor bg default `#161418`, text default `#ffffff`; user can change text + bg colors
-- default font consolas 13pt (fallback lucida console / courier new); better font+color settings ui than the stock dialog
+- colors: **two themes only, dark (default) and light**, switched from view > theme and saved as `[view] theme=dark|light`. mint accent `#9df5bd` in both; dark chrome `#161418` with a **black** editor,
+  light = win2000 gray chrome with a **white** editor. custom text / background colours were removed (maintainer's decision): `g_pf.fg / bg` come from the theme and are never saved
+- default font consolas 13pt (fallback lucida console / courier new); the font dialog is **font only** (face, size 10..96, bold, italic, preview, reset)
 - windows-2000-esque as far as possible: native frame, classic bevels, flat menu bar, sunken fields; dark (default) or light. **no size grip** on the status bar (removed on request): the window resizes by its frame
 - **no accent-colored window border** (frame border is a neutral dark gray)
 - **menu bar / popups / status bar use the editor font, 3pt smaller, never above 14pt** (`UiSetChromeFont`, `CHROME_PT_LESS`, `g_fontMenu`; the status bar and the menu bar share that one font object).
-  (the native title bar text is drawn by windows in the system caption font: it can't follow the editor font without a custom-drawn title bar)
+  the **title bar follows it too**: the caption is drawn by us in the client area (`src/frame.c`, `FRAME_CUSTOM` 1), title text in the accent colour while the window is active. (a native caption is drawn by windows
+  in the system caption font and can't follow the editor font; build with `/DFRAME_CUSTOM=0` via `tools\probe.bat` to get it back)
 - status bar like notepad: `ln, col | font size | line ending | encoding`; line ending + encoding selectable
 - handle ALL languages: utf-8/utf-16 (+bom), ansi, legacy code pages (reopen/save as), ime, rtl toggle, unicode control chars
 - **ctrl+plus / ctrl+minus / ctrl+wheel change the font SIZE** (not a percentage): steps along a ladder 10..96pt
@@ -26,7 +28,7 @@ comdlg32 (page setup / print only) are loaded at run time. one 32-bit exe runs o
 ```
 src/w32.h      hand-written win32 types/consts/prototypes (32-bit x86 layouts; PRINTDLGW packed 1)
 src/rt.asm     x86 masm: _memset/_memcpy/_memmove/_memcmp, __chkstk (esp must drop by exactly eax!), _mp_count_lf (sse2, no popcnt)
-src/mp.h       shared decls, palette (C_*), command ids (IDM_*), Prefs, DocState
+src/mp.h       shared decls, palette (C_* = runtime values of `g_pal`, never use them in static initialisers), command ids (IDM_*), Prefs, DocState
 src/util.c     mem/string/path helpers (+ Dbg() file logger in dbg builds)
 src/ui.c       bevel drawing, dwm dark frame, custom button class `mp_btn`, dialog scaffolding (DlgBase), MpAsk, fonts, dynamic dpi lookups
 src/menu.c     custom menu bar + popup engine with submenus (no native menus)
@@ -35,12 +37,16 @@ src/doc.c      DocRead/DocWrite: encoding detect, code page table, crlf normalis
 src/edit.c     native EDIT wrapper: create/recreate (word wrap), subclass, font+size ladder, logical line/col, word delete, goto, rtl
 src/main.c     entry `start`, main window, commands, file flow, settings, accelerators, command line
 src/about.c    about box + help topics
-src/find.c, filedlg.c, fontdlg.c, print.c   find/replace+goto, open/save/encoding dialogs, font&colors, print/page setup
+src/frame.c    the custom title strip (icon, title in the chrome font, min / max / close, hit testing, window menu)
+src/find.c (+ search.c: the pure, unit-tested search / replace-all code), filedlg.c, fontdlg.c, print.c   find/replace + go to, open / save as / encoding dialogs, font dialog, print / page setup
 src/notepad_mint.rc + .manifest   icon id 1, versioninfo, manifest (per-monitor-v2 dpi, supportedOS, asInvoker)
 build.bat      `build.bat` from the project root (x64-hosted x86 cl/ml/link via vcvarsamd64_x86; from git bash: `cmd.exe /c "<abs path>\build.bat"`).
                `dbg` arg = symbols + build\dbg.log tracing.
                `SRCS=...` env var overrides the c file list (interim builds)
-tools/         shot.ps1 (launch+keys+screenshot), crop.ps1, px.ps1, cc.bat (compile-check one file), cc_asm.bat, fonttest.*, layout_check/
+tools/         shot.ps1 (launch + keys / -Cmd + screenshot), crop.ps1, px.ps1, cc.bat (compile-check one file), cc_asm.bat, fonttest.*,
+               probe.bat (experimental build into build\probe, e.g. `/DFRAME_CUSTOM=0`), frame_test.ps1 (title strip: real mouse input), smoke.ps1 (ci smoke test),
+               check_imports.ps1 (kernel32 / user32 / gdi32 only), layout_check/ (w32.h vs the real sdk), linux_check.sh (syntax check on linux)
+tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `tests\unit\build.bat`), ui/ (message-driven gui tests), sample files
 ```
 
 ## decisions / design notes
@@ -60,7 +66,17 @@ tools/         shot.ps1 (launch+keys+screenshot), crop.ps1, px.ps1, cc.bat (comp
   saving to an 8-bit code page flags lossy conversion (no best-fit): the user is asked first.
 - rtl toggle = flip WS_EX_RTLREADING|WS_EX_RIGHT|WS_EX_LEFTSCROLLBAR on the edit; unicode control char table in main.c.
 - accelerators: ctrl+n, ctrl+shift+n (new window = CreateProcess self), ctrl+o/s/shift+s/p, ctrl+f/h/g, f3/shift+f3, f5, f1,
-  ctrl+(=,+,numpad+) bigger, ctrl+(-,numpad-) smaller, ctrl+(0,numpad0) reset. only translated for messages to the main window / its children.
+  ctrl+(=,+,numpad+) bigger, ctrl+(-,numpad-) smaller, ctrl+(0,numpad0) reset. only translated for messages to the main window, its children and the modeless
+  find dialog (so f3 / ctrl+g work from it, like notepad); modal dialogs run their own loop and never see them.
+- dialogs: `DlgRunModal` disables every live window of ours (owner + the modeless find dialog) and re-enables exactly those. the dialog fonts (`g_fontUI`) are rebuilt only on a dpi change
+  (the replaced pair is not deleted: an open find dialog may still hold it); a chrome font change only rebuilds `g_fontMenu`. dialog edits (`UiEdit`) are subclassed for ctrl+backspace (the stock
+  edit inserts a DEL character). known gap: a dialog dragged to a monitor with another dpi is not re-laid-out.
+- the font dialog lists only vector fonts (bitmap families like terminal / fixedsys are skipped) and, by default, only monospaced ones (probed by comparing the widths of "iiiiiiii" / "WWWWWWWW").
+- printing (`print.c`) runs the whole job inside the command handler: no abort dialog, the window can show "not responding" for a very large document. the native print / page setup dialogs stay light.
+- title strip (`frame.c`): the first attempt drew two title bars because the only `WM_NCCALCSIZE` sent by `CreateWindowExW` has `wParam` FALSE (the single-rect form) and nothing recalculated the frame until the first
+  resize. fix: `FrameNcCalc` handles both forms, and `mp_main` forces one more recalculation with `SetWindowPos(SWP_FRAMECHANGED)` right after creating the window. the sizing border stays the system's
+  (resize, aero snap, shadow), the strip answers HTCAPTION / HTTOP / HTTOPLEFT / HTTOPRIGHT, the three buttons are HTCLIENT (own mouse handling: no windows 11 snap-layout flyout on the maximize button).
+  verified with `tools\frame_test.ps1` (real mouse input: hit tests, maximize / restore, double click, drag, win+left snap, minimize, close).
 - file dialogs: custom dark dialogs (path edit, up, listbox, file name, type + encoding + line ending dropdowns made of mp_btn + MenuPopup). default ext .txt rule like notepad.
 - prefs: `%APPDATA%\notepad mint\settings.ini` (utf-16 ini so any font name works). window placement saved. new windows cascade.
 - dpi: manifest per-monitor-v2; everything scaled through `S()`; WM_DPICHANGED rebuilds fonts. win10-only dpi apis are looked up at run time.

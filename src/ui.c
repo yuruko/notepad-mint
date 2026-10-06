@@ -104,11 +104,11 @@ static HFONT Face(const WCHAR *face, int pt, int weight)
 }
 
 /* the dialog fonts (g_fontUI / g_fontUIB) are handed to controls with WM_SETFONT and stay in use for as long as a dialog
- * lives (the modeless find dialog outlives a format > font change), so they are only rebuilt when the dpi changes */
+ * lives (the modeless find dialog outlives a format > font change), so a chrome font change leaves them alone. a dpi
+ * change does rebuild them, and the replaced pair is deliberately NOT deleted: an open find dialog may still hold it
+ * (two small gdi objects per dpi change instead of dangling handles) */
 static void MakeDialogFonts(void)
 {
-    if (g_fontUI)   DeleteObject(g_fontUI);
-    if (g_fontUIB)  DeleteObject(g_fontUIB);
     g_fontUI   = Face(UI_FACE, UI_PT, FW_NORMAL);              /* dialogs */
     g_fontUIB  = Face(UI_FACE, UI_PT, FW_BOLD);
 }

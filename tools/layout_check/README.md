@@ -19,11 +19,10 @@ how it works
 gen.py parses w32.h and writes real_tab.c (includes windows.h) and w32_tab.c (includes only w32.h) with identical tables, and api_tab.c (the address of every prototype). cmp.c diffs the two tables and reads the log of the api link. what gen.py cannot parse stops the run, it is never skipped. a new function-like macro needs argument vectors in FUNC_MACROS (gen.py), else it is printed as `UNVERIFIED`.
 
 ci
-the windows job already loads the x86 toolchain (ilammy/msvc-dev-cmd, arch x86), so check.bat skips its own vcvars lookup. run it as a step of its own, a non-zero exit fails the job:
-    - name: layout check (w32.h against the sdk)
+the windows job already loads the x86 toolchain (ilammy/msvc-dev-cmd, arch x86), so check.bat skips its own vcvars lookup. it runs as a step of its own in .github/workflows/build.yml, a non-zero exit fails the job:
+    - name: layout check (w32.h vs the real sdk)
       shell: cmd
       run: tools\layout_check\check.bat
-(this step is not in .github/workflows/build.yml yet)
 
 negative test
 `python tools\layout_check\mkbad.py` writes build\layout_check\bad\w32.h with one wrong field order, one wrong constant and one wrong api arity. check.bat on that copy has to report all three and fail. `mkbad.py --all` writes bad\w32_all.h, which also breaks the other categories.
