@@ -217,7 +217,7 @@ static void BarLayout(void)
     HGDIOBJ of = SelectObject(dc, g_fontMenu);
     TEXTMETRICW tm;
     WCHAR buf[64];
-    int i, x = S(3);
+    int i, x = 0;                                        /* the first item starts at the left edge: no margin */
     GetTextMetricsW(dc, &tm);
     g_barH = tm.tmHeight + S(9);
     for (i = 0; i < (int)NBAR; i++) {
@@ -280,7 +280,7 @@ static void BarPaint(HWND h)
     for (i = 0; i < (int)NBAR; i++) {
         BOOL on = (i == g_open || i == g_kbd || i == g_hot);   /* open, keyboard-selected or hovered: the accent as the BACKGROUND */
         r.left = g_itemL[i]; r.right = g_itemL[i + 1];
-        r.top = S(1); r.bottom = rc.bottom - S(1);
+        r.top = 0; r.bottom = rc.bottom - S(1);                /* (no margin above the items either) */
         if (on) FillC(mdc, &r, C_ACCENT);
         TextC(mdc, g_ent[i].title, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE, on ? C_ON_ACCENT : C_TEXT);
     }
