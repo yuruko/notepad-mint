@@ -120,7 +120,7 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
     } else if (hot) {
         bg = C_ACCENT; fg = C_ON_ACCENT;
     }
-    FillC(dc, r, bg);
+    if (hot || down) FillC(dc, r, bg);                               /* a button at rest is transparent: the strip's fade shows through */
 
     pen = CreatePen(PS_SOLID, pw < 1 ? 1 : pw, fg);
     op = SelectObject(dc, pen);
@@ -154,8 +154,10 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
     DeleteObject(pen);
 }
 
-/* the strip's background: the face colour with a fade of the accent over it, 20% at the left edge down to 0% where the window buttons start
- * (one fill per distinct colour: at most 52) */
+/* the strip's background: the face colour with a fade of the accent over it, FADE_FROM % at the left edge down to FADE_TO % where the window
+ * buttons start, and FADE_TO % under the buttons (their normal state is transparent, so the strip reads as one piece). one fill per distinct colour */
+#define FADE_FROM 14
+#define FADE_TO   4
 static COLORREF Tint(COLORREF face, COLORREF acc, int a)         /* a = 0..255: how much of the accent */
 {
     int r = GetRValue(face) + (GetRValue(acc) - GetRValue(face)) * a / 255;
@@ -167,15 +169,15 @@ static COLORREF Tint(COLORREF face, COLORREF acc, int a)         /* a = 0..255: 
 static void FillStrip(HDC dc, int cw, int ch, int fadeEnd)
 {
     RECT r;
-    COLORREF face = C_FACE, last = face, c;
+    COLORREF base = Tint(C_FACE, C_ACCENT, FADE_TO * 255 / 100), last = base, c;
     int x, from = 0;
     r.left = 0; r.top = 0; r.right = cw; r.bottom = ch;
-    FillC(dc, &r, face);
+    FillC(dc, &r, base);
     if (fadeEnd > cw) fadeEnd = cw;
     for (x = 0; x <= fadeEnd; x++) {
-        c = x < fadeEnd ? Tint(face, C_ACCENT, 51 * (fadeEnd - x) / fadeEnd) : face;      /* 51 / 255 = 20% */
+        c = x < fadeEnd ? Tint(C_FACE, C_ACCENT, 255 * (FADE_TO * fadeEnd + (FADE_FROM - FADE_TO) * (fadeEnd - x)) / (100 * fadeEnd)) : base;
         if (c != last || x == fadeEnd) {
-            if (last != face) { r.left = from; r.right = x; FillC(dc, &r, last); }
+            if (last != base) { r.left = from; r.right = x; FillC(dc, &r, last); }
             from = x;
             last = c;
         }

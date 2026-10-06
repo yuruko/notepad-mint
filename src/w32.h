@@ -349,6 +349,11 @@ typedef struct {
 #define SIF_RANGE 0x0001
 #define SIF_PAGE 0x0002
 #define SIF_POS 0x0004
+#define SB_LINEUP 0
+#define SB_LINEDOWN 1
+#define SB_PAGEUP 2
+#define SB_PAGEDOWN 3
+#define SB_THUMBPOSITION 4
 #define SM_CXVSCROLL 2
 #define SM_CYHSCROLL 3
 #define SM_CYFRAME 33
@@ -850,6 +855,8 @@ API int      WINAPI AbortDoc(HDC);
 API COLORREF WINAPI SetDCBrushColor(HDC, COLORREF);
 API COLORREF WINAPI SetDCPenColor(HDC, COLORREF);
 API COLORREF WINAPI GetPixel(HDC, int, int);
+API HBITMAP  WINAPI CreateBitmap(int, int, UINT, UINT, const void *);
+API HBRUSH   WINAPI CreatePatternBrush(HBITMAP);
 
 /* mem* (provided by rt.asm) */
 void *memset(void *, int, size_t);

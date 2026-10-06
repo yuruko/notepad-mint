@@ -1,6 +1,6 @@
 # notepad mint
 
-free replacement for notepad.exe: dark (default) or light, mint / dark green accent, no ai / sign-in / telemetry. plain text only.
+free replacement for notepad.exe: dark (default) or light, a mint accent (a softer green in light), no ai / sign-in / telemetry. plain text only.
 written in raw c + **32-bit x86** masm. no crt, no libs, no windows.h (every win32 decl is in `src/w32.h`).
 exe imports only kernel32/user32/gdi32; dwmapi/uxtheme (dark frame, scrollbar themes), shell32 (drag & drop, the about link) and
 comdlg32 (open / save as, page setup, print) are loaded at run time. one 32-bit exe runs on 32-bit windows, 64-bit windows and arm.
@@ -9,18 +9,20 @@ comdlg32 (open / save as, page setup, print) are loaded at run time. one 32-bit 
 - name everywhere (title, about, version info, exe, appdata dir): **"notepad mint"**, lowercase aesthetic. exe = `build\notepad mint.exe`
 - function EXACTLY like notepad.exe (same menus/layout/status bar/dialog wording) + nice extras + custom theming
 - colors: **two themes only, dark (default) and light**, switched from view > theme and saved as `[view] theme=dark|light`. dark: mint accent `#9df5bd`, chrome `#161418`, **black** editor.
-  light: a **dark green accent `#0a552d`** (the title strip's green, a little darker; white text on it), one light face `#e4e1da` shared by the title strip, menu bar, status bar and dialogs, **white** editor.
-  (the face value is a guess at "the app background must match the status bar": every chrome part already used one colour, it was just too dark.)
+  light: a **softer, minty green accent `#2f7d58`** (white text on it; `#1f6a43` where it is text or a thin line on the face), one light face `#e4e1da` shared by the title strip, menu bar, status bar and dialogs, **white** editor.
+  (the face value is a guess at "the app background must match the status bar": every chrome part already used one colour, it was just too dark. the light accent went dark pine `#0a552d` -> `#2f7d58` on request: "more mint, less pine tree".)
   custom text / background colours were removed (maintainer's decision): `g_pf.fg / bg` come from the theme and are never saved
 - **hover = accent as the BACKGROUND** (with on-accent text), never the accent as text colour: menu bar items, popup items, status bar panels, push buttons, check / radio labels, the about link, the title strip's buttons.
-  **selected text and the caret use the accent too.** **one border only** between the menu bar and the editor and between the editor and the status bar (the editor's 2px sunken frame; the bars draw no line of their own)
+  **the caret uses the accent; selected text keeps windows' own selection colour** (an accent overpaint was tried and flickered). **no frame around the editor**: it fills the space between the menu bar and the status bar and the text
+  has an **8 px padding** inside it (96 dpi, scaled: `EDIT_PAD`)
 - default font consolas 13pt (fallback lucida console / courier new); the font dialog is **font only** (face, size 10..96, bold, italic, preview, reset)
 - windows-2000-esque as far as possible: native frame, classic bevels, flat menu bar, sunken fields; dark (default) or light. **no size grip** on the status bar (removed on request): the window resizes by its frame
 - **no accent-colored window border** (frame border is a neutral dark gray)
-- **menu bar / popups / status bar use the editor font, 3pt smaller, never above 14pt** (`UiSetChromeFont`, `CHROME_PT_LESS`, `g_fontMenu`; the status bar and the menu bar share that one font object).
-  the **title bar follows it too**: the caption is drawn by us in the client area (`src/frame.c`, `FRAME_CUSTOM` 1), title text in the accent colour while the window is active. (a native caption is drawn by windows
-  in the system caption font and can't follow the editor font; build with `/DFRAME_CUSTOM=0` via `tools\probe.bat` to get it back)
-- status bar like notepad: `ln, col | font size | line ending | encoding`; line ending + encoding selectable
+- **menu bar / popups / status bar / title strip use the editor font FACE at a static 10 pt** (`CHROME_PT`, `UiSetChromeFont`, `g_fontMenu`; the bars share that one font object; zooming the editor never changes them).
+  the **title strip** is drawn by us in the client area (`src/frame.c`, `FRAME_CUSTOM` 1): the title in plain white (dark) / black (light) while the window is active, over a fade of the accent (14% at the left edge down to 4% where the window buttons start, 4% under them: the buttons are transparent at rest).
+  (a native caption is drawn by windows in the system caption font; build with `/DFRAME_CUSTOM=0` via `tools\probe.bat` to get it back)
+- status bar: `line:column | size pt | crlf / lf / cr | encoding` (short texts: `utf-8 bom`, `utf-16 le` ...); the size / line ending / encoding panels are clickable (arrow cursor, not a hand), their hover is the accent background.
+  **no panel is ever cut off or ellipsized**: each is as wide as the widest text it can normally show (or, for a long code page name, the text it shows right now) and the window's minimum width / `AppUpdateStatus` keep the window that wide
 - handle ALL languages: utf-8/utf-16 (+bom), ansi, legacy code pages (reopen/save as), ime, rtl toggle, unicode control chars
 - **ctrl+plus / ctrl+minus / ctrl+wheel change the font SIZE** (not a percentage): steps along a ladder 10..96pt
   (1pt steps up to 20, then 2, 4, 6, 8). **ctrl+0 returns to the size picked in the font dialog** (default 13). font size range 10..96pt everywhere.
@@ -39,6 +41,7 @@ src/menu.c     custom menu bar + popup engine with submenus (no native menus)
 src/status.c   custom status bar (clickable size/eol/enc panels, widths measured from the chrome font; no size grip)
 src/doc.c      DocRead/DocWrite: encoding detect, code page table, crlf normalising
 src/edit.c     native EDIT wrapper: create/recreate (word wrap), subclass, font+size ladder, logical line/col, word delete, goto, rtl
+src/sbar.c     the classic scrollbars in the palette, laid over the native bars of the editor / help edit / list boxes
 src/main.c     entry `start`, main window, commands, file flow, settings, accelerators, command line
 src/about.c    about box + help topics
 src/frame.c    the custom title strip (icon, title in the chrome font, min / max / close, hit testing, window menu)
@@ -47,7 +50,7 @@ src/notepad_mint.rc + .manifest   icon id 1, versioninfo, manifest (per-monitor-
 build.bat      `build.bat` from the project root (x64-hosted x86 cl/ml/link via vcvarsamd64_x86; from git bash: `cmd.exe /c "<abs path>\build.bat"`).
                `dbg` arg = symbols + build\dbg.log tracing.
                `SRCS=...` env var overrides the c file list (interim builds)
-tools/         shot.ps1 (launch + keys / -Cmd + screenshot), crop.ps1, px.ps1, cc.bat (compile-check one file), cc_asm.bat, fonttest.*,
+tools/         shot.ps1 (launch + keys / -Cmd + screenshot on the real desktop), pw_shot.ps1 (screenshot on the private desktop: safe while you work), crop.ps1, px.ps1, cc.bat (compile-check one file), cc_asm.bat, fonttest.*,
                probe.bat (experimental build into build\probe, e.g. `/DFRAME_CUSTOM=0`), frame_test.ps1 (title strip: real mouse input), smoke.ps1 (smoke test, used by verify.bat and the parked ci workflow),
                check_imports.ps1 (kernel32 / user32 / gdi32 only), layout_check/ (w32.h vs the real sdk), linux_check.sh (syntax check on linux)
 tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `tests\unit\build.bat`), ui/ (message-driven gui tests), sample files
@@ -56,13 +59,12 @@ tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `
 ## decisions / design notes
 - edit control = native EDIT (multiline, ES_NOHIDESEL). text kept utf-16 + CRLF inside; DocRead normalises, DocWrite converts.
   word wrap toggle = recreate the edit control (like notepad). colors via WM_CTLCOLOREDIT.
-- **accent selection** (`edit.c` `SelPaint` / `PaintSelection` / `RepaintSel`): the stock control can only draw the system selection colour, so while a selection exists `WM_PAINT` is answered by us:
-  the control paints itself into an off-screen bitmap (`WM_PRINTCLIENT`), then every selected run is overpainted in the accent (fill + on-accent text, positions from `EM_POSFROMCHAR`, tabs and partial lines included),
-  and the bitmap is blitted once (no flicker). the stock highlight is one pixel wider than its text, so a run's fill is extended by one pixel when the pixel next to it in the captured paint still has the system highlight colour
-  (`GetPixel` / `GetSysColor(COLOR_HIGHLIGHT)`): without that a 1px blue line stayed at the end of every run (found in a screenshot, checked by counting `#0078d7` pixels: 0 left in light / dark, wrap on / off, horizontal scroll, tabs, mouse drag).
-  the stock control paints a *changed* selection directly (it never goes through our `WM_PAINT`), so `RepaintSel` forces a repaint after every message that can change the selection.
-  **limit:** a line that contains right-to-left text keeps the stock blue (its runs are not contiguous on screen), and so does the whole editor while `WS_EX_RTLREADING` is on. single-line edits in dialogs keep the stock colour too.
-- **accent caret** (`AccentCaret`): a bitmap caret whose bits are `(editor background xor accent)`, because the caret is drawn with xor: on the editor background it comes out exactly as the accent (measured `#0a552d` in light).
+- **selection = windows' default highlight.** an accent overpaint (answering `WM_PAINT` while a selection exists, painting the control into a bitmap via `WM_PRINTCLIENT` and painting the selected runs over it) was built,
+  verified with screenshots and then removed on request: it flickered, because the stock control paints a *changed* selection straight onto the window (not through `WM_PAINT`), so every selection change needed a forced repaint.
+  (what it needed on the way: the stock highlight is one pixel wider than its text, found by counting `#0078d7` pixels in a screenshot.)
+- **editor padding** (`edit.c` `EditPad`): no frame; the formatting rectangle is the client area shrunk by `EDIT_PAD` (8 px) on all four sides (`EM_SETRECTNP` replaces the margins, so left / right are in it; `EM_SETMARGINS` keeps them as well).
+  the control resets that rectangle to the client area on every size change, so `EditPad` runs after `WM_SIZE` / `WM_SETFONT` too. the scrollbars sit at the outer edges of the editor window (they are the control's non-client area), the padding is inside them.
+- **accent caret** (`AccentCaret`): a bitmap caret whose bits are `(editor background xor accent)`, because the caret is drawn with xor: on the editor background it comes out exactly as the accent (measured: exactly the accent in both themes).
   re-made on `WM_SETFOCUS`, `WM_SETFONT` and when the theme changes (`EditApplyColors`).
 - **dirty state by content** (`main.c` `g_clean`, `CleanMark`, `TextChanged`, `AppIsDirty`): the stock modified flag is sticky, so typing and deleting again, or undoing back to the original, would still ask to save.
   the clean state (what was loaded / saved, or blank for a new document) is kept as length + two 32-bit hashes (no 64-bit math, nothing is copied for a big file); a compare only happens when the control's flag is set and the length is back to the clean one.
@@ -101,9 +103,14 @@ tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `
 - prefs: `%APPDATA%\notepad mint\settings.ini` (utf-16 ini so any font name works). window placement saved. new windows cascade.
 - dpi: manifest per-monitor-v2; everything scaled through `S()`; WM_DPICHANGED rebuilds fonts. win10-only dpi apis are looked up at run time.
 - accent usage: menu bar / popup items, status bar panels, push buttons and check / radio labels fill with the accent (text in `C_ON_ACCENT`) when hovered or keyboard-selected; the default button frame is the accent.
-  light mode: accent = accentFg = `#0a552d` (text on the light face and lines use the same green, onAccent is white). NOT the window border.
-- scrollbars: dark keeps `SetWindowTheme(h, L"DarkMode_Explorer", NULL)` (thin dark bars, arrows only on hover); light uses `SetWindowTheme(h, L"", L"")` = the **classic scrollbar with always visible arrow buttons**
-  (the explorer-themed light bar has no arrows at all; the maintainer likes the classic one: keep). both in `DarkScroll` (ui.c), re-applied on a theme switch.
+  light mode: accent `#2f7d58` as a fill (onAccent white), accentFg `#1f6a43` where it is text / a thin line on the face (the about link, check marks, the default button frame). NOT the window border.
+- **scrollbars = classic ones in our palette, in both themes** (`src/sbar.c`, class `mp_sbar`). windows draws a control's own bars with fixed system colours and its themed bars are thin with hidden arrows, so the native bars stay (they keep ALL the logic:
+  range, page, position, keyboard, wheel, `UpdateBars` showing / hiding them) but are set to the classic theme (`DarkScroll`: `SetWindowTheme(h, L"", L"")`, a fixed 17 px strip) and **a window of ours is laid over each strip**: square arrow buttons with a raised bevel
+  and a small triangle, a 1px dithered track, a raised thumb (min length = the strip width), a corner square, double buffered, `WM_PRINTCLIENT` aware. the target has `WS_CLIPSIBLINGS`, so whatever windows draws into the native strip is clipped away
+  under the overlay (measured: only palette colours in the strip, in a screenshot with the native bar scrolling). geometry = the target's window rect against its client rect (exact at any dpi, works for `WS_EX_LEFTSCROLLBAR`); a hidden native bar (style cleared) = a hidden overlay.
+  the overlay reads `GetScrollInfo` live and drives the target with the messages its own bar would send: lines / pages by `WM_VSCROLL` / `WM_HSCROLL`; a thumb drag by `EM_LINESCROLL` (edit) / `LB_SETTOPINDEX` (list box), because the 16 bit position of
+  `WM_VSCROLL` can't carry a document of more than 65535 lines (tested with 70000); the horizontal bar is in pixels (`SB_THUMBPOSITION`). the wheel over a bar goes to the target, the bars never take the focus. every overlay polls its target every 40 ms
+  (so the dialog controls need no hooks); the editor's subclass also calls `SbarSync` after every message that can scroll. users: the editor, the help topics edit, the font list, the code page list. tested by `T18` (messages) and by screenshots.
 - dialogs and message boxes carry the app icon (`DlgOpen` sends `WM_SETICON` big + small from resource 1). the about box has a link, "yuru.be" (`about.c`, class `mp_link`, `ShellExecuteW` found with `GetProcAddress`)
   that opens https://yuru.be (hover = accent background like every other control).
 - fonts: dialogs use segoe ui 9pt, DEFAULT_CHARSET. **measured on this ja-JP machine: tahoma + microsoft sans serif draw '\' as a yen sign
@@ -122,14 +129,14 @@ every menu item is implemented (no placeholders left, `src/stubs.c` is gone). th
 how each part was verified (everything below ran locally; `tools\verify.bat ui` repeats all of it except the title strip and the screenshots):
 | what | how | result |
 |---|---|---|
-| build | `build.bat`, log scanned for warnings | clean, 187 kb |
-| imports | `tools\check_imports.ps1` (reads the pe import table) | kernel32 / user32 / gdi32 only, 158 functions (comdlg32 / shell32 / uxtheme / dwmapi are loaded at run time) |
-| `src/w32.h` against the real sdk | `tools\layout_check` (two translation units + a linker pass; fails on a broken copy: tested) | 34 structs, 263 fields, 448 constants, 140 macros, 54 typedefs, 192 api prototypes: 0 mismatches |
-| doc / search / util logic | `tests\unit` (no crt, like the app) | 375 checks: encodings x line endings round trips, bom, utf-16 without bom, invalid utf-8, lossy writes, 1 mb round trips, find / replace-all, wildcard, paths, default name. 1 skipped (accented latin needs cp 1252, this box is cp 932) |
-| dialogs and commands | `tests\ui\ui_test.ps1`: drives the real exe with window messages on a private desktop (nothing shows, no keystroke can leak) | 247 checks (T1-T13, T15-T17): startup decode, find (case, wrap, up / down, cannot find), replace / replace all (one undo step), go to, **open and save as through the native comdlg32 dialogs** (the `#32770` windows are driven by messages, no dialog text is asserted: open / cancel / missing file / dirty prompt, utf-8 / utf-16 / ansi round trips, `.txt` rule, overwrite prompt yes / no, encoding and line ending from the format menu, start folder), reopen with encoding, theme (settings + pixels), font dialog (clamps, presets, reset), about / help / page setup, big file, exit prompts, default name, **scrollbars only when needed (T15: empty / wide / tall / both / wrap on / off)**, **dirty state by content (T16: type + delete, undo back, eol change and back, close prompt only for a real change)**, **the about link (T17: control, text, place)**. 1 skipped (editor focus after a dialog needs a visible desktop; it passed in an earlier visible run). the test exe copy is named `mint_ui_test.exe` so the native dialogs' per-exe-name "last folder" registry entry of the real app is not touched |
+| build | `build.bat`, log scanned for warnings | clean, 188 kb (192,512 bytes) |
+| imports | `tools\check_imports.ps1` (reads the pe import table) | kernel32 / user32 / gdi32 only, 159 functions (comdlg32 / shell32 / uxtheme / dwmapi are loaded at run time) |
+| `src/w32.h` against the real sdk | `tools\layout_check` (two translation units + a linker pass; fails on a broken copy: tested) | 34 structs, 263 fields, 454 constants, 140 macros, 54 typedefs, 194 api prototypes: 0 mismatches |
+| doc / search / util logic | `tests\unit` (no crt, like the app) | 390 checks (the short status bar names included): encodings x line endings round trips, bom, utf-16 without bom, invalid utf-8, lossy writes, 1 mb round trips, find / replace-all, wildcard, paths, default name. 1 skipped (accented latin needs cp 1252, this box is cp 932) |
+| dialogs and commands | `tests\ui\ui_test.ps1`: drives the real exe with window messages on a private desktop (nothing shows, no keystroke can leak) | 275 checks (T1-T13, T15-T19): startup decode, find (case, wrap, up / down, cannot find), replace / replace all (one undo step), go to, **open and save as through the native comdlg32 dialogs** (the `#32770` windows are driven by messages, no dialog text is asserted: open / cancel / missing file / dirty prompt, utf-8 / utf-16 / ansi round trips, `.txt` rule, overwrite prompt yes / no, encoding and line ending from the format menu, start folder), reopen with encoding, theme (settings + pixels), font dialog (clamps, presets, reset), about / help / page setup, big file, exit prompts, default name, **scrollbars only when needed (T15: empty / wide / tall / both / wrap on / off)**, **dirty state by content (T16: type + delete, undo back, eol change and back, close prompt only for a real change)**, **the about link (T17: control, text, place)**, **the classic scrollbars (T18: overlays follow the native bars in every T15 scenario, exact geometry, arrow / page / thumb / wheel by mouse messages, a 70000 line thumb drag, palette pixels in both themes)**, **the chrome (T19: no editor frame, 8 px padding, static chrome font under zoom, title strip fade pixels in both themes)**. 1 skipped (editor focus after a dialog needs a visible desktop; it passed in an earlier visible run). the test exe copy is named `mint_ui_test.exe` so the native dialogs' per-exe-name "last folder" registry entry of the real app is not touched |
 | title strip | `tools\frame_test.ps1`: real mouse input on the real desktop | 18 checks (hit tests, maximize / restore with the same size back, double click, drag, win+left snap, window menu, minimize, close): all pass on the final exe (rerun 2026-10-06 after the light theme / native dialog batch). needs the desktop to itself: three runs made while someone was using the mouse / keyboard failed at random (the last one 7 of 18, passed untouched) |
 | looked at in screenshots | dark and light main window, find, replace, go to, native open / save as, font, about, menus, rtl, new-window cascade, 50 mb file | as intended |
-| light palette, hover, single border, accent selection / caret, scrollbars (2026-10-06 batch) | `tools\shot.ps1` on the real desktop with real keys and a real mouse drag; the pixels were measured with python / PIL | light accent `#0a552d` and face `#e4e1da` as designed; hover = accent background on menu bar, popups, status panels, buttons, check / radio labels, about link; one border line under the menu / above the status bar; the caret pixel is exactly the accent on the editor background (a white inverse bar inside a selection); selection in the accent with partial lines, tabs, word wrap on, horizontal scroll and a mouse drag (held and released): **0 stock-blue `#0078d7` pixels left** after the 1 px fix; runtime theme switch dark -> light -> dark re-themes the scrollbars (classic with arrows in light, thin in dark) and the selection / caret; dialogs carry the app icon |
+| light palette, hover, padding, status bar, title fade, classic scrollbars (2026-10-06 batches) | `tools\shot.ps1` on the real desktop (real keys, a real mouse drag, real dialogs), `tools\pw_shot.ps1` on the private desktop, pixels measured with python / PIL | light accent `#2f7d58` / `#1f6a43` and face `#e4e1da` as designed; hover = accent background on menu bar, popups, status panels, buttons, check / radio labels, about link; the caret pixel is exactly the accent; default (blue) selection in light / dark; 8 px padding inside the editor, no frame; status bar `3:15 | 13 pt | crlf | utf-8` in the 10 pt chrome font; title strip fade 14% -> 4% accent with white / black text; **classic scrollbars over the native ones in the editor, the help text and both dialog lists**: only palette colours in the strip (native bar not showing through), dark and light, wrap on / off, corner square; runtime theme switch re-themes them; dialogs carry the app icon |
 | ctrl+backspace / ctrl+delete, rtl toggle, new window cascade, settings.ini round trip | by hand with `tools\shot.ps1` | work |
 | print | the page wrap logic was property tested against a reference model (6.9 m cases); page setup opens and closes (gui test) | **no job was ever sent to a printer or pdf driver**: unverified |
 | about link | `T17` checks the control (class, text, place); the hover look was seen in a screenshot | **the click was never tried** (it opens the default browser): unverified |
@@ -139,6 +146,8 @@ needs no `WM_CHARTOITEM` handler, and Enter on a focused non-default button does
 
 ## tooling quirks
 - RunBash: don't put powershell code in a bash heredoc (gets routed to powershell and breaks). use the Write tool for files.
+- `tools\pw_shot.ps1` takes a PrintWindow screenshot on the gui tests' private desktop (`-File -Theme -Cmds -Sel -Text -Out`): nothing shows, no foreground / keyboard / mouse is used, so it is safe while the user works; it cannot show real hover,
+  the caret blink or native dialogs. use it first, `shot.ps1` only when the real desktop is needed.
 - `cmd.exe /c build.bat` needs the absolute path. screenshots: tools\shot.ps1 (CopyFromScreen of the dwm frame bounds; forces the window to the foreground
   with AttachThreadInput; the keys go to the real foreground window, so runs are flaky if something steals focus).
 - `tools\shot.ps1` and `tools\frame_test.ps1` steal the foreground (and the mouse): the user's own typing can land in the test window (it happened: stray text showed up in the editor).

@@ -223,14 +223,13 @@ void DarkFrame(HWND h, int active)
     pDwmSet(h, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof corner);
 }
 
-/* dark: the dark explorer scrollbar (thin, arrows only while the mouse is over it). light: visual styles off for this
- * window (empty theme names), which gives the classic scrollbar with its arrow buttons ALWAYS visible: windows 11's themed
- * scrollbars, the default one as well as the explorer one, are thin and hide their arrows until the mouse is over them */
+/* the scrollbars of a control: visual styles off for it (empty theme names) = the classic native bar with a fixed 17 px strip and its
+ * arrow buttons always visible (windows 11's themed bars are thin and hide their arrows), and sbar.c covers that strip with our own
+ * classic bar in the palette: the native one keeps doing the work, ours is what you see. safe to call again (a theme switch) */
 void DarkScroll(HWND h)
 {
-    if (!pSetTheme) return;
-    if (g_theme == THEME_DARK) pSetTheme(h, L"DarkMode_Explorer", NULL);
-    else pSetTheme(h, L"", L"");
+    if (pSetTheme) pSetTheme(h, L"", L"");
+    SbarAttach(h);
 }
 
 void RegClass(const WCHAR *name, WNDPROC proc, UINT style, HBRUSH bg)

@@ -101,6 +101,7 @@ static void UpdateBars(void)
     SendMessageW(g_edit, WM_SETREDRAW, TRUE, 0);
     if (BARS(g_edit) != before) RedrawWindow(g_edit, NULL, NULL, RDW_INVALIDATE | RDW_FRAME);   /* only when a bar really came or went */
     g_inBars = 0;
+    SbarSync(g_edit);                             /* the classic bars over the native ones show / hide with them */
 }
 
 /* ----------------------------------------------------- text buffer access - */
@@ -518,6 +519,18 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         break;
     }
     if (m == WM_SETFOCUS || m == WM_SETFONT) AccentCaret(h);    /* the control has just made its own caret: swap in the accent one */
+    if (!g_inBars) switch (m) {                                 /* anything that can scroll the text or change a native bar: the classic bars over them follow at once (they poll too; not while UpdateBars shows the native horizontal bar for a moment to probe it: the overlay must not flash) */
+    case WM_KEYDOWN: case WM_CHAR: case WM_MOUSEWHEEL: case WM_VSCROLL: case WM_HSCROLL: case WM_SIZE: case WM_SETTEXT:
+    case WM_PASTE: case WM_CUT: case WM_CLEAR: case WM_UNDO: case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_TIMER: case WM_SETFONT:
+        SbarSync(h);
+        break;
+    case WM_MOUSEMOVE:
+        if (w & 1) SbarSync(h);                                 /* dragging a selection past the edge scrolls */
+        break;
+    default:
+        if (m >= 0x00B0 && m <= 0x00D8) SbarSync(h);            /* EM_* */
+        break;
+    }
     switch (m) {                                                /* anything that can move the caret / change the text */
     case WM_KEYDOWN: case WM_KEYUP: case WM_CHAR:
     case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_TIMER:
@@ -538,7 +551,7 @@ HWND EditCreate(HWND parent)
 {
     HWND old = g_edit, e;
     WCHAR *text = NULL;
-    DWORD s = 0, en = 0, st = WS_CHILD | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_NOHIDESEL;
+    DWORD s = 0, en = 0, st = WS_CHILD | WS_CLIPSIBLINGS | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_NOHIDESEL;
     LONG_PTR ex = 0;
     int mod = 0, focus = 0, x = 0, y = 0, w = 0, h = 0;
 
@@ -579,7 +592,8 @@ HWND EditCreate(HWND parent)
     UpdateBars();                                   /* before it is shown: no flash of empty scrollbars */
     EditScrollSoon();
     ShowWindow(e, SW_SHOW);
-    if (old) DestroyWindow(old);
+    SbarSync(e);
+    if (old) { SbarDetach(old); DestroyWindow(old); }
     if (focus || !old) SetFocus(e);
     return e;
 }

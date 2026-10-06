@@ -5,8 +5,8 @@ a free, dark replacement for `notepad.exe`: plain text only. no ai, no sign-in, 
 - written in raw c and **32-bit x86 assembly**. no crt, no libraries, no `windows.h`: every win32 declaration is hand-written in `src/w32.h`
   (checked against the real sdk by `tools/layout_check`). the exe imports only kernel32 / user32 / gdi32 (everything else is loaded at run time).
 - one small 32-bit exe runs on 32-bit windows, 64-bit windows and windows on arm.
-- behaves like notepad (same menus, status bar and wording) plus: a dark theme (the default, mint accent `#9df5bd`) and a light one (dark green accent `#0a552d`);
-  hover, the selection and the caret use the accent; title bar, menu bar and status bar in the editor's own font (3 pt smaller); ctrl+plus / ctrl+minus / ctrl+0 font-size zoom (10-96 pt);
+- behaves like notepad (same menus, status bar and wording) plus: a dark theme (the default, mint accent `#9df5bd`) and a light one (a softer green accent `#2f7d58`);
+  hover and the caret use the accent; classic style scrollbars in both themes' colours; an 8 px padding around the text; title bar (white / black over a soft accent fade), menu bar and status bar in the editor's font face at a fixed 10 pt, the status bar compact (`12:5`, `crlf`, `utf-8 bom`) and never cut off; ctrl+plus / ctrl+minus / ctrl+0 font-size zoom (10-96 pt);
   line ending and encoding pickers (format menu, status bar); utf-8 / utf-16 / legacy code pages; right-to-left toggle; unicode control characters; drag and drop; per-monitor dpi;
   an unsaved document is called `mintXXXX` (4 characters of 0-9 a-z from the date and time) instead of "untitled"; "modified" means *different from the file* (type and delete again, or undo back, is not a change).
 
@@ -35,7 +35,7 @@ needs visual studio's c++ build tools (x86 target) and the windows sdk (python 3
     tools\verify.bat frame    ... plus the title strip test (tools\frame_test.ps1: real mouse input, it moves the mouse for a few seconds)
 
 github ci is switched off (only the cloud agent needs it): the workflow with the same steps (minus the gui and title strip tests) is parked as `.github/workflows/build.yml.disabled`, rename it to `build.yml` to turn it on.
-`tools\` also has `shot.ps1` (launch, send keys or a menu command, screenshot), `cc.bat` (compile-check one file), `probe.bat` (experimental build) and `make_icon.ps1` (builds the icon).
+`tools\` also has `pw_shot.ps1` (screenshot on a private desktop: nothing shows), `shot.ps1` (launch, send keys / a menu command / a mouse drag, screenshot on the real desktop), `cc.bat` (compile-check one file), `probe.bat` (experimental build) and `make_icon.ps1` (builds the icon).
 
 ## notes
 

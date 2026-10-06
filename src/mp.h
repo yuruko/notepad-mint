@@ -131,7 +131,10 @@ int   TextW(HDC dc, const WCHAR *s, int n);
 void  Tri(HDC dc, int x, int y, int sz, int dir, COLORREF c);  /* dir: 0 right, 1 down */
 void  CheckGlyph(HDC dc, int x, int y, COLORREF c);
 void  DarkFrame(HWND h, int active);
-void  DarkScroll(HWND h);
+void  DarkScroll(HWND h);                      /* the control's scrollbars: native ones in the classic style, covered by our own (sbar.c) */
+void  SbarAttach(HWND target);                  /* (DarkScroll calls it) overlays for the target's native bars; the target gets WS_CLIPSIBLINGS */
+void  SbarSync(HWND target);                    /* follow the target's native bars now (they are also polled) */
+void  SbarDetach(HWND target);                  /* the target is being replaced */
 void  RegClass(const WCHAR *name, WNDPROC proc, UINT style, HBRUSH bg);
 
 DlgBase *DlgFromHwnd(HWND h, UINT m, LPARAM l);

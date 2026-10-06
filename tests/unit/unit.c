@@ -619,6 +619,27 @@ static void TestEncList(void)
     }
     Str(L"g_eolName crlf", g_eolName[EOL_CRLF], L"windows (crlf)");
     Str(L"g_eolName lf", g_eolName[EOL_LF], L"unix (lf)");
+    for (i = 0; i < EOL_COUNT; i++) {
+        wsprintfW(name, L"g_eolShort[%d] \"%s\" is lowercase and shorter than the full name", i, g_eolShort[i]);
+        Want(g_eolShort[i][0] && Lower(g_eolShort[i]) && wlen(g_eolShort[i]) < wlen(g_eolName[i]), L"it isn't", 0, 0);
+        Done(name);
+    }
+    Str(L"g_eolShort crlf", g_eolShort[EOL_CRLF], L"crlf");
+    Str(L"g_eolShort lf", g_eolShort[EOL_LF], L"lf");
+    Str(L"g_eolShort cr", g_eolShort[EOL_CR], L"cr");
+    for (i = 0; i < ENC_COUNT; i++) {
+        wsprintfW(name, L"g_encShort[%d] \"%s\" is lowercase and no longer than the full name", i, g_encShort[i]);
+        Want(g_encShort[i][0] && Lower(g_encShort[i]) && wlen(g_encShort[i]) <= wlen(g_encName[i]), L"it isn't", 0, 0);
+        Done(name);
+    }
+    EncShort(ENC_UTF8BOM, lab, COUNTOF(lab));
+    Str(L"encshort utf-8 with bom", lab, L"utf-8 bom");
+    EncShort(ENC_UTF16LE, lab, COUNTOF(lab));
+    Str(L"encshort utf-16 le", lab, L"utf-16 le");
+    EncShort(1252, lab, COUNTOF(lab));
+    Str(L"encshort 1252 = the code page name", lab, L"windows-1252");
+    EncShort(12345, lab, COUNTOF(lab));
+    Str(L"encshort a code page the table doesn't know", lab, L"cp 12345");
 
     Want(n > ENC_COUNT && n <= 512, L"count %d", n, 0);
     Done(L"enclistcount = the unicode / ansi entries + a code page table");

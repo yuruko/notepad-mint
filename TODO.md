@@ -14,7 +14,7 @@ and what was never verified; this file is what is still open, plus the rules for
   (see `UiInit` in `ui.c`). win10-only apis must be looked up at run time too (see `UiDpiForWindow`).
 - **all user-visible text is lowercase** (labels, buttons, titles, messages).
 - dpi: coordinates you hand to the ui helpers (`UiLabel/UiEdit/UiButton/DlgFrame/DlgOpen`) are 96-dpi pixels; any raw pixel math goes through `S()`.
-- fonts: dialogs use `g_fontUI` (segoe ui 9pt, `DEFAULT_CHARSET`), the main window chrome (menu bar, status bar, title strip) uses `g_fontMenu` = the editor font minus `CHROME_PT_LESS` (3) pt.
+- fonts: dialogs use `g_fontUI` (segoe ui 9pt, `DEFAULT_CHARSET`), the main window chrome (menu bar, status bar, title strip) uses `g_fontMenu` = the editor font face at a static `CHROME_PT` (10) pt.
   **never use tahoma / microsoft sans serif for ui text**: on a japanese system locale (the dev machine is ja-JP) they draw `\` as a yen sign in every charset (measured, see `tools/fonttest.c`).
 - the palette `C_*` is a set of **runtime values** (`g_pal`, dark / light): never use them in static initialisers, `case` labels or constant expressions, and never cache a brush made from them across a theme switch.
 - a custom window class that handles `WM_NCCREATE` must still call `DefWindowProcW` for it (that is what stores the window text, otherwise buttons are blank).
@@ -29,7 +29,7 @@ and what was never verified; this file is what is still open, plus the rules for
 ## 1. the feedback loop
 
 - **locally**: `tools\verify.bat` (build + warning scan, imports, layout check, unit tests, smoke test), `tools\verify.bat ui` adds the message-driven gui suite (`tests\ui\ui_test.ps1`, private desktop, nothing shows),
-  `tools\verify.bat frame` adds the title strip test with real mouse input. `tools\shot.ps1` takes screenshots (`-Keys` or `-Cmd <IDM_ id>`), `tools\cc.bat file.c` compile-checks one file,
+  `tools\verify.bat frame` adds the title strip test with real mouse input. `tools\pw_shot.ps1` takes screenshots on the private desktop (nothing shows, safe while you work), `tools\shot.ps1` on the real desktop (`-Keys`, `-Cmd <IDM_ id>`, `-Drag`), `tools\cc.bat file.c` compile-checks one file,
   `tools\probe.bat <cl switches>` builds an experimental copy into `build\probe` without touching the real build.
 - **ci is switched off** (the maintainer builds and tests locally; only the cloud agent needs ci): the workflow is parked as `.github/workflows/build.yml.disabled` (github ignores it). it does, on windows-latest with msvc x86:
   build with a warning scan, import check, layout check, unit tests, smoke test with a screenshot artifact, debug build with a warning scan. the cloud agent can turn it on by renaming it back to `build.yml`.
@@ -52,9 +52,10 @@ and what was never verified; this file is what is still open, plus the rules for
 11. **the light face `#e4e1da` is a guess.** the maintainer said the light app background was too dark and had to match the status bar; title strip, menu bar, status bar and dialogs already shared one colour, so that colour was lightened.
     if another region was meant, say which (the palette is the `g_themes[1]` row in `ui.c`).
 12. native open / save as dialogs follow windows' own app mode, not the app theme (dark on this dark-mode windows in both of our themes: a dark dialog over the light theme), and have no encoding / line ending picker: both come from the format menu / status bar.
-13. the accent selection is an overpaint (`edit.c` `SelPaint`): a line containing right-to-left text keeps the stock blue, and so does the whole editor in rtl mode; single-line edits in dialogs keep the stock colour.
+13. selected text is windows' default highlight (an accent overpaint flickered and was removed); single-line edits in dialogs have it too.
 14. the stock edit's undo is single level (a second ctrl+z redoes). "undo back to the original = not modified" therefore holds for the last edit only; type-and-delete works for any length.
-15. light scrollbars are the classic ones with arrows (kept on purpose); dark ones are the thin `DarkMode_Explorer` bars (arrows only on hover). classic arrows in dark would need custom drawn bars.
+15. the scrollbars are our classic bars over the native ones (`sbar.c`): the native bar keeps working underneath and is only hidden by `WS_CLIPSIBLINGS` + the overlay on top, so a new control with a scrollbar must go through `DarkScroll()`.
+    the overlays poll their target every 40 ms (cheap; the editor also syncs on every scrolling message). the stock edit's horizontal range is capped by the control itself (about 9200 px: a longer line can't be scrolled to its end, with the native bar either).
 16. the maintainer reported the horizontal scrollbar logic "seems inverted": **not reproduced** (empty, wide only, tall only, tall + wide, wrap on / off all end in the right state, `T15`). needs the exact steps.
 17. the about link was never click-tested (it opens the default browser); `T17` checks the control, its text and its place.
 

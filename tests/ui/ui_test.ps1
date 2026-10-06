@@ -1445,12 +1445,182 @@ function Test-T17 {                                                             
     Ck 'T17.4 the about box closes on WM_CLOSE' (Gone $h) 'the window is still visible'
 }
 
+# =========================================================================================================== T18
+# the classic scrollbars (sbar.c): our own window of class mp_sbar lies over each native bar strip of the editor, paints a classic bar in the
+# palette and drives the editor with the messages the native bar would send. all of it is driven by posted / sent mouse messages here.
+function Sbars($app) {                                                           # the VISIBLE overlays (children of the main window): @{ V = hwnd or 0; H = hwnd or 0 }
+    $r = @{ V = [long]0; H = [long]0 }
+    foreach ($k in [U]::Kids([long]$app.Main)) {
+        if ([U]::Cls($k) -ne 'mp_sbar' -or -not [U]::Visible($k)) { continue }
+        $w = [U]::WRect($k)
+        if (($w[3] - $w[1]) -gt ($w[2] - $w[0])) { $r.V = [long]$k } else { $r.H = [long]$k }
+    }
+    return $r
+}
+function CkSb([string]$n, $app, [bool]$v, [bool]$h) {                             # the overlays show exactly when the native bars do, and stay that way (3 samples in a row)
+    $sw = [Diagnostics.Stopwatch]::StartNew(); $streak = 0; $s = $null; $b = $null
+    while ($true) {
+        $s = Sbars $app; $b = Bars $app
+        if (([bool]$s.V -eq $v) -and ([bool]$s.H -eq $h) -and ($b.V -eq $v) -and ($b.H -eq $h)) { $streak++ } else { $streak = 0 }
+        if (($streak -ge 3) -or ($sw.ElapsedMilliseconds -ge 3500)) { break }
+        Start-Sleep -Milliseconds 60
+    }
+    Ck $n ($streak -ge 3) ('wanted vertical=' + $v + ' horizontal=' + $h + ', overlays vertical=' + [bool]$s.V + ' horizontal=' + [bool]$s.H + ', native bars vertical=' + $b.V + ' horizontal=' + $b.H)
+}
+function Mouse($ov, [int]$msg, [int]$x, [int]$y, [int]$keys = 0) { [void](Snd $ov $msg $keys ((([long]$y) -shl 16) -bor ([long]($x -band 0xFFFF)))) }
+function Click-Sb($ov, [int]$x, [int]$y) { Mouse $ov 0x201 $x $y 1; Mouse $ov 0x202 $x $y 0 }     # WM_LBUTTONDOWN + WM_LBUTTONUP
+function Sb-Thumb($app, $ov) {                                                   # where the classic algorithm puts the vertical thumb: a0 (start), len, centre (overlay client coordinates)
+    $si = [U]::Scroll((Get-Edit $app), 1); $c = [U]::CRect($ov); $w = $c[2]; $h = $c[3]
+    $range = $si[1] - $si[0] + 1; $page = $si[2]; $tl = $h - 2 * $w
+    $len = [Math]::Max($w, [int][Math]::Round($tl * $page / $range, [MidpointRounding]::AwayFromZero))
+    $maxp = $range - $page
+    $a0 = $w + $(if ($maxp -gt 0) { [int][Math]::Round(($tl - $len) * ($si[3] - $si[0]) / $maxp, [MidpointRounding]::AwayFromZero) } else { 0 })
+    return @{ A0 = $a0; Len = $len; Centre = $a0 + [int]($len / 2); W = $w; H = $h; Tl = $tl; Range = $range; Page = $page; MaxP = $maxp }
+}
+function Sb-Face($app, $ov) {                                                    # the colour inside the first arrow button of an overlay, from PrintWindow of the main window
+    $w = [U]::WRect([long]$app.Main); $o = [U]::WRect([long]$ov)
+    $bmp = [U]::Grab([long]$app.Main)
+    try {
+        $x = ($o[0] - $w[0]) + 3; $y = ($o[1] - $w[1]) + 3
+        if ($x -lt 0 -or $y -lt 0 -or $x -ge $bmp.Width -or $y -ge $bmp.Height) { return $null }
+        $c = $bmp.GetPixel($x, $y)
+        return [pscustomobject]@{ R = [int]$c.R; G = [int]$c.G; B = [int]$c.B; Info = ('rgb(' + $c.R + ',' + $c.G + ',' + $c.B + ') at ' + $x + ',' + $y) }
+    } finally { $bmp.Dispose() }
+}
+function Test-T18 {
+    $app = Start-App
+    $wide = 'wide text ' * 60
+    $tall = (1..150 | ForEach-Object { 'line ' + $_ }) -join "`r`n"
+    CkSb 'T18.1 an empty document: no classic bars (the native ones are hidden as well)' $app $false $false
+    Ed-Set $app $wide
+    CkSb 'T18.2 one very wide line: the horizontal bar only' $app $false $true
+    Ed-Set $app $tall
+    CkSb 'T18.3 150 short lines: the vertical bar only' $app $true $false
+    Ed-Set $app ($tall + "`r`n" + $wide)
+    CkSb 'T18.4 150 lines and a wide one: both bars' $app $true $true
+    $ed = Get-Edit $app; $wr = [U]::WRect($ed); $cr = [U]::CRect($ed); $sb = Sbars $app
+    if ($sb.V -and $sb.H) {
+        $vr = [U]::WRect($sb.V); $hr = [U]::WRect($sb.H)
+        $vs = ($wr[2] - $wr[0]) - ($cr[2] - $cr[0]); $hs = ($wr[3] - $wr[1]) - ($cr[3] - $cr[1])
+        Ck 'T18.5 the vertical bar covers the editor''s whole right strip (the corner square included)' (($vr[0] -eq $wr[2] - $vs) -and ($vr[2] -eq $wr[2]) -and ($vr[1] -eq $wr[1]) -and ($vr[3] -eq $wr[3])) ('overlay ' + ($vr -join ',') + ' editor ' + ($wr -join ',') + ' strip ' + $vs)
+        Ck 'T18.6 the horizontal bar covers the bottom strip up to the corner' (($hr[1] -eq $wr[3] - $hs) -and ($hr[3] -eq $wr[3]) -and ($hr[0] -eq $wr[0]) -and ($hr[2] -eq $vr[0])) ('overlay ' + ($hr -join ',') + ' editor ' + ($wr -join ',') + ' strip ' + $hs)
+    } else { Fail 'T18.5 / T18.6 geometry' 'an overlay is missing' }
+    Cmd $app 'IDM_FMT_WRAP'
+    CkSb 'T18.7 word wrap on: the vertical bar only' $app $true $false
+    Cmd $app 'IDM_FMT_WRAP'
+    CkSb 'T18.8 word wrap off again: both bars' $app $true $true
+
+    Reset-Doc $app $tall                                                         # --- driving the vertical bar with mouse messages
+    CkSb 'T18.9 (setup) 150 lines: the vertical bar only' $app $true $false
+    $ed = Get-Edit $app; $v = (Sbars $app).V
+    if (-not $v) { Fail 'T18.10 - T18.17 interaction' 'no vertical overlay'; return }
+    $c = [U]::CRect($v); $w = $c[2]; $h = $c[3]
+    CkEq 'T18.10 the document starts at the first line' 0 (Snd $ed 0xCE 0 0)
+    Click-Sb $v ([int]($w / 2)) ($h - [int]($w / 2))                              # the down arrow
+    CkEq 'T18.11 the down arrow scrolls one line' 1 (Snd $ed 0xCE 0 0)
+    Click-Sb $v ([int]($w / 2)) ([int]($w / 2))                                   # the up arrow
+    CkEq 'T18.12 the up arrow scrolls it back' 0 (Snd $ed 0xCE 0 0)
+    [void](Snd $ed 0x115 3 0)                                                    # what the native bar does for a click on its track: WM_VSCROLL SB_PAGEDOWN
+    $page = [int](Snd $ed 0xCE 0 0)
+    [void](Snd $ed 0xB6 0 (-$page))                                              # back to line 0
+    Click-Sb $v ([int]($w / 2)) ($h - $w - 3)                                     # the track below the thumb
+    CkEq 'T18.13 a click on the track below the thumb scrolls one page (the same as the native bar)' $page (Snd $ed 0xCE 0 0)
+    [void](Snd $ed 0xB6 0 (-$page))
+    $t = Sb-Thumb $app $v
+    Mouse $v 0x201 ([int]($w / 2)) $t.Centre 1                                    # grab the thumb ...
+    Mouse $v 0x200 ([int]($w / 2)) ($t.Centre + [int]($t.Tl / 2)) 1               # ... half way down the track
+    Mouse $v 0x200 ([int]($w / 2)) ($h - 1) 1                                     # ... and far past the end
+    Mouse $v 0x202 ([int]($w / 2)) ($h - 1) 0
+    $si = [U]::Scroll($ed, 1)
+    CkEq 'T18.14 dragging the thumb past the end of the track stops at the last page' ($si[1] - $si[2] + 1) $si[3]
+    $before = [int](Snd $ed 0xCE 0 0)
+    [void](Snd $v 0x20A ([long](((-120) -band 0xFFFF) -shl 16)) 0)                # the wheel over the bar goes to the editor
+    Ck 'T18.15 the mouse wheel over the bar is forwarded to the editor (it scrolls)' ((Snd $ed 0xCE 0 0) -ne $before -or $before -eq ($si[1] - $si[2] + 1)) 'the first visible line did not change'
+
+    $pal = Read-Palette                                                          # --- the classic bar is drawn in the palette, not by windows
+    if ($pal) {
+        $ok = WaitFor { Near (Sb-Face $app $v) $pal.dark.face } 3000
+        Ck 'T18.16 dark: the arrow button face is the palette face colour (the native bar does not show through)' $ok ('actual ' + (Sb-Face $app $v).Info)
+        Cmd $app 'IDM_THEME_LIGHT'
+        $ok = WaitFor { Near (Sb-Face $app $v) $pal.light.face } 3000
+        Ck 'T18.17 light: ... and follows the theme switch' $ok ('actual ' + (Sb-Face $app $v).Info)
+        Cmd $app 'IDM_THEME_DARK'
+    } else { Skip 'T18.16 / T18.17 pixels' 'could not parse the g_themes palette table in src\ui.c' }
+
+    $big = (1..70000 | ForEach-Object { 'x' }) -join "`r`n"                        # --- a document with more lines than a 16 bit scroll position holds
+    Reset-Doc $app $big
+    CkSb 'T18.18 (setup) 70000 lines: the vertical bar only' $app $true $false
+    $ed = Get-Edit $app; $v = (Sbars $app).V
+    $t = Sb-Thumb $app $v; $w = $t.W
+    Mouse $v 0x201 ([int]($w / 2)) $t.Centre 1
+    Mouse $v 0x200 ([int]($w / 2)) ($t.Centre + [int]($t.Tl / 2)) 1
+    Mouse $v 0x202 ([int]($w / 2)) ($t.Centre + [int]($t.Tl / 2)) 0
+    $first = [int](Snd $ed 0xCE 0 0)
+    $want = [int]($t.MaxP * ($t.Tl / 2) / ($t.Tl - $t.Len))                      # the thumb moved by half the track length: that share of the range
+    Ck 'T18.19 dragging the thumb half way along the track lands there in 70000 lines (within 1%): the 16 bit scroll position does not limit it' ([Math]::Abs($first - $want) -le 700) ('first visible line ' + $first + ', wanted about ' + $want)
+}
+
+# =========================================================================================================== T19
+# the main window's chrome: no frame around the editor but an 8 px padding inside it, the chrome font is static, the title strip fades the accent in
+function Chrome-Kid($app, [string]$cls) { foreach ($k in [U]::Kids([long]$app.Main)) { if ([U]::Cls($k) -eq $cls) { return [long]$k } }; return [long]0 }
+function Accent-Colours() {                                                      # the accents of the two themes, from the g_themes table in ui.c (first colour of each theme)
+    $t = [IO.File]::ReadAllText((Join-Path $Src 'ui.c'))
+    $m = [regex]::Match($t, 'g_themes\[2\]\s*=\s*\{(.*?)\n\};', 'Singleline')
+    $c = @([regex]::Matches($m.Groups[1].Value, 'RGB\(\s*(0x[0-9a-fA-F]+)\s*,\s*(0x[0-9a-fA-F]+)\s*,\s*(0x[0-9a-fA-F]+)\s*\)') | ForEach-Object {
+        , @([Convert]::ToInt32($_.Groups[1].Value.Substring(2), 16), [Convert]::ToInt32($_.Groups[2].Value.Substring(2), 16), [Convert]::ToInt32($_.Groups[3].Value.Substring(2), 16)) })
+    if ($c.Count -ne 28) { return $null }
+    return @{ dark = $c[0]; light = $c[14] }
+}
+function Strip-Pixel($app, [int]$x, [int]$y) {                                   # a pixel of the title strip (window coordinates, from PrintWindow)
+    $bmp = [U]::Grab([long]$app.Main)
+    try {
+        if ($x -ge $bmp.Width -or $y -ge $bmp.Height) { return $null }
+        $c = $bmp.GetPixel($x, $y)
+        return [pscustomobject]@{ R = [int]$c.R; G = [int]$c.G; B = [int]$c.B; Info = ('rgb(' + $c.R + ',' + $c.G + ',' + $c.B + ') at ' + $x + ',' + $y) }
+    } finally { $bmp.Dispose() }
+}
+function Test-T19 {
+    $app = Start-App
+    $dpi = [U]::Dpi([long]$app.Main); $pad = [int][Math]::Round(8 * $dpi / 96, [MidpointRounding]::AwayFromZero)
+    $bar = Chrome-Kid $app 'mp_menubar'; $st = Chrome-Kid $app 'mp_status'; $ed = Get-Edit $app
+    $b = [U]::WRect($bar); $s = [U]::WRect($st); $e = [U]::WRect($ed); $w = [U]::WRect([long]$app.Main)
+    Ck 'T19.1 no frame around the editor: it fills the space between the menu bar and the status bar' (($e[1] -eq $b[3]) -and ($e[3] -eq $s[1]) -and ($e[0] -eq $b[0]) -and ($e[2] -eq $b[2])) ('menu bar ' + ($b -join ',') + ' editor ' + ($e -join ',') + ' status bar ' + ($s -join ','))
+    Reset-Doc $app 'x'
+    $p = [long](Snd $ed 0xD6 0 0)                                                # EM_POSFROMCHAR of the first character: the client position of the text
+    Ck 'T19.2 the text starts 8 px (dpi scaled) from the editor''s top left corner: the padding' ((($p -band 0xFFFF) -eq $pad) -and ((($p -shr 16) -band 0xFFFF) -eq $pad)) ('first character at ' + ($p -band 0xFFFF) + ',' + (($p -shr 16) -band 0xFFFF) + ', wanted ' + $pad + ',' + $pad)
+
+    $h0 = @(($b[3] - $b[1]), ($s[3] - $s[1]))                                    # the chrome font is static: zooming the editor leaves the bars alone
+    foreach ($i in 1..4) { Cmd $app 'IDM_ZOOM_IN'; Start-Sleep -Milliseconds 150 }
+    Start-Sleep -Milliseconds 400
+    $b = [U]::WRect($bar); $s = [U]::WRect($st)
+    Ck 'T19.3 zooming the editor in four steps leaves the menu bar and the status bar heights alone (static chrome font)' ((($b[3] - $b[1]) -eq $h0[0]) -and (($s[3] - $s[1]) -eq $h0[1])) ('heights before ' + ($h0 -join ',') + ' after ' + ($b[3] - $b[1]) + ',' + ($s[3] - $s[1]))
+    foreach ($i in 1..4) { Cmd $app 'IDM_ZOOM_OUT'; Start-Sleep -Milliseconds 100 }
+
+    $acc = Accent-Colours; $pal = Read-Palette
+    if ($acc -and $pal) {                                                        # the title strip: 14% accent at the left edge, fading to 4% where the window buttons start (and staying 4% under them)
+        foreach ($th in @('dark', 'light')) {
+            if ($th -eq 'light') { Cmd $app 'IDM_THEME_LIGHT'; Start-Sleep -Milliseconds 500 }
+            $face = $pal[$th].face; $a = $acc[$th]
+            $want = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * 35 / 255) })          # 14% (35 / 255)
+            $want4 = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * 10 / 255) })         # 4% (10 / 255)
+            $bw = [int](($w[2] - $w[0] - [U]::CRect([long]$app.Main)[2]) / 2)                  # the sizing border left of the client area (the strip starts after it)
+            $left = Strip-Pixel $app ($bw + 2) 3
+            Ck ('T19.4 ' + $th + ': the title strip starts with 14% of the accent at its left edge (rgb ' + ($want -join ',') + ')') (Near $left $want 6) ('actual ' + $left.Info)
+            $btn = [int](($w[2] - $w[0]) - 3 * [Math]::Round(46 * $dpi / 96) - 4)
+            $right = Strip-Pixel $app $btn 3
+            Ck ('T19.5 ' + $th + ': ... and fades to 4% of it where the window buttons start (rgb ' + ($want4 -join ',') + ')') (Near $right $want4 3) ('actual ' + $right.Info)
+            $under = Strip-Pixel $app ($btn + 8) 3                                       # inside the minimize button, away from its glyph: transparent at rest, the strip shows through
+            Ck ('T19.6 ' + $th + ': ... and stays 4% under the window buttons (they are transparent at rest: no seam)') (Near $under $want4 3) ('actual ' + $under.Info)
+        }
+    } else { Skip 'T19.4 / T19.5 title strip pixels' 'could not parse the g_themes palette table in src\ui.c' }
+}
+
 # ====================================================================================================== run them all
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine
