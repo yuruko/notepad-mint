@@ -26,7 +26,7 @@ static LRESULT CALLBACK AboutProc(HWND h, UINT m, WPARAM w, LPARAM l)
         UiLabel(h, L"version " APP_VERSION L"  (32-bit)", 68, 40, 290, 16, IDC_DIM, SS_NOPREFIX);
         DlgFrame(b, 20, 68, 340, 2, BV_ETCHED);
         UiLabel(h, L"a free replacement for notepad.exe.\n"
-                   L"plain text, dark, and nothing else:\n"
+                   L"plain text, dark or light, and nothing else:\n"
                    L"no ai, no sign-in, no telemetry, no cloud.", 20, 80, 340, 52, 0, SS_NOPREFIX);
         UiLabel(h, L"written in c and assembly with no runtime libraries. one small 32-bit exe runs on "
                    L"32-bit, 64-bit and arm windows.", 20, 138, 340, 34, IDC_DIM, SS_NOPREFIX);
@@ -82,14 +82,18 @@ static const WCHAR g_help[] =
     L"font size\r\n"
     L"  ctrl+plus         bigger  (also ctrl + mouse wheel up)\r\n"
     L"  ctrl+minus        smaller (also ctrl + mouse wheel down)\r\n"
-    L"  ctrl+0            back to the size you picked in font & colors\r\n"
+    L"  ctrl+0            back to the size picked in the font dialog\r\n"
     L"  sizes run from 10 to 96 pt. the menus follow the editor font:\r\n"
     L"  the same face, 2 pt smaller, never above 14 pt.\r\n"
     L"\r\n"
     L"format and status bar\r\n"
-    L"  word wrap, font & colors, line ending and encoding are in the\r\n"
+    L"  word wrap, font, line ending and encoding are in the\r\n"
     L"  format menu. the status bar shows line and column, the font size,\r\n"
     L"  the line ending and the encoding - click the last three to change them.\r\n"
+    L"\r\n"
+    L"theme\r\n"
+    L"  view > theme switches between dark (the default) and light.\r\n"
+    L"  the editor, menus, dialogs and title bar all follow it.\r\n"
     L"\r\n"
     L"files\r\n"
     L"  any text file opens: utf-8, utf-16 (with or without a bom) and the\r\n"
