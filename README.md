@@ -14,7 +14,7 @@ a free, dark replacement for `notepad.exe`: plain text only. no ai, no sign-in, 
 
 every menu item works: file (new, new window, open, save, save as, page setup, print, exit), edit (undo ... select all, time / date, find, find next / previous,
 replace, go to), format (word wrap, font, line ending, encoding), view (zoom, status bar, theme), help (the about box links to yuru.be). find / replace, go to, font, encodings, about and help
-are our own dark / light dialogs; open, save as, print and page setup are the native windows dialogs (always light: a native dialog can't be darkened). the encoding and line ending of a file are set from the
+are our own dark / light dialogs; open, save as, print and page setup are the native windows dialogs (they follow windows' own dark / light mode, not the app theme). the encoding and line ending of a file are set from the
 format menu or the status bar, not in the save as dialog.
 
 how each part was verified, and what is still open, is in `NOTES.md` (status) and `TODO.md`.

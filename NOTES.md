@@ -58,7 +58,9 @@ tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `
   word wrap toggle = recreate the edit control (like notepad). colors via WM_CTLCOLOREDIT.
 - **accent selection** (`edit.c` `SelPaint` / `PaintSelection` / `RepaintSel`): the stock control can only draw the system selection colour, so while a selection exists `WM_PAINT` is answered by us:
   the control paints itself into an off-screen bitmap (`WM_PRINTCLIENT`), then every selected run is overpainted in the accent (fill + on-accent text, positions from `EM_POSFROMCHAR`, tabs and partial lines included),
-  and the bitmap is blitted once (no flicker). the stock control paints a *changed* selection directly (it never goes through our `WM_PAINT`), so `RepaintSel` forces a repaint after every message that can change the selection.
+  and the bitmap is blitted once (no flicker). the stock highlight is one pixel wider than its text, so a run's fill is extended by one pixel when the pixel next to it in the captured paint still has the system highlight colour
+  (`GetPixel` / `GetSysColor(COLOR_HIGHLIGHT)`): without that a 1px blue line stayed at the end of every run (found in a screenshot, checked by counting `#0078d7` pixels: 0 left in light / dark, wrap on / off, horizontal scroll, tabs, mouse drag).
+  the stock control paints a *changed* selection directly (it never goes through our `WM_PAINT`), so `RepaintSel` forces a repaint after every message that can change the selection.
   **limit:** a line that contains right-to-left text keeps the stock blue (its runs are not contiguous on screen), and so does the whole editor while `WS_EX_RTLREADING` is on. single-line edits in dialogs keep the stock colour too.
 - **accent caret** (`AccentCaret`): a bitmap caret whose bits are `(editor background xor accent)`, because the caret is drawn with xor: on the editor background it comes out exactly as the accent (measured `#0a552d` in light).
   re-made on `WM_SETFOCUS`, `WM_SETFONT` and when the theme changes (`EditApplyColors`).
@@ -86,13 +88,14 @@ tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `
   (the replaced pair is not deleted: an open find dialog may still hold it); a chrome font change only rebuilds `g_fontMenu`. dialog edits (`UiEdit`) are subclassed for ctrl+backspace (the stock
   edit inserts a DEL character). known gap: a dialog dragged to a monitor with another dpi is not re-laid-out.
 - the font dialog lists only vector fonts (bitmap families like terminal / fixedsys are skipped) and, by default, only monospaced ones (probed by comparing the widths of "iiiiiiii" / "WWWWWWWW").
-- printing (`print.c`) runs the whole job inside the command handler: no abort dialog, the window can show "not responding" for a very large document. the native print / page setup dialogs stay light.
+- printing (`print.c`) runs the whole job inside the command handler: no abort dialog, the window can show "not responding" for a very large document. the native print / page setup dialogs are windows' own (they follow its light / dark mode, not our theme).
 - title strip (`frame.c`): the first attempt drew two title bars because the only `WM_NCCALCSIZE` sent by `CreateWindowExW` has `wParam` FALSE (the single-rect form) and nothing recalculated the frame until the first
   resize. fix: `FrameNcCalc` handles both forms, and `mp_main` forces one more recalculation with `SetWindowPos(SWP_FRAMECHANGED)` right after creating the window. the sizing border stays the system's
   (resize, aero snap, shadow), the strip answers HTCAPTION / HTTOP / HTTOPLEFT / HTTOPRIGHT, the three buttons are HTCLIENT (own mouse handling: no windows 11 snap-layout flyout on the maximize button).
   verified with `tools\frame_test.ps1` (real mouse input: hit tests, maximize / restore, double click, drag, win+left snap, minimize, close).
 - file dialogs (maintainer's request: native ones): open / save as are `GetOpenFileNameW` / `GetSaveFileNameW` from comdlg32, loaded on first use (`PickFile` in `filedlg.c`), titles "open" / "save as", filter text documents / all files,
-  default extension `.txt`, start folder = the current file's folder, else the last folder picked. a native dialog follows the system theme: it **can't be darkened**, so it is light in both themes.
+  default extension `.txt`, start folder = the current file's folder, else the last folder picked. a native dialog is not ours to theme: **it follows windows' own app mode, not the app theme** (measured on this machine: windows is
+  in dark mode, and the dialog is dark in both our themes; with the light theme that is a dark dialog over a light app, and the other way round on a light system).
   there is **no encoding / line ending picker in them any more**: both come from the format menu and the status bar panels (`FileDlgSave(owner, path, cap)` takes no enc / eol). `EncDlg` (code page list) stays ours.
   while one is up the modeless find dialog is disabled too (replace all must not edit the document under it). if comdlg32 can't be loaded the app says so in a message box and does nothing.
 - prefs: `%APPDATA%\notepad mint\settings.ini` (utf-16 ini so any font name works). window placement saved. new windows cascade.

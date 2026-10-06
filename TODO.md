@@ -51,7 +51,7 @@ and what was never verified; this file is what is still open, plus the rules for
 10. no license decision yet (the icon derives from microsoft's notepad icon, see `README.md`).
 11. **the light face `#e4e1da` is a guess.** the maintainer said the light app background was too dark and had to match the status bar; title strip, menu bar, status bar and dialogs already shared one colour, so that colour was lightened.
     if another region was meant, say which (the palette is the `g_themes[1]` row in `ui.c`).
-12. native open / save as dialogs are light in both themes (a native dialog can't be darkened) and have no encoding / line ending picker: both come from the format menu / status bar.
+12. native open / save as dialogs follow windows' own app mode, not the app theme (dark on this dark-mode windows in both of our themes: a dark dialog over the light theme), and have no encoding / line ending picker: both come from the format menu / status bar.
 13. the accent selection is an overpaint (`edit.c` `SelPaint`): a line containing right-to-left text keeps the stock blue, and so does the whole editor in rtl mode; single-line edits in dialogs keep the stock colour.
 14. the stock edit's undo is single level (a second ctrl+z redoes). "undo back to the original = not modified" therefore holds for the last edit only; type-and-delete works for any length.
 15. light scrollbars are the classic ones with arrows (kept on purpose); dark ones are the thin `DarkMode_Explorer` bars (arrows only on hover). classic arrows in dark would need custom drawn bars.

@@ -56,7 +56,8 @@ function Shot([IntPtr]$h, [string]$name) {
     $bmp.Save((Join-Path $Shots $name), [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
 }
 
-Get-Process -Name "notepad mint" -ErrorAction SilentlyContinue | Stop-Process -Force
+$exeFull = (Resolve-Path -LiteralPath $Exe).Path
+Get-Process -Name "notepad mint" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exeFull } | Stop-Process -Force   # copies of THIS exe only (the gui tests run temp copies)
 Start-Sleep -Milliseconds 300
 $p = Start-Process -FilePath $Exe -PassThru
 Start-Sleep -Milliseconds 1800
