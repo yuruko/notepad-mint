@@ -157,6 +157,17 @@ typedef struct {
     void *lpfnPageSetupHook, *lpfnPagePaintHook; LPCWSTR lpPageSetupTemplateName; HGLOBAL hPageSetupTemplate;
 } PAGESETUPDLGW;
 
+/* openfilename (comdlg32 GetOpenFileNameW / GetSaveFileNameW, loaded when the user opens / saves). commdlg.h packs the whole struct to 1 byte;
+ * this is the windows 2000+ form (the last three fields) and lStructSize must be sizeof */
+#pragma pack(push, 1)
+typedef struct {
+    DWORD lStructSize; HWND hwndOwner; HINSTANCE hInstance; LPCWSTR lpstrFilter; LPWSTR lpstrCustomFilter; DWORD nMaxCustFilter, nFilterIndex;
+    LPWSTR lpstrFile; DWORD nMaxFile; LPWSTR lpstrFileTitle; DWORD nMaxFileTitle; LPCWSTR lpstrInitialDir, lpstrTitle; DWORD Flags;
+    WORD nFileOffset, nFileExtension; LPCWSTR lpstrDefExt; LPARAM lCustData; void *lpfnHook; LPCWSTR lpTemplateName;
+    void *pvReserved; DWORD dwReserved, FlagsEx;
+} OPENFILENAMEW;
+#pragma pack(pop)
+
 /* ------------------------------------------------------------ constants -- */
 #define INVALID_HANDLE_VALUE ((HANDLE)(LONG_PTR)-1)
 #define CW_USEDEFAULT        ((int)0x80000000)
@@ -626,6 +637,15 @@ typedef struct {
 #define PDERR_DNDMMISMATCH 0x1009
 #define PDERR_PRINTERNOTFOUND 0x100B
 #define PDERR_DEFAULTDIFFERENT 0x100C
+
+/* comdlg32 open / save as (OPENFILENAMEW.Flags, and CommDlgExtendedError after a failed call: cderr.h) */
+#define OFN_OVERWRITEPROMPT 0x00000002
+#define OFN_HIDEREADONLY 0x00000004
+#define OFN_NOCHANGEDIR 0x00000008
+#define OFN_PATHMUSTEXIST 0x00000800
+#define OFN_FILEMUSTEXIST 0x00001000
+#define OFN_EXPLORER 0x00080000
+#define FNERR_BUFFERTOOSMALL 0x3003
 
 /* ------------------------------------------------------------- kernel32 -- */
 API void    WINAPI ExitProcess(UINT);
