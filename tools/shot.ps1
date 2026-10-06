@@ -31,6 +31,7 @@ public class W {
   [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
   [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
   [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  public static uint FgPid() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
   public static bool Force(IntPtr h) {
     for (int i = 0; i < 5; i++) {
       IntPtr fg = GetForegroundWindow(); uint pid;
@@ -69,7 +70,8 @@ if ($Size -match '^(\d+)x(\d+)$') { [void][W]::SetWindowPos($h, [IntPtr]::new(-1
 if ($Keys -ne "") {
     foreach ($k in $Keys.Split('|')) {
         if ($k -match '^\{WAIT:(\d+)\}$') { Start-Sleep -Milliseconds ([int]$Matches[1]); continue }
-        if (-not [W]::Force($h)) { Write-Output "WARNING: lost foreground before '$k'" }
+        # only reclaim the foreground when some other app has it: a dialog of ours (find, open ...) must keep the keys
+        if ([W]::FgPid() -ne $p.Id) { if (-not [W]::Force($h)) { Write-Output "WARNING: lost foreground before '$k'" } }
         if ($k -match '^\{(ALT|CTRL|CTRLSHIFT):(0x[0-9A-Fa-f]+|.)\}$') {      # slow, real key events (SendKeys fires them with no gap); key = char or 0xVK
             $mods = @(); if ($Matches[1] -eq 'ALT') { $mods = @(0x12) } elseif ($Matches[1] -eq 'CTRL') { $mods = @(0x11) } else { $mods = @(0x11, 0x10) }
             $ks = [string]$Matches[2]
@@ -86,7 +88,7 @@ if ($Keys -ne "") {
     }
 }
 
-[void][W]::Force($h)
+if ([W]::FgPid() -ne $p.Id) { [void][W]::Force($h) }
 $r = New-Object W+RECT
 [void][W]::DwmGetWindowAttribute($h, 9, [ref]$r, 16)
 $w = $r.R - $r.L + $PadR

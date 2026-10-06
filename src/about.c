@@ -84,7 +84,7 @@ static const WCHAR g_help[] =
     L"  ctrl+minus        smaller (also ctrl + mouse wheel down)\r\n"
     L"  ctrl+0            back to the size picked in the font dialog\r\n"
     L"  sizes run from 10 to 96 pt. the menus follow the editor font:\r\n"
-    L"  the same face, 2 pt smaller, never above 14 pt.\r\n"
+    L"  the same face, 3 pt smaller, never above 14 pt.\r\n"
     L"\r\n"
     L"format and status bar\r\n"
     L"  word wrap, font, line ending and encoding are in the\r\n"

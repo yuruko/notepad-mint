@@ -555,7 +555,7 @@ static void Cmd(int id)
     FocusEdit();
 }
 
-/* the chrome (menu bar, popups, status bar) follows the editor font: same face, 2pt smaller, max 14pt */
+/* the chrome (menu bar, popups, status bar) follows the editor font: same face, CHROME_PT_LESS (3) pt smaller, max 14pt */
 static void ApplyChrome(void)
 {
     UiSetChromeFont(g_pf.font, g_pf.pt);

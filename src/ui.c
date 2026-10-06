@@ -55,8 +55,8 @@ static DpiSysFn pDpiSys;
 static AdjDpiFn pAdjDpi;
 static MetricFn pMetric;
 
-static WCHAR g_chromeFace[32] = L"Consolas";   /* menu bar / popups / status bar font: the editor font, 2pt smaller */
-static int   g_chromePt = 11;
+static WCHAR g_chromeFace[32] = L"Consolas";   /* menu bar / popups / status bar font: the editor font, CHROME_PT_LESS smaller */
+static int   g_chromePt = 10;                  /* = the default 13pt editor size - CHROME_PT_LESS (UiSetChromeFont overwrites it at startup) */
 
 int S(int v)    { return MulDiv(v, g_dpi, 96); }
 int UnS(int px) { return MulDiv(px, 96, g_dpi); }
@@ -112,10 +112,10 @@ static void MakeFonts(void)
     g_fontMenu = Face(g_chromeFace, g_chromePt, FW_NORMAL);    /* main window chrome */
 }
 
-/* chrome font = the editor's font face, 2pt smaller than its size, never above 14pt */
+/* chrome font = the editor's font face, CHROME_PT_LESS (3) pt smaller than its size, never above 14pt */
 void UiSetChromeFont(const WCHAR *face, int editorPt)
 {
-    int pt = editorPt - 2;
+    int pt = editorPt - CHROME_PT_LESS;
     if (pt > 14) pt = 14;
     if (pt < 8) pt = 8;
     wcopy(g_chromeFace, face, 32);

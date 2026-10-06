@@ -1,6 +1,6 @@
-/* status.c - classic status bar: ln/col | font size | line ending | encoding + size grip.
- * the size / line-ending / encoding panels are clickable (they pop a menu). drawn in the chrome font,
- * so the panel widths are measured from the text they can show rather than fixed. */
+/* status.c - classic status bar: ln/col | font size | line ending | encoding. no size grip: the window is resized by its frame.
+ * the size / line-ending / encoding panels are clickable (they pop a menu). drawn in the chrome font (g_fontMenu, the same
+ * font as the menu bar), so the panel widths are measured from the text they can show rather than fixed. */
 #include "mp.h"
 
 static HWND  g_sb;
@@ -41,7 +41,7 @@ int StatusHeight(void)
 int StatusMinWidth(void)
 {
     if (!g_sbH) Measure();
-    return g_pw[SB_ZOOM] + g_pw[SB_EOL] + g_pw[SB_ENC] + S(16) + S(110);
+    return g_pw[SB_ZOOM] + g_pw[SB_EOL] + g_pw[SB_ENC] + S(1) + S(110);
 }
 
 void StatusRefont(HWND sb)
@@ -61,7 +61,7 @@ void StatusSet(HWND sb, int idx, const WCHAR *text)
 /* panel rectangles in client coords */
 static void Panels(const RECT *rc, RECT out[SB_COUNT])
 {
-    int x = rc->right - S(16), i;                 /* leave room for the grip */
+    int x = rc->right - S(1), i;                  /* the same 1px margin as on the left */
     if (!g_sbH) Measure();
     for (i = SB_COUNT - 1; i >= SB_ZOOM; i--) {
         out[i].right = x;
@@ -93,7 +93,7 @@ static void Paint(HWND h)
     HBITMAP bmp;
     HGDIOBJ old, of;
     RECT rc, p[SB_COUNT], r;
-    int i, gx, gy, row, col;
+    int i;
 
     GetClientRect(h, &rc);
     mdc = CreateCompatibleDC(dc);
@@ -114,16 +114,6 @@ static void Paint(HWND h)
         TextC(mdc, g_txt[i], -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, c);
     }
 
-    /* size grip: staggered 2x2 dots, light with a dark shadow (the outer bevel colours: visible in both themes) */
-    for (row = 0; row < 3; row++) {
-        for (col = row; col < 3; col++) {
-            gx = rc.right - S(4) - col * S(4);
-            gy = rc.bottom - S(4) - row * S(4);
-            r.left = gx + 1; r.top = gy + 1; r.right = gx + 3; r.bottom = gy + 3; FillC(mdc, &r, C_LO);
-            r.left = gx;     r.top = gy;     r.right = gx + 2; r.bottom = gy + 2; FillC(mdc, &r, C_HI);
-        }
-    }
-
     BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY);
     SelectObject(mdc, of);
     SelectObject(mdc, old);
@@ -140,14 +130,6 @@ static LRESULT CALLBACK StatusProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_PAINT:
         Paint(h);
         return 0;
-    case WM_NCHITTEST: {
-        POINT pt;
-        RECT rc;
-        pt.x = GET_X_LPARAM(l); pt.y = GET_Y_LPARAM(l);
-        ScreenToClient(h, &pt);
-        GetClientRect(h, &rc);
-        if (pt.x >= rc.right - S(16) && !IsZoomed(GetParent(h))) return HTBOTTOMRIGHT;   /* grip resizes the window */
-        return HTCLIENT; }
     case WM_MOUSEMOVE: {
         int i = PanelAt(h, GET_X_LPARAM(l), GET_Y_LPARAM(l));
         if (i == SB_POS) i = -1;

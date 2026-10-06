@@ -1,4 +1,4 @@
-/* frame.c - the main window's title strip, drawn by us in the chrome font (g_fontMenu: the editor font, 2pt smaller).
+/* frame.c - the main window's title strip, drawn by us in the chrome font (g_fontMenu: the editor font, CHROME_PT_LESS smaller).
  *
  * the window keeps the system's thick frame on the left / right / bottom (resizing, aero snap, shadow and animations
  * stay native); only the caption moves into the client area: WM_NCCALCSIZE hands the client the whole top edge, we

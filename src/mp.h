@@ -107,7 +107,8 @@ enum { BV_RAISED, BV_SUNKEN, BV_ETCHED, BV_FLAT_UP, BV_FLAT_DN };
 extern HINSTANCE g_hinst;
 extern int       g_dpi;
 extern HFONT     g_fontUI, g_fontUIB;                 /* dialogs: segoe ui 9pt */
-extern HFONT     g_fontMenu;                          /* menu bar / popups / status bar: editor font, 2pt smaller (max 14pt) */
+extern HFONT     g_fontMenu;                          /* menu bar / popups / status bar: editor font, CHROME_PT_LESS smaller (max 14pt) */
+#define CHROME_PT_LESS 3                              /* the chrome font is the editor size minus this many points */
 extern HBRUSH    g_brFace, g_brField;
 
 int   S(int v);                                       /* scale 96-dpi px -> device px */

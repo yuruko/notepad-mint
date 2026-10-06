@@ -10,9 +10,9 @@ comdlg32 (page setup / print only) are loaded at run time. one 32-bit exe runs o
 - function EXACTLY like notepad.exe (same menus/layout/status bar/dialog wording) + nice extras + custom theming
 - colors: accent `#9df5bd`, app/editor bg default `#161418`, text default `#ffffff`; user can change text + bg colors
 - default font consolas 13pt (fallback lucida console / courier new); better font+color settings ui than the stock dialog
-- windows-2000-esque as far as possible: native frame, classic bevels, flat menu bar, sunken fields, size grip; all dark
+- windows-2000-esque as far as possible: native frame, classic bevels, flat menu bar, sunken fields; dark (default) or light. **no size grip** on the status bar (removed on request): the window resizes by its frame
 - **no accent-colored window border** (frame border is a neutral dark gray)
-- **menu bar / popups / status bar use the editor font, 2pt smaller, never above 14pt** (`UiSetChromeFont`, `g_fontMenu`).
+- **menu bar / popups / status bar use the editor font, 3pt smaller, never above 14pt** (`UiSetChromeFont`, `CHROME_PT_LESS`, `g_fontMenu`; the status bar and the menu bar share that one font object).
   (the native title bar text is drawn by windows in the system caption font: it can't follow the editor font without a custom-drawn title bar)
 - status bar like notepad: `ln, col | font size | line ending | encoding`; line ending + encoding selectable
 - handle ALL languages: utf-8/utf-16 (+bom), ansi, legacy code pages (reopen/save as), ime, rtl toggle, unicode control chars
@@ -30,7 +30,7 @@ src/mp.h       shared decls, palette (C_*), command ids (IDM_*), Prefs, DocState
 src/util.c     mem/string/path helpers (+ Dbg() file logger in dbg builds)
 src/ui.c       bevel drawing, dwm dark frame, custom button class `mp_btn`, dialog scaffolding (DlgBase), MpAsk, fonts, dynamic dpi lookups
 src/menu.c     custom menu bar + popup engine with submenus (no native menus)
-src/status.c   custom status bar (clickable size/eol/enc panels, widths measured from the chrome font, size grip)
+src/status.c   custom status bar (clickable size/eol/enc panels, widths measured from the chrome font; no size grip)
 src/doc.c      DocRead/DocWrite: encoding detect, code page table, crlf normalising
 src/edit.c     native EDIT wrapper: create/recreate (word wrap), subclass, font+size ladder, logical line/col, word delete, goto, rtl
 src/main.c     entry `start`, main window, commands, file flow, settings, accelerators, command line
