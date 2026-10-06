@@ -1214,17 +1214,23 @@ function Test-T13 {                                                             
 
 # =========================================================================================================== T15
 function Bars($app) { $st = [U]::Style((Get-Edit $app)); return @{ V = [bool]($st -band 0x00200000); H = [bool]($st -band 0x00100000) } }
-function CkBars([string]$n, $app, [bool]$v, [bool]$h) {                           # the edit's scrollbars reach the wanted state (they follow posted messages)
-    [void](WaitFor { $b = Bars $app; ($b.V -eq $v) -and ($b.H -eq $h) } 2500)
-    $b = Bars $app
+function CkBars([string]$n, $app, [bool]$v, [bool]$h) {                           # the edit's scrollbars reach the wanted state (they follow posted messages) and STAY there:
+    $sw = [Diagnostics.Stopwatch]::StartNew()                                    # 3 samples in a row, 40 ms apart (UpdateBars shows the horizontal bar for a few ms to probe its range, then hides it again:
+    $streak = 0; $b = $null                                                      # a single sample can land inside that probe)
+    while ($true) {
+        $b = Bars $app
+        if (($b.V -eq $v) -and ($b.H -eq $h)) { $streak++ } else { $streak = 0 }
+        if (($streak -ge 3) -or ($sw.ElapsedMilliseconds -ge 3000)) { break }
+        Start-Sleep -Milliseconds 40
+    }
     $sh = [U]::Scroll((Get-Edit $app), 0)
     $extra = ''
-    if (($b.V -ne $v) -or ($b.H -ne $h)) {                                       # a failure: how stable is the state? (samples 100 ms apart) + the edit's client size
+    if ($streak -lt 3) {                                                         # a failure: how stable is the state? (samples 100 ms apart) + the edit's client size
         $s = @(); for ($k = 0; $k -lt 6; $k++) { $x = Bars $app; $s += ('V' + [int]$x.V + 'H' + [int]$x.H); Start-Sleep -Milliseconds 100 }
         $cr = [U]::CRect((Get-Edit $app))
         $extra = ' samples ' + ($s -join ',') + ' client ' + (($cr[2] - $cr[0]) -as [string]) + 'x' + (($cr[3] - $cr[1]) -as [string])
     }
-    Ck $n (($b.V -eq $v) -and ($b.H -eq $h)) ('wanted vertical=' + $v + ' horizontal=' + $h + ', got vertical=' + $b.V + ' horizontal=' + $b.H + ' (horizontal range min/max/page/pos ' + ($sh -join '/') + ')' + $extra)
+    Ck $n ($streak -ge 3) ('wanted vertical=' + $v + ' horizontal=' + $h + ', got vertical=' + $b.V + ' horizontal=' + $b.H + ' (horizontal range min/max/page/pos ' + ($sh -join '/') + ')' + $extra)
 }
 function Test-T15 {                                                              # scrollbars only when needed (edit.c UpdateBars)
     $app = Start-App
@@ -1249,12 +1255,84 @@ function Test-T15 {                                                             
     CkBars 'T15.9 wide line only, wrap on: no bars (it wraps into a few rows)' $app $false $false
 }
 
+# =========================================================================================================== T16
+function Test-T16 {                                                              # dirty state by content (main.c AppIsDirty): the title's "*" and the close prompt follow it
+    $EM_BACK = 8                                                                 # WM_CHAR backspace: a real keystroke-like deletion (the control's own modified flag stays set)
+    $app = Start-App                                                             # --- a blank unsaved document
+    $name = Default-Name $app
+    $clean = $name + ' - notepad mint'
+    CkEq 'T16.1 a blank document is not modified (no "*" in the title)' $clean (Title $app)
+    Ed-Dirty $app 'x'
+    Ck 'T16.2 typing a character marks it modified ("*mintXXXX - notepad mint")' (Wait-Title $app ('*' + $clean)) ('title [' + (Title $app) + ']')
+    [void](Snd (Get-Edit $app) 0x102 $EM_BACK 0)                                 # WM_CHAR backspace
+    Ck 'T16.3 deleting it again: blank again = not modified' (Wait-Title $app $clean) ('title [' + (Title $app) + ']')
+    Ed-Dirty $app 'abc'
+    Ck 'T16.4 typing three characters: modified' (Wait-Title $app ('*' + $clean)) ('title [' + (Title $app) + ']')
+    [void](Snd (Get-Edit $app) $EM_SETSEL 0 -1)
+    Ed-Dirty $app ''                                                             # EM_REPLACESEL with '' = delete the selection
+    Ck 'T16.5 select all + delete: blank again = not modified' (Wait-Title $app $clean) ('title [' + (Title $app) + ']')
+    Cmd $app 'IDM_EOL_LF'
+    Start-Sleep -Milliseconds 300
+    CkEq 'T16.6 another line ending on an empty unsaved document: nothing to save, still not modified' $clean (Title $app)
+    Pst $app.Main $WM_CLOSE 0 0
+    Ck 'T16.7 WM_CLOSE on it exits within 3 s with no save prompt' ($app.Proc.WaitForExit(3000)) 'still running 3 s after WM_CLOSE (a prompt?)'
+
+    $app = Start-App $sampleMulti                                                # --- a file document (lf line endings)
+    $fn = 'multilingual-sample.txt - notepad mint'
+    Ck 'T16.8 a loaded file is not modified' (Wait-Title $app $fn) ('title [' + (Title $app) + ']')
+    Ed-Dirty $app 'x'
+    Ck 'T16.9 typing a character: modified' (Wait-Title $app ('*' + $fn)) ('title [' + (Title $app) + ']')
+    [void](Snd (Get-Edit $app) $EM_UNDO 0 0)
+    Ck 'T16.10 undo back to the original text: not modified' (Wait-Title $app $fn) ('title [' + (Title $app) + ']')
+    CkEdText 'T16.11 ... and the text is the file again' $app (Expected-Text $sampleMulti)
+    Ed-Dirty $app 'x'
+    [void](Wait-Title $app ('*' + $fn))
+    [void](Snd (Get-Edit $app) 0x102 $EM_BACK 0)
+    Ck 'T16.12 type and delete: not modified' (Wait-Title $app $fn) ('title [' + (Title $app) + ']')
+    Cmd $app 'IDM_EOL_CRLF'
+    Ck 'T16.13 a new line ending on a file document: modified (it needs a save)' (Wait-Title $app ('*' + $fn)) ('title [' + (Title $app) + ']')
+    Cmd $app 'IDM_EOL_LF'
+    Ck 'T16.14 ... and back to the original line ending: not modified' (Wait-Title $app $fn) ('title [' + (Title $app) + ']')
+    Ed-Dirty $app 'x'
+    [void](Snd (Get-Edit $app) $EM_UNDO 0 0)
+    [void](Wait-Title $app $fn)
+    Pst $app.Main $WM_CLOSE 0 0
+    Ck 'T16.15 WM_CLOSE after an undone edit exits within 3 s with no save prompt' ($app.Proc.WaitForExit(3000)) 'still running 3 s after WM_CLOSE (a prompt?)'
+
+    $app = Start-App $sampleMulti                                                # --- the opposite: a real change still asks
+    [void](Wait-Title $app $fn)
+    Ed-Dirty $app 'x'
+    [void](Wait-Title $app ('*' + $fn))
+    Pst $app.Main $WM_CLOSE 0 0
+    $box = Wait-Box $app $AppName
+    Ck 'T16.16 WM_CLOSE on a really modified document still asks to save' ($box -ne $null) 'no save prompt'
+    if ($box) { [void](Box-Press $box $BOX_BTN2) }                               # "don't save"
+    Ck 'T16.17 "don''t save" exits the app' ($app.Proc.WaitForExit(3000)) 'still running 3 s after "don''t save"'
+}
+
+# =========================================================================================================== T17
+function Test-T17 {                                                              # the about box links to yuru.be (about.c mp_link; never clicked: that opens a browser)
+    $app = Start-App
+    Cmd $app 'IDM_HELP_ABOUT'
+    $h = Wait-Win $app 'mp_about' 'about notepad mint'
+    $link = $null
+    foreach ($k in [U]::Kids($h)) { if ([U]::Cls($k) -eq 'mp_link') { $link = [long]$k } }
+    Ck 'T17.1 the about box has a link control (class mp_link)' ($link -ne $null) 'no mp_link child in the about box'
+    if ($link) {
+        CkEq 'T17.2 ... it reads "yuru.be"' 'yuru.be' ([U]::Text($link))
+        $lr = [U]::WRect($link); $dr = [U]::WRect($h)                            # left, top, right, bottom (screen)
+        Ck 'T17.3 ... it is visible and lies inside the dialog' ([U]::Visible($link) -and $lr[0] -ge $dr[0] -and $lr[1] -ge $dr[1] -and $lr[2] -le $dr[2] -and $lr[3] -le $dr[3]) ('link ' + ($lr -join ',') + ' dialog ' + ($dr -join ','))
+    }
+    Pst $h $WM_CLOSE 0 0
+    Ck 'T17.4 the about box closes on WM_CLOSE' (Gone $h) 'the window is still visible'
+}
+
 # ====================================================================================================== run them all
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine
