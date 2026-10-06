@@ -164,6 +164,38 @@ void PathJoin(WCHAR *dir, const WCHAR *name, int cap)
     wcat(dir, name, cap);
 }
 
+/* one pattern [p, pe) against a whole name: '*' = any run (also empty), '?' = exactly one char */
+static BOOL Wild1(const WCHAR *p, const WCHAR *pe, const WCHAR *s)
+{
+    const WCHAR *star = NULL, *ss = NULL;
+    while (*s) {
+        if (p < pe && *p == '*') { star = ++p; ss = s; }
+        else if (p < pe && (*p == '?' || wlow(*p) == wlow(*s))) { p++; s++; }
+        else if (star) { p = star; s = ++ss; }
+        else return FALSE;
+    }
+    while (p < pe && *p == '*') p++;
+    return p == pe;
+}
+
+/* file dialog filters. like the classic dialogs a trailing ".*" may also match "no extension",
+ * so "*.*" lists every file and "readme.*" finds "readme". "*.txt; *.log" = either pattern */
+BOOL WildMatch(const WCHAR *pat, const WCHAR *name)
+{
+    while (*pat) {
+        const WCHAR *b, *e;
+        while (*pat == ' ' || *pat == ';') pat++;
+        b = pat;
+        while (*pat && *pat != ';') pat++;
+        e = pat;
+        while (e > b && e[-1] == ' ') e--;
+        if (e == b) continue;
+        if (Wild1(b, e, name)) return TRUE;
+        if (e - b >= 2 && e[-1] == '*' && e[-2] == '.' && Wild1(b, e - 2, name)) return TRUE;
+    }
+    return FALSE;
+}
+
 BOOL IsDir(const WCHAR *path)
 {
     DWORD a = GetFileAttributesW(path);

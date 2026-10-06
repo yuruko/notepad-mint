@@ -58,7 +58,18 @@ const WCHAR *PathName(const WCHAR *path);
 void   PathDir(const WCHAR *path, WCHAR *out, int cap);
 void   PathJoin(WCHAR *dir, const WCHAR *name, int cap);
 BOOL   IsDir(const WCHAR *path);
+BOOL   WildMatch(const WCHAR *pat, const WCHAR *name);   /* case-insensitive * and ?, "a;b" = either, "*.*" also matches "readme" */
 size_t mp_count_lf(const WCHAR *p, size_t n);        /* rt.asm */
+
+/* ------------------------------------------------------------ search.c -- */
+/* pure text search (no ui, unit tested): pattern pat[0..m) in t[0..n) (neither needs a terminator).
+ * down (up = 0): the first match starting at or after `from`. up: the last match ending at or before `from`.
+ * returns the match start or -1 (also for m <= 0). no wrap-around: the caller retries from the other end. */
+int    FindInText(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int up, int matchCase);
+/* replace every match of pat with `with` in one pass. returns a mem_alloc'd, nul terminated result
+ * (*outLen chars, *count replacements) or NULL when out of memory. zero matches => a copy and *count = 0. */
+WCHAR *ReplaceAllText(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase,
+                      int *outLen, int *count);
 #ifdef DBGLOG
 void   Dbg(const WCHAR *tag, INT_PTR a, INT_PTR b);  /* debug builds: append to build\dbg.log */
 #define DBG(t, a, b) Dbg(t, (INT_PTR)(a), (INT_PTR)(b))
