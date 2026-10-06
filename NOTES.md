@@ -92,21 +92,30 @@ tests/         unit/ (no-crt host tests of doc.c / search.c / util.c / rt.asm, `
   cmdline path that doesn't exist => "cannot find the <path> file. do you want to create a new file?"; time/date = short time (no secs) + space + short date;
   not-found msg `cannot find "<text>"`; goto line error "the line number is beyond the total number of lines"; default ext txt on save.
 
-## status (snapshot when the repo was first pushed)
-done + screenshot-tested: main window, custom dark menu bar/popups/status bar (chrome font), word wrap, font-size zoom (ctrl+plus/minus/0/wheel, 10..96pt),
-  neutral window border, about box, help topics, 32-bit build (pe32, large-address-aware), command line / drag & drop open, in-place save (ctrl+s) of a file that has a path,
-  new / new window / exit prompts, settings load/save, utf-8/utf-16/code page read+write code (doc.c; not yet round-trip tested).
-placeholders in src/stubs.c (each shows "isn't written yet"): find, replace, go to, open dialog, save as dialog, encoding pickers (other code page / reopen with),
-  font & colors dialog, print, page setup.  => the specs for them are in git history / were: find.c (find+replace modeless + goto), filedlg.c (custom dark open/save with
-  encoding + line ending dropdowns, EncDlg), fontdlg.c (font list, size 10..96, rgb sliders + hex + presets, live preview, reset), print.c (comdlg32 on demand, text pagination).
-  (a first attempt to have helpers write them was interrupted before any file landed.)
-experimental, OFF: custom title strip (src/frame.c, `FRAME_CUSTOM` 0) so the title could use the chrome font - windows still drew its own caption above it
-  (WM_NCCALCSIZE override had no effect; FrameNcCalc never logged). the native dark title bar is used meanwhile.
-todo: the dialogs above, tools/layout_check (compare w32.h struct layouts + constants with the real sdk), functional tests (encoding/eol round trips, wrap, find/replace, dpi),
-  a final polish pass, license decision.
+## status (2026-10-05)
+every menu item is implemented (no placeholders left, `src/stubs.c` is gone). the release build has zero /W3 warnings and the exe imports only kernel32 / user32 / gdi32.
+how each part was verified (everything below ran locally; `tools\verify.bat ui` repeats all of it except the title strip and the screenshots):
+| what | how | result |
+|---|---|---|
+| build | `build.bat`, log scanned for warnings (also in ci) | clean, 192 kb |
+| imports | `tools\check_imports.ps1` (reads the pe import table) | kernel32 / user32 / gdi32 only, 155 functions |
+| `src/w32.h` against the real sdk | `tools\layout_check` (two translation units + a linker pass; fails on a broken copy: tested) | 33 structs, 240 fields, 436 constants, 14 macros (140 vectors), 54 typedefs, 185 api prototypes: 0 mismatches |
+| doc / search / util logic | `tests\unit` (no crt, like the app) | 375 checks: encodings x line endings round trips, bom, utf-16 without bom, invalid utf-8, lossy writes, 1 mb round trips, find / replace-all, wildcard, paths, default name. 1 skipped (accented latin needs cp 1252, this box is cp 932) |
+| dialogs and commands | `tests\ui\ui_test.ps1`: drives the real exe with window messages on a private desktop (nothing shows, no keystroke can leak) | 202 checks: startup decode, find (case, wrap, up / down, cannot find), replace / replace all (one undo step), go to, open (missing file, folder, filter), save as (.txt rule, replace prompt, utf-16 / lf pick), reopen with encoding, theme (settings + pixels), font dialog (clamps, presets, reset), about / help / page setup, big file, exit prompts, default name. 1 skipped (editor focus after a dialog needs a visible desktop; it passed in an earlier visible run) |
+| title strip | `tools\frame_test.ps1`: real mouse input on the real desktop | hit tests, maximize / restore (same size back), double click, drag, win+left snap, minimize, close: all pass (last run before the late dialog fixes; frame.c did not change since) |
+| looked at in screenshots | dark and light main window, find, replace, go to, open, save as, font, about, menus, rtl, new-window cascade, 50 mb file | as intended |
+| ctrl+backspace / ctrl+delete, rtl toggle, new window cascade, settings.ini round trip | by hand with `tools\shot.ps1` | work |
+| print | the page wrap logic was property tested against a reference model (6.9 m cases); page setup opens and closes (gui test) | **no job was ever sent to a printer or pdf driver**: unverified |
+| ci | the scripts it runs were run locally | **the workflow itself has not run on github yet** (it was only rewritten) |
+five read-only reviews of find / filedlg / fontdlg / print / the theme code found about 30 candidate defects. each was re-checked before touching code: two were refuted by measurement (listbox type-ahead
+needs no `WM_CHARTOITEM` handler, and Enter on a focused non-default button does not press ok), the real ones were fixed (see git log). known limits are in `TODO.md`.
 
 ## tooling quirks
 - RunBash: don't put powershell code in a bash heredoc (gets routed to powershell and breaks). use the Write tool for files.
 - `cmd.exe /c build.bat` needs the absolute path. screenshots: tools\shot.ps1 (CopyFromScreen of the dwm frame bounds; forces the window to the foreground
   with AttachThreadInput; the keys go to the real foreground window, so runs are flaky if something steals focus).
-- the test harness steals keyboard focus: the user's own typing can land in the test window.
+- `tools\shot.ps1` and `tools\frame_test.ps1` steal the foreground (and the mouse): the user's own typing can land in the test window (it happened: stray text showed up in the editor).
+  `tests\ui\ui_test.ps1` does not: it runs the app on a private desktop (`CreateDesktop`) and uses window messages only. `shot.ps1 -Cmd <IDM_ id>` posts a menu command by id.
+- batch files: the current directory is not on the command lookup path here, so every `cmd /c` / `call` uses an absolute path (`tools\verify.bat` builds one from `%~dp0`);
+  `a && b & c` runs `c` unconditionally (use parentheses).
+- the unit tests, layout_check, probe builds and the gui suite all write under `build\` (git-ignored) and never touch `build\notepad mint.exe` except `build.bat` itself.

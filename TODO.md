@@ -1,163 +1,58 @@
-# TODO - finishing notepad mint
+# TODO - notepad mint
 
-this file is the work order for whoever continues the project (people or agents). read `README.md` and `NOTES.md` first (design + decisions),
-then `src/mp.h` (all shared declarations), `src/ui.c` (dialog scaffolding, `MsgDlg` at the bottom is the canonical dialog), `src/edit.c`, `src/main.c`.
-
-## status of this branch (read first): partly written, NOT built, NOT integrated
-
-an agent session wrote most of the files below but was stopped before integration. **nothing on this branch has been compiled by msvc or run.**
-the only checks that ran were a linux-side clang syntax check (`tools/linux_check.sh`) and, for the first two commits only, ci (green). the head commit is a wip snapshot and **will not link**: ci on it is expected red.
-
-| item | state |
-|---|---|
-| `tools/linux_check.sh` | done, works (catches crt calls and 64-bit helpers; verified on a deliberately bad file) |
-| `WildMatch` (`util.c`), search decls in `mp.h` | written; the `WildMatch` commit passed msvc ci |
-| dark / light theme foundation (`mp.h` `g_pal`, `C_*` are now runtime values, `ThemeSet` / `DarkFrame` in `ui.c`, accent title text via dwm) | committed; ci never ran on it. menu / status / about / main edits for it are in the wip commit, unreviewed |
-| `src/find.c`, `src/search.c` | written, unreviewed, never compiled by msvc. `FindInText` / `ReplaceAllText` are not unit tested yet |
-| `src/filedlg.c` | written, unreviewed, never compiled by msvc |
-| `src/fontdlg.c` | written, unreviewed, never compiled by msvc. spec changed: font only (see "new requirements") |
-| `src/print.c` | written, unreviewed, never compiled by msvc; the gate currently fails (`ERROR_PRINT_CANCELLED`, `PD_PAGENUMS`, `IDC_WAIT` undeclared) |
-| `src/frame.c` | modified in the working tree, uncommitted work from the title-strip investigation; root cause not written up, `FRAME_CUSTOM` still 0, no ci evidence |
-| `tests/unit/` | partial (`unit.c`, `build.bat`), not wired into ci, never run |
-| `tools/layout_check`, ci hardening, smoke test, import assertion, zero-warning assertion | **not started** (section 4 is still entirely owed) |
-| `src/stubs.c` | **still present**: it duplicates the real modules, so the head does not link. delete it once the modules compile |
-| `NOTES.md` / `README.md` | **not updated** ("not written yet" lists are stale) |
-
-### what to do next, in order
-1. `tools/pending/` holds the `w32.h` declaration fragments the agents wrote (`w32_filedlg.h`, `w32_fontdlg.h`, `w32_print.h`, `w32_theme.h`, `w32_frame.h`) and two proposed `main.c` diffs (`find_main.diff`, `frame_main.diff`). merge the declarations into `src/w32.h` (check for duplicates and exact 32-bit sdk signatures / values: the print gate failure above is a missing `PD_PAGENUMS` / `IDC_WAIT` / `ERROR_PRINT_CANCELLED`), apply the diffs only if still wanted, then delete `tools/pending/`.
-2. delete `src/stubs.c`, run `tools/linux_check.sh` until clean, push, and iterate on ci until the msvc build has zero /W3 warnings.
-3. review each new module against its section below (none has been reviewed), then section 4 (layout_check, unit tests, smoke test, imports + warnings assertions in the workflow).
-4. update `NOTES.md` (status, theme, title-strip findings) and `README.md`, then open the pr against `main` with per-item verification.
-
-### new requirements from the maintainer (these override the sections below where they conflict)
-- **only two themes: dark (default) and light**, switched from view > theme, saved as `[view] theme=dark|light`. the editor area is **black in dark and white in light**. **custom text / background colours are removed**: the font dialog (2.3) is font only (title "font": face, size 10..96, bold, italic, preview, reset; no colour column, sliders, hex edits or presets). `g_pf.fg` / `g_pf.bg` are derived from the theme and not saved.
-- the `C_*` colours are runtime values (`g_pal`): never use them in static initialisers / constant expressions or cache a brush made from them. `C_ACCENT_FG` = accent as text or a line, `C_ON_ACCENT` = text on an accent fill.
-- **title bar text in the accent colour while the window is active** (done via dwm text colour in `DarkFrame`, unverified) **and in the app's own font**: the latter needs the custom title strip (section 3, `src/frame.c`) and stays off until ci evidence shows a single title bar and working buttons / maximize / snap.
-- do not touch the scrollbar auto-hide logic in `src/edit.c` / `src/main.c` (the maintainer is doing it locally); keep the theme hunks in `main.c` small so the merge is easy.
+state (2026-10-05): feature complete. every menu item works, the build is clean and the checks in `tools\verify.bat ui` pass. `NOTES.md` ("status") says per item how it was verified
+and what was never verified; this file is what is still open, plus the rules for whoever changes the code next. the original per-module specs of the dialogs live in git history (`TODO.md` at 78e8b0a).
 
 ## 0. hard rules (breaking any of these breaks the build or the product)
 
 - **raw c17 + x86 masm, 32-bit only.** no crt, no `windows.h`, no third-party code. the exe links with `/NODEFAULTLIB`, so any crt call
   (`strlen`, `wcslen`, `malloc`, `printf`, `qsort`, `swprintf` ...) is an *unresolved external at link time*. `memset/memcpy/memmove/memcmp` come from `src/rt.asm`.
-  use the helpers in `src/util.c` (`mem_alloc`, `wcopy`, `wcat`, `wcmp`, `wcmpi`, `wlow`, `wtoi`, `PathName/PathDir/PathJoin`, `ParseColor/FormatColor` ...) and win32 (`wsprintfW`, `lstrlenW` ...).
+  use the helpers in `src/util.c` (`mem_alloc`, `wcopy`, `wcat`, `wcmp`, `wcmpi`, `wlow`, `wtoi`, `PathName/PathDir/PathJoin`, `DefaultDocName` ...) and win32 (`wsprintfW`, `lstrlenW` ...).
   **no 64-bit integer division / modulus / shifts and no floating point** (they need crt helpers such as `__alldiv`); use `MulDiv` for scaled math.
-- every win32 function, struct and constant you use must be declared in `src/w32.h` with the exact **32-bit sdk** signature / layout (stdcall, `API` = dllimport).
-  only kernel32 / user32 / gdi32 may be imported statically; anything else (dwmapi, uxtheme, shell32, comdlg32 ...) is loaded with `LoadLibraryW` + `GetProcAddress` (see `UiInit` in `ui.c`).
-  win10-only apis must be looked up at run time too (see `UiDpiForWindow`).
+- every win32 function, struct and constant you use must be declared in `src/w32.h` with the exact **32-bit sdk** signature / layout (stdcall, `API` = dllimport). `tools\layout_check` proves it against the real sdk:
+  run it after every `w32.h` edit. only kernel32 / user32 / gdi32 may be imported statically; anything else (dwmapi, uxtheme, shell32, comdlg32 ...) is loaded with `LoadLibraryW` + `GetProcAddress`
+  (see `UiInit` in `ui.c`). win10-only apis must be looked up at run time too (see `UiDpiForWindow`).
 - **all user-visible text is lowercase** (labels, buttons, titles, messages).
 - dpi: coordinates you hand to the ui helpers (`UiLabel/UiEdit/UiButton/DlgFrame/DlgOpen`) are 96-dpi pixels; any raw pixel math goes through `S()`.
-- fonts: dialogs use `g_fontUI` (segoe ui 9pt, `DEFAULT_CHARSET`), the main window chrome uses `g_fontMenu`. **never use tahoma / microsoft sans serif for ui text**: on a japanese
-  system locale (the dev machine is ja-JP) they draw `\` as a yen sign in every charset (measured, see `tools/fonttest.c`).
+- fonts: dialogs use `g_fontUI` (segoe ui 9pt, `DEFAULT_CHARSET`), the main window chrome (menu bar, status bar, title strip) uses `g_fontMenu` = the editor font minus `CHROME_PT_LESS` (3) pt.
+  **never use tahoma / microsoft sans serif for ui text**: on a japanese system locale (the dev machine is ja-JP) they draw `\` as a yen sign in every charset (measured, see `tools/fonttest.c`).
+- the palette `C_*` is a set of **runtime values** (`g_pal`, dark / light): never use them in static initialisers, `case` labels or constant expressions, and never cache a brush made from them across a theme switch.
 - a custom window class that handles `WM_NCCREATE` must still call `DefWindowProcW` for it (that is what stores the window text, otherwise buttons are blank).
 - keep `build.bat` producing `build\notepad mint.exe` with **zero warnings at /W3**; keep the exe's imports to kernel32 / user32 / gdi32 only.
 - dialogs follow the `MsgDlg` pattern in `ui.c`: a struct whose first member is `DlgBase`, one window class per dialog registered once with `RegClass`, a wndproc that starts with
   `DlgBase *b = DlgFromHwnd(h, m, l); if (!b) return DefWindowProcW(...)` and ends with `if (DlgCommon(b, m, w, l, &r)) return r;`. open with `DlgOpen(b, cls, title, cw, ch, modeless)`,
-  run modal ones with `DlgRunModal(b)`. default button id = `IDOK`, esc = `IDCANCEL`. native `COMBOBOX` / trackbar / comctl32 controls cannot be darkened: do not use them.
+  run modal ones with `DlgRunModal(b)` (it disables every other live window of ours and re-enables them). default button id = `IDOK`, esc = `IDCANCEL`. native `COMBOBOX` / trackbar / comctl32 controls cannot be darkened: do not use them.
   native `LISTBOX` is fine but create it owner-draw (`LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY`), draw the selection with `C_ACCENT` / `C_FACE`, call `DarkScroll()` on it.
   dropdown-like choices = an `mp_btn` that pops `MenuPopup()` (ids >= 1000 so they never collide with `IDM_*`).
+- the scrollbar auto-hide logic in `src/edit.c` (`UpdateBars` / `EditScrollSoon`) was done with a real display and verified with screenshots: don't regress it.
 
-## 1. you can't run the app (probably linux): the feedback loop
+## 1. the feedback loop
 
-1. **ci first**: `.github/workflows/build.yml` builds on `windows-latest` with the real msvc x86 toolchain (`build.bat`), uploads the exe, and has a best-effort smoke test.
-   push your branch and read the result (`gh run list / gh run view --log-failed`, the pr checks, or the api, whatever you have). iterate until green.
-   extend the workflow: assert the exe's imports are only kernel32 / user32 / gdi32 (`dumpbin /imports`), run the unit tests from section 4, keep the smoke test honest.
-2. **linux-side syntax check** (optional but fast): a 32-bit mingw-w64 cross compiler can check most files: e.g.
-   `i686-w64-mingw32-gcc -std=gnu17 -fsyntax-only -ffreestanding -D__int64="long long" -Wall src/find.c` (you may need a few `-D` shims; do not change the sources to please gcc if msvc is fine with them).
-3. if you cannot observe a ci result at all, say so plainly in the pr and list what is unverified. never claim something was tested when it was only read.
+- **locally**: `tools\verify.bat` (build + warning scan, imports, layout check, unit tests, smoke test), `tools\verify.bat ui` adds the message-driven gui suite (`tests\ui\ui_test.ps1`, private desktop, nothing shows),
+  `tools\verify.bat frame` adds the title strip test with real mouse input. `tools\shot.ps1` takes screenshots (`-Keys` or `-Cmd <IDM_ id>`), `tools\cc.bat file.c` compile-checks one file,
+  `tools\probe.bat <cl switches>` builds an experimental copy into `build\probe` without touching the real build.
+- **ci**: `.github/workflows/build.yml` (windows-latest, msvc x86): build with a warning scan, import check, layout check, unit tests, smoke test with a screenshot artifact, debug build with a warning scan.
+- **linux-side syntax check** (optional, fast): `tools/linux_check.sh`.
 
-## 2. the missing modules (the menu items currently hit the placeholders in `src/stubs.c`)
+## 2. open items (none blocks the build)
 
-each is one new file with the functions already declared in `src/mp.h`. as each lands, delete its placeholder from `stubs.c`; delete `stubs.c` when empty. they are independent: do them in parallel,
-but only one person/agent edits the shared files (`mp.h`, `w32.h`, `stubs.c`, `NOTES.md`, `README.md`, `build.bat`) at a time.
+1. **ci has not run yet.** the workflow was rewritten and every script it calls was run locally, but nobody has pushed it: push and read the first windows-latest result (the smoke test is `continue-on-error` until it proves stable there).
+2. **big files are slow to open** because of the stock edit control, not our code: setting the text makes the control build its line index and measure every line (about 44 us per line, ~0.65 s per mb: 20 mb = 13 s,
+   50 mb = 31 s, the window shows "not responding" meanwhile). profiled: `DocRead` takes 62 ms for 20 mb, the bar logic ~0 ms, and `WM_SETTEXT` and `EM_SETHANDLE` cost the same.
+   fixes would be a chunked loader that pumps messages and shows progress, or our own text view instead of the native edit.
+3. **printing was never run against a printer or pdf driver.** the wrap logic is tested, page setup opens; the job runs inside the command handler (no abort dialog, no message pump).
+4. dialogs are not re-laid-out when dragged to a monitor with another dpi (the main window is).
+5. ime composition in the edit is untested (no ime available to drive it here).
+6. the custom radio buttons are both tab stops (native: only the checked one); arrow keys already move and select.
+7. windows 11 snap layouts flyout on the maximize button is not available: the strip's buttons are `HTCLIENT` (own mouse handling) so they can't answer `HTMAXBUTTON`.
+8. `notepad foo.` on the command line still falls back to `foo.txt`; the open / save dialogs no longer do (`OpenCmdFile` in `main.c`).
+9. `tools\layout_check` checks argument byte counts of the api prototypes, not their argument types.
+10. no license decision yet (the icon derives from microsoft's notepad icon, see `README.md`).
 
-### 2.1 `src/find.c` - find / replace (modeless) + go to
-declared: `void FindDlgShow(int replaceMode); void FindNext(int dirUp); HWND FindDlgHwnd(void); BOOL FindHasText(void); void GotoDlg(HWND owner);`
-state: static `WCHAR g_findWhat[256], g_findWith[256]; int g_findUp;` match case / wrap around live in `g_pf.matchCase` / `g_pf.wrapAround` (main saves them).
-- `FindDlgShow`: **modeless** dialog owned by `g_hwnd` (`DlgOpen(..., modeless=1)`), main routes keys with `IsDialogMessageW(FindDlgHwnd(), &msg)` so `FindDlgHwnd()` must be NULL when it doesn't exist.
-  if it exists: switch mode (destroy + recreate keeping the text) or just bring it to front; focus "find what" with its text selected. prefill "find what" from the main edit's selection when it is
-  non-empty, has no line break and is <= 255 chars (`EM_GETSEL` + `EditLockText`; never the clipboard).
-  layout (client px), notepad-like: find mode ~410x130: label "find what:" + edit (1001); checks "match case" (1002), "wrap around" (1003); an etched `DlgFrame` "direction" with radios "up" (1004) / "down" (1005);
-  buttons "find next" (`IDOK`, default) / "cancel". replace mode ~410x170 adds "replace with:" + edit (1006) and buttons "find next", "replace" (1007), "replace all" (1008), "cancel". titles "find" / "replace".
-  find next / replace / replace all are disabled while "find what" is empty.
-- find next: search from the END of the selection going down (START going up); if nothing and wrap around is on, continue from the other end; if still nothing:
-  `MpAsk(dlg, APP_NAME, L"cannot find \"<text>\"", L"ok", NULL, NULL, 1)`. on a hit: `EM_SETSEL(start,end)` + `EM_SCROLLCARET` on `g_edit`; keep the dialog open (the edit has `ES_NOHIDESEL`, so its selection stays visible).
-- replace: if the selection equals the find text (honouring match case) `EM_REPLACESEL(TRUE, with)`, then find next; else just find next.
-- replace all: one pass over the zero-copy view (`EditLockText` / `EditUnlockText`: CRLF text, buffer NOT nul terminated), build the result in one `mem_alloc` buffer, then `EM_SETSEL(0,-1)` +
-  `EM_REPLACESEL(TRUE, buf)` so it is one undo step. zero matches => the same "cannot find" message.
-- case-insensitive compare with `wlow()` on both sides + a first-char prefilter; case-sensitive = plain compare. keep the search function pure (pointer + length in, index out) so it can be unit tested.
-- cancel / close / esc destroys the dialog (`DlgCommon` already `DestroyWindow`s modeless dialogs on `WM_CLOSE`: make `IDCANCEL` send `WM_CLOSE`); clear your statics on `WM_NCDESTROY`, then `SetFocus(g_edit)`.
-- `FindNext(dirUp)` (f3 / shift+f3): uses the remembered text + options (f3 = down, shift+f3 = up regardless of the dialog radios); no remembered text => `FindDlgShow(0)`. `FindHasText()` = `g_findWhat[0] != 0`.
-- `GotoDlg(owner)`: modal "go to line" (~300x110): label "line number:" + numeric edit prefilled with the caret line (`EditCaretPos`), text selected; buttons "go to" (default) / "cancel".
-  ok: `n = wtoi(text)` (< 1 means 1); `if (!EditGotoLine(n))` show `MpAsk(dlg, L"go to line", L"the line number is beyond the total number of lines", L"ok", NULL, NULL, 1)` and stay; else close + `SetFocus(g_edit)`.
+## 3. definition of done
 
-### 2.2 `src/filedlg.c` - open / save as / encoding picker (custom dark dialogs; the native ones can't be dark)
-declared: `BOOL FileDlgOpen(HWND owner, WCHAR *path, int cap); BOOL FileDlgSave(HWND owner, WCHAR *path, int cap, int *enc, int *eol); BOOL EncDlg(HWND owner, int *enc, int reopen);`
-- modal, fixed size ~580x420 client px (save a bit taller). rows: "look in:" + path edit (enter navigates to a typed absolute path) + button "up" (parent; from a drive root go to the drive list) /
-  owner-draw listbox: directories first (alphabetical via `wcmpi`, small folder glyph drawn by you), then files matching the filter; skip hidden entries and "."/".."; at the top level list the drives
-  (`GetLogicalDrives` / `GetDriveTypeW`, "c:\" style) / "file name:" + edit + default button "open" / "save" / "files of type:" dropdown ("text documents (*.txt)", "all files (*.*)") + "cancel".
-  save only: "encoding:" dropdown ("utf-8", "utf-8 with bom", "utf-16 le", "utf-16 be", "ansi" = `ENC_*` 0..4 via `g_encName[]`, and "other code page..." which opens `EncDlg(dlg, &enc, 0)`; show `EncLabel()` of the pick)
-  and "line ending:" dropdown (`g_eolName[]`, `EOL_*`). initial values from `*enc` / `*eol`, written back on ok.
-- start folder: directory part of `path` if it exists, else the last folder used in this process (static), else the current directory. save: the file-name edit starts with the name part (empty for untitled). initial focus: file name edit.
-- single click on a file copies its name to the edit; double click / enter on a directory enters it; double click on a file = ok. backspace in the list = up (nice to have).
-- ok (open): wildcard (`*` / `?`) in the name => use it as the filter and refresh; existing directory => navigate; else build the full path (a name with a drive letter / leading backslash / unc prefix is absolute,
-  else join with the current folder); missing file => `MpAsk(dlg, L"open", <name> + L"\n\nfile not found. check the file name and try again.", L"ok", NULL, NULL, 1)` and stay; else fill `path` (never overflow `cap`) and return TRUE.
-- ok (save): same resolution; **notepad rule: if the last path component has no '.', append ".txt"**; existing file => `MpAsk(dlg, L"save as", <path> + L"\n\nalready exists. do you want to replace it?", L"yes", L"no", NULL, 2)` (anything but 1 stays);
-  missing target folder => error + stay. on success write `path`, `*enc`, `*eol`, return TRUE. cancel / esc => FALSE, outputs untouched. titles "open" / "save as".
-- filter patterns: small case-insensitive wildcard matcher you write; "all files" = `*.*` matches names without a dot too. paths are `PATH_CAP` (1024) chars max: use `wcopy/wcat/PathJoin` with the right caps.
-- `EncDlg(owner, enc, reopen)`: ~400x360, title reopen ? "reopen with encoding" : "other code page"; label (reopen ? "pick the encoding to read the file with:" : "pick the encoding to save the file with:") above an owner-draw listbox of
-  every `EncListGet(i, ...)` (`i < EncListCount()`; item data = the encoding id, 0..4 or a code page >= 100); preselect `*enc`; "ok" / "cancel"; double click = ok; writes `*enc` on ok.
-- main already does: default `.txt`-less names, the lossy-save prompt, "reopen" (`Reopen()` in `main.c`), settings. the dialogs only pick values.
-
-### 2.3 `src/fontdlg.c` - "font & colors" dialog (`BOOL FontDlg(HWND owner)`)
-modal ~640x450, title "font & colors". works on a local copy of `g_pf.font[32] / pt / bold / italic / fg / bg`; on ok copies back and returns TRUE (main then calls `AppApplyPrefs`, which also resets the working size and re-fonts the menus);
-cancel returns FALSE.
-- left "font": check "monospaced fonts only" (default on); owner-draw listbox of families (`EnumFontFamiliesExW`, `DEFAULT_CHARSET`, skip names starting with '@', de-duplicate case-insensitively, names are `WCHAR[32]`);
-  decide "monospaced" robustly (create the font, compare the widths of `L"iiiiiiii"` and `L"WWWWWWWW"`; lazily + cached); sorted with `wcmpi`. "size:" numeric edit + hint "10 to 96 pt" (`IDC_DIM`) + a row of preset buttons
-  10 11 12 13 14 16 18 20 24 28 32 36 48 72 96; checks "bold" / "italic". size is clamped to `FONT_MIN..FONT_MAX` (10..96) on leaving the edit and on ok.
-- right "colors": blocks "text color" and "background": big swatch, hex edit "rrggbb" (`ParseColor` / `FormatColor`, live, invalid text keeps the old colour), three R/G/B sliders 0..255 with value labels.
-  write a small custom window class `mp_slider` (sunken track, mint thumb, mouse drag with capture, arrows/page/home/end, `WM_GETDLGCODE` = `DLGC_WANTARROWS`, notifies the parent with `WM_COMMAND`).
-  guard the edit <-> slider <-> preset updates against feedback loops. a row of 12 preset swatches (text/background pairs): mint ffffff/161418 (the default), paper 1b1b1b/f5f5f0, solarized dark 839496/002b36,
-  solarized light 657b83/fdf6e3, monokai f8f8f2/272822, dracula f8f8f2/282a36, nord d8dee9/2e3440, gruvbox dark ebdbb2/282828, terminal green 33ff66/000000, amber ffb000/1a1000, high contrast ffffff/000000,
-  black on white 000000/ffffff; clicking sets both; show the preset name in a dim label.
-- bottom: sunken "preview" panel rendering the current choice (face, point size scaled by `g_dpi`, bold/italic, colours; clamp the drawn size to what fits, ~32pt): line 1 "the quick brown fox jumps over the lazy dog 0123456789",
-  line 2 "日本語 한국어 العربية עברית русский ελληνικά", line 3 "int main(void) { return 0; }". repaint on every change.
-- buttons "ok" (default), "cancel", "reset" (face "Consolas" then `FontResolve()`, 13 pt, no bold/italic, text ffffff, background 161418). initial focus: the font list with the current face selected and scrolled into view.
-- all text lowercase; leak nothing (HFONT / HBRUSH / HDC).
-
-### 2.4 `src/print.c` - print + page setup (`void PrintDoc(HWND owner); void PageSetup(HWND owner);`)
-- `comdlg32.dll` is loaded on demand (`LoadLibraryW` + `GetProcAddress("PrintDlgW" / "PageSetupDlgW")`); never statically imported. `PRINTDLGW` (packed to 1 byte on 32-bit) and `PAGESETUPDLGW` are already in `w32.h`. the native dialogs are light-themed: accepted.
-- keep `hDevMode` / `hDevNames` in statics (shared by page setup and print), free replaced ones with `GlobalFree` (declare it).
-- `PageSetup`: `PSD_MARGINS | PSD_INTHOUSANDTHSOFINCHES`, margins from `g_pf.marginL/T/R/B` (1/1000 inch), write them back on ok.
-- `PrintDoc`: `PD_RETURNDC | PD_NOSELECTION | PD_USEDEVMODECOPIESANDCOLLATE` (+ page range if you like). text = `EditGetDocText` (CRLF; free with `mem_free`), job name = file name or "untitled". font = the editor face at the **chosen** size `g_pf.pt`
-  (not `g_pf.cur`), bold/italic from `g_pf`, height `-MulDiv(pt, LOGPIXELSY, 72)`. margins -> device px relative to the printable area (`PHYSICALOFFSETX/Y`, `PHYSICALWIDTH/HEIGHT`), clamp so the text box is never empty.
-  split at CRLF, expand tabs to 8 columns, word-wrap to the text-box width with `GetTextExtentExPointW` (break at the last fitting space, else hard break; always advance >= 1 char), paginate by line height, compute rows lazily page by page
-  (no unbounded allocation). header = file name centred in the top margin, footer = "page <n>" centred in the bottom margin (like notepad; skip if the margin can't hold a line).
-  `StartDocW` / `StartPage` / `TextOutW` / `EndPage` / `EndDoc`; any failure => `AbortDoc` + `MpAsk(owner, APP_NAME, L"cannot print the document.", ...)`. copies: if the driver ignores the devmode copies, repeat the job. free everything on every exit path.
-
-### 2.5 integrate
-delete the placeholders from `stubs.c` as modules land (and the file when empty), update `NOTES.md` (status section) and `README.md` ("not written yet" list), keep `build.bat` building `src\*.c`.
-
-## 3. other features still owed
-
-- **title bar in the chrome font** (the user asked for it): `src/frame.c` is an experiment that draws a custom title strip (`FRAME_CUSTOM`, currently 0 = off). when switched on, windows still drew its own caption above ours
-  (the `WM_NCCALCSIZE` override had no effect, `FrameNcCalc` never logged). find out why (suspects: the system only applies the shrunken client rect when ...; `DwmExtendFrameIntoClientArea`; `SetWindowPos(SWP_FRAMECHANGED)` after creation;
-  an earlier handler consuming the message) - only turn it on if a ci screenshot (or other evidence) shows a single title bar, correct maximize / restore / snap behaviour and working min / max / close buttons; otherwise leave it off and write down what you found in `NOTES.md`.
-- **scrollbars that only appear when needed - DONE (maintainer, verified with screenshots)**: `UpdateBars` / `EditScrollSoon` in `src/edit.c` (see the comments there and `NOTES.md`). do not touch it; just don't regress it
-  (a ci screenshot test of a short / tall / wide document would be a welcome addition).
-- polish / review pass over what you wrote: ime composition in the edit, per-monitor dpi change while a dialog is open, a 50 mb file, ctrl+backspace / ctrl+delete, rtl toggle, new window cascade, `settings.ini` round trip.
-
-## 4. verification the project still owes (do these in ci where possible)
-
-- **`tools/layout_check`**: prove `src/w32.h` matches the real 32-bit sdk: for every struct in `w32.h` compare `sizeof` + every field offset, for every `#define` that exists in the sdk compare the value, and check every `API` prototype has the right
-  stdcall byte count (`_Name@N`). e.g. two translation units (one including the real `windows.h`, one including only `w32.h`) that each export a table, plus a checker that diffs them; run it in the windows ci job
-  (a mingw-w64 `windows.h` is also fine on linux if you can run the result). report every mismatch and fix `w32.h`.
-- **unit tests** (host-only programs, may use the normal crt): `DocRead` / `DocWrite` round trips for every encoding (`ENC_*` and a few code pages) x every line ending (crlf / lf / cr / mixed -> majority wins), bom handling, utf-16 without bom,
-  invalid utf-8 -> ansi, lossy detection on an 8-bit code page, empty file, a file ending without a newline; the pure search function from `find.c` (case, wrap, up/down, crlf boundaries, empty needle);
-  `EncListGet` / `EncLabel`; path helpers; wildcard matcher. wire them into the ci job.
-- **smoke test in ci**: start the exe with `tests/multilingual-sample.txt`, assert it stays alive and the main window title is `multilingual-sample.txt - notepad mint`; if the runner has a desktop, also capture a screenshot artifact
-  (`tools/shot.ps1` is a starting point).
-
-## 5. definition of done
-
-`build.bat` clean (zero /W3 warnings), ci green on windows-latest, imports only kernel32 / user32 / gdi32, `src/stubs.c` gone, every menu item does what notepad's does (plus the extras in `README.md`), `NOTES.md` / `README.md` updated,
-and a pr description that says, per item, **how it was verified** (ci job, unit test, read only). open the pr against `main`; do not force-push `main`.
+- [x] `build.bat` clean (zero /W3 warnings), imports only kernel32 / user32 / gdi32, `src/stubs.c` gone
+- [x] every menu item does what notepad's does (plus the extras in `README.md`): driven by `tests\ui`, see `NOTES.md`
+- [x] `NOTES.md` / `README.md` updated
+- [ ] ci green on windows-latest (never run: item 1 above)
+- [ ] a pr description that says, per item, how it was verified: the table in `NOTES.md` ("status") is that list; `main` was not pushed (nothing was force-pushed)
