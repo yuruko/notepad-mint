@@ -270,7 +270,7 @@ function Read-Consts([string]$path, $base = @{}) {                              
 }
 $IDM = Read-Consts (Join-Path $Src 'mp.h')                                       # IDM_*, ENC_*, EOL_*, FONT_MIN ...
 $IDF = Read-Consts (Join-Path $Src 'find.c') $IDM                                # ID_WHAT ... ID_REPLACEALL, ID_LINE
-$IDO = Read-Consts (Join-Path $Src 'filedlg.c') $IDM                             # ID_PATH ... ID_ENCLIST, MI_*
+$IDO = Read-Consts (Join-Path $Src 'filedlg.c') $IDM                             # ID_ENCLIST (the encoding picker; open / save as are native now)
 $IDT = Read-Consts (Join-Path $Src 'fontdlg.c') $IDM                             # ID_LIST ... ID_RESET
 $IDE = Read-Consts (Join-Path $Src 'edit.c') $IDM                                # IDC_EDIT
 foreach ($need in @(@('IDM', $IDM, 'IDM_EDIT_FIND'), @('find.c', $IDF, 'ID_REPLACEALL'), @('filedlg.c', $IDO, 'ID_ENCLIST'), @('fontdlg.c', $IDT, 'ID_RESET'), @('edit.c', $IDE, 'IDC_EDIT'))) {
@@ -370,7 +370,7 @@ function Ini-Val($app, [string]$sec, [string]$key, [string]$want = $null, [int]$
 # ------------------------------------------------------------------------------------------------ app management
 $work = Join-Path ([IO.Path]::GetTempPath()) ('npm_ui_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 [void](New-Item -ItemType Directory -Force -Path $work)
-$exeCopy = Join-Path $work 'notepad mint.exe'
+$exeCopy = Join-Path $work 'mint_ui_test.exe'                                    # (not "notepad mint.exe": the native file dialogs remember their last folder per exe NAME in the registry, the real app's entry must stay untouched)
 for ($try = 0; $try -lt 8; $try++) {                                             # the lead's build may be rewriting the exe right now
     try { Copy-Item -LiteralPath $Exe -Destination $exeCopy -Force; if ((Get-Item -LiteralPath $exeCopy).Length -gt 50000) { break } } catch {}
     Start-Sleep -Milliseconds 500
@@ -488,7 +488,7 @@ function Run-Case([string]$id) {
     finally { try { Stop-All } catch {} }
 }
 function Kill-Mine() {                                                           # any leftover process whose exe lives in our temp dir
-    Get-Process -Name 'notepad mint' -ErrorAction SilentlyContinue | Where-Object { try { $_.Path -like ($work + '*') } catch { $false } } | ForEach-Object { try { $_.Kill() } catch {} }
+    Get-Process -Name 'mint_ui_test' -ErrorAction SilentlyContinue | Where-Object { try { $_.Path -like ($work + '*') } catch { $false } } | ForEach-Object { try { $_.Kill() } catch {} }
 }
 
 $sampleMulti = Join-Path $Tests 'multilingual-sample.txt'
