@@ -349,8 +349,8 @@ void EditToggleRtl(void)
 }
 
 /* ------------------------------------------------------- word delete ------ */
-/* 0 blank, 1 word, 2 punctuation */
-static int WClass(WCHAR c)
+/* 0 blank, 1 word, 2 punctuation (also used by the dialog edits' ctrl+backspace in ui.c) */
+int WordClass(WCHAR c)
 {
     if (c == ' ' || c == '\t') return 0;
     if (c >= 0x80) return 1;
@@ -377,10 +377,10 @@ static void DelWord(int dir)
             a--;
             if (a > 0 && p[a - 1] == '\r') a--;
         } else {
-            while (a > 0 && WClass(p[a - 1]) == 0) a--;        /* blanks, then one run of a kind */
+            while (a > 0 && WordClass(p[a - 1]) == 0) a--;     /* blanks, then one run of a kind */
             if (a > 0 && p[a - 1] != '\n') {
-                int k = WClass(p[a - 1]);
-                while (a > 0 && p[a - 1] != '\n' && WClass(p[a - 1]) == k) a--;
+                int k = WordClass(p[a - 1]);
+                while (a > 0 && p[a - 1] != '\n' && WordClass(p[a - 1]) == k) a--;
             }
         }
     } else {
@@ -390,11 +390,11 @@ static void DelWord(int dir)
         } else if (b < n && p[b] == '\n') {
             b++;
         } else {
-            if (b < n && WClass(p[b]) != 0) {
-                int k = WClass(p[b]);
-                while (b < n && p[b] != '\r' && WClass(p[b]) == k) b++;
+            if (b < n && WordClass(p[b]) != 0) {
+                int k = WordClass(p[b]);
+                while (b < n && p[b] != '\r' && WordClass(p[b]) == k) b++;
             }
-            while (b < n && WClass(p[b]) == 0) b++;
+            while (b < n && WordClass(p[b]) == 0) b++;
         }
     }
     LocalUnlock(h);

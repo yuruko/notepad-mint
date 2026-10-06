@@ -460,7 +460,7 @@ static BOOL CALLBACK RethemeWnd(HWND h, LPARAM l)
 {
     WCHAR cn[32];
     (void)l;
-    GetClassNameW(h, cn, 32);
+    if (!GetClassNameW(h, cn, 32)) return TRUE;
     if (wcmp(cn, APP_CLASS) != 0 && !(cn[0] == 'm' && cn[1] == 'p' && cn[2] == '_')) return TRUE;   /* ime windows etc. */
     if ((GetWindowLongPtrW(h, GWL_STYLE) & WS_CAPTION) == WS_CAPTION) DarkFrame(h, h == GetActiveWindow());
     RedrawWindow(h, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
@@ -470,6 +470,7 @@ static BOOL CALLBACK RethemeWnd(HWND h, LPARAM l)
 /* view > theme. everything we draw reads the palette at paint time, so a repaint is enough after this */
 static void ApplyTheme(int theme)
 {
+    if (theme == g_pf.theme) return;                  /* clicking the checked item again: nothing to repaint or save */
     ThemeUse(theme);
     SetClassLongW(g_hwnd, GCL_HBRBACKGROUND, (LONG)(LONG_PTR)g_brFace);   /* the class brush erases the main window */
     EditApplyColors();
@@ -915,7 +916,8 @@ int mp_main(void)
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
         HWND fd = FindDlgHwnd();
         if (fd && IsDialogMessageW(fd, &msg)) continue;        /* the modeless find / replace dialog */
-        if (g_hwnd && msg.hwnd && (msg.hwnd == g_hwnd || IsChild(g_hwnd, msg.hwnd)) &&
+        if (g_hwnd && msg.hwnd &&
+            (msg.hwnd == g_hwnd || IsChild(g_hwnd, msg.hwnd) || (fd && (msg.hwnd == fd || IsChild(fd, msg.hwnd)))) &&   /* f3, ctrl+g ... work from the find dialog too, like notepad */
             TranslateAcceleratorW(g_hwnd, g_accel, &msg)) continue;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);

@@ -74,6 +74,7 @@ void   PathJoin(WCHAR *dir, const WCHAR *name, int cap);
 BOOL   IsDir(const WCHAR *path);
 BOOL   WildMatch(const WCHAR *pat, const WCHAR *name);   /* case-insensitive * and ?, "a;b" = either, "*.*" also matches "readme" */
 size_t mp_count_lf(const WCHAR *p, size_t n);        /* rt.asm */
+int    WordClass(WCHAR c);                           /* edit.c: 0 blank, 1 word char, 2 punctuation (word delete) */
 
 /* ------------------------------------------------------------ search.c -- */
 /* pure text search (no ui, unit tested): pattern pat[0..m) in t[0..n) (neither needs a terminator).

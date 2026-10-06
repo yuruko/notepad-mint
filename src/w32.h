@@ -233,6 +233,7 @@ typedef struct {
 #define WM_DRAWITEM 0x002B
 #define WM_MEASUREITEM 0x002C
 #define WM_VKEYTOITEM 0x002E
+#define WM_CHARTOITEM 0x002F
 #define WM_SETFONT 0x0030
 #define WM_GETFONT 0x0031
 #define WM_WINDOWPOSCHANGED 0x0047
@@ -590,6 +591,7 @@ typedef struct {
 #define DRIVE_FIXED 3
 #define DRIVE_REMOTE 4
 #define DRIVE_CDROM 5
+#define SEM_FAILCRITICALERRORS 0x0001
 #define ERROR_FILE_NOT_FOUND 2L
 #define ERROR_PRINT_CANCELLED 63L
 #define ERROR_ALREADY_EXISTS 183
@@ -606,6 +608,8 @@ typedef struct {
 
 /* comdlg32 printing */
 #define PD_PAGENUMS 0x00000002
+#define PD_DISABLEPRINTTOFILE 0x00080000
+#define PD_HIDEPRINTTOFILE 0x00100000
 #define PD_RETURNDC 0x00000100
 #define PD_NOSELECTION 0x00000004
 #define PD_NOPAGENUMS 0x00000008
@@ -613,7 +617,8 @@ typedef struct {
 #define PSD_MARGINS 0x00000002
 #define PSD_INTHOUSANDTHSOFINCHES 0x00000004
 #define PSD_DISABLEPRINTER 0x00000020
-#define PDERR_NODEFAULTPRN 0x1008                       /* cderr.h */
+#define PDERR_NODEVICES 0x1007                          /* cderr.h */
+#define PDERR_NODEFAULTPRN 0x1008
 #define PDERR_DNDMMISMATCH 0x1009
 #define PDERR_PRINTERNOTFOUND 0x100B
 #define PDERR_DEFAULTDIFFERENT 0x100C
@@ -667,6 +672,7 @@ API BOOL    WINAPI SetCurrentDirectoryW(LPCWSTR);
 API DWORD   WINAPI FormatMessageW(DWORD, LPCVOID, DWORD, DWORD, LPWSTR, DWORD, void *);
 API DWORD   WINAPI GetCurrentThreadId(void);
 API HGLOBAL WINAPI GlobalFree(HGLOBAL);
+API UINT    WINAPI SetErrorMode(UINT);
 
 /* --------------------------------------------------------------- user32 -- */
 API ATOM    WINAPI RegisterClassExW(const WNDCLASSEXW *);

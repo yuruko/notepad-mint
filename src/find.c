@@ -101,22 +101,25 @@ static void ReplaceAll(HWND owner)
 {
     DWORD s = 0, e = 0;
     void *hl = NULL;
-    int n = 0, m = wlen(g_findWhat), wn = wlen(g_findWith), len = 0, cnt = 0, k = 0, i, p, caret;
+    int n = 0, m = wlen(g_findWhat), wn = wlen(g_findWith), len = 0, cnt = 0, k = 0, i, p, caret, found = 0;
     const WCHAR *t;
     WCHAR *out = NULL;
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
     t = EditLockText(&hl, &n);
     if (t) {
-        out = ReplaceAllText(t, n, g_findWhat, m, g_findWith, wn, g_pf.matchCase, &len, &cnt);
-        if ((int)s > n) s = (DWORD)n;
-        for (i = 0; (p = FindInText(t, (int)s, g_findWhat, m, i, 0, g_pf.matchCase)) >= 0; i = p + m) k++;   /* before the caret */
+        found = FindInText(t, n, g_findWhat, m, 0, 0, g_pf.matchCase) >= 0;     /* ReplaceAllText copies the whole text even for zero matches */
+        if (found) {
+            out = ReplaceAllText(t, n, g_findWhat, m, g_findWith, wn, g_pf.matchCase, &len, &cnt);
+            if ((int)s > n) s = (DWORD)n;
+            for (i = 0; (p = FindInText(t, (int)s, g_findWhat, m, i, 0, g_pf.matchCase)) >= 0; i = p + m) k++;   /* before the caret */
+        }
     }
     EditUnlockText(hl);
-    if (t && !out) {
+    if (found && !out) {
         MpAsk(owner, APP_NAME, L"not enough memory available to complete this operation.", L"ok", NULL, NULL, 1);
         return;
     }
-    if (!cnt) { mem_free(out); NotFound(owner); return; }
+    if (!found || !cnt) { mem_free(out); NotFound(owner); return; }
     caret = (int)s + k * (wn - m);                  /* the caret stays at the same place in the text */
     if (caret < 0) caret = 0;
     if (caret > len) caret = len;

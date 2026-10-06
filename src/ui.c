@@ -14,7 +14,8 @@ Palette   g_pal;
 /* dark: everything derived from the #161418 face + the mint; the editor is black.
  * light: the classic win2000 gray (#d4d0c8 face, white fields); the mint stays the highlight fill, a dark
  * mint is used where the accent is text or a thin line on a light surface; the editor is white.
- * light contrast (wcag): text >= 13.6, dark mint text on face 5.0, dim on face 3.4, shadow #737373 on face 3.1 */
+ * light contrast (wcag): text >= 13.6, dark mint text on face 5.0, dim on face 4.5 (info labels use it as reading text),
+ * shadow #737373 on face 3.1 */
 static const Palette g_themes[2] = {
     { RGB(0x9d, 0xf5, 0xbd), RGB(0x9d, 0xf5, 0xbd), RGB(0x16, 0x14, 0x18),
       RGB(0x16, 0x14, 0x18), RGB(0x21, 0x1e, 0x24), RGB(0x10, 0x0f, 0x12),
@@ -24,7 +25,7 @@ static const Palette g_themes[2] = {
     { RGB(0x9d, 0xf5, 0xbd), RGB(0x0b, 0x60, 0x33), RGB(0x00, 0x00, 0x00),
       RGB(0xd4, 0xd0, 0xc8), RGB(0xe4, 0xe1, 0xda), RGB(0xff, 0xff, 0xff),
       RGB(0xff, 0xff, 0xff), RGB(0xe9, 0xe7, 0xe2), RGB(0x40, 0x40, 0x40), RGB(0x73, 0x73, 0x73),
-      RGB(0x00, 0x00, 0x00), RGB(0x6d, 0x6d, 0x6d),
+      RGB(0x00, 0x00, 0x00), RGB(0x59, 0x59, 0x59),
       RGB(0x00, 0x00, 0x00), RGB(0xff, 0xff, 0xff) },
 };
 static int    g_theme;
@@ -102,14 +103,26 @@ static HFONT Face(const WCHAR *face, int pt, int weight)
                        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
 }
 
-static void MakeFonts(void)
+/* the dialog fonts (g_fontUI / g_fontUIB) are handed to controls with WM_SETFONT and stay in use for as long as a dialog
+ * lives (the modeless find dialog outlives a format > font change), so they are only rebuilt when the dpi changes */
+static void MakeDialogFonts(void)
 {
     if (g_fontUI)   DeleteObject(g_fontUI);
     if (g_fontUIB)  DeleteObject(g_fontUIB);
-    if (g_fontMenu) DeleteObject(g_fontMenu);
     g_fontUI   = Face(UI_FACE, UI_PT, FW_NORMAL);              /* dialogs */
     g_fontUIB  = Face(UI_FACE, UI_PT, FW_BOLD);
+}
+
+static void MakeMenuFont(void)
+{
+    if (g_fontMenu) DeleteObject(g_fontMenu);
     g_fontMenu = Face(g_chromeFace, g_chromePt, FW_NORMAL);    /* main window chrome */
+}
+
+static void MakeFonts(void)
+{
+    MakeDialogFonts();
+    MakeMenuFont();
 }
 
 /* chrome font = the editor's font face, CHROME_PT_LESS (3) pt smaller than its size, never above 14pt */
@@ -120,7 +133,7 @@ void UiSetChromeFont(const WCHAR *face, int editorPt)
     if (pt < 8) pt = 8;
     wcopy(g_chromeFace, face, 32);
     g_chromePt = pt;
-    MakeFonts();
+    MakeMenuFont();
 }
 
 void UiSetDpi(int dpi)
@@ -294,7 +307,7 @@ static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
     FillC(dc, &rc, C_FACE);
     if (t == BS_PUSHBUTTON || t == BS_DEFPUSHBUTTON) {
         RECT r = rc, in, tr;
-        if (s->isdef) { Frame(dc, &r, C_ACCENT_FG, C_ACCENT_FG); InflateRect(&r, -1, -1); }
+        if (s->isdef && en) { Frame(dc, &r, C_ACCENT_FG, C_ACCENT_FG); InflateRect(&r, -1, -1); }   /* a disabled default (empty find box) shows no outline */
         Bevel(dc, &r, s->down ? BV_SUNKEN : BV_RAISED);
         in = r;
         InflateRect(&in, -2, -2);
@@ -545,11 +558,33 @@ HWND DlgOpen(DlgBase *b, const WCHAR *cls, const WCHAR *title, int cw, int ch, i
     return b->hwnd;
 }
 
+/* a modal dialog disables every other window of ours that is live (the owner, and the modeless find dialog:
+ * otherwise replace all could still edit the document under an open / save as dialog) and enables them again after */
+typedef struct { HWND list[8]; int n; HWND skip; } Disabled;
+
+static BOOL CALLBACK DisableOne(HWND h, LPARAM l)
+{
+    Disabled *d = (Disabled *)l;
+    WCHAR cn[32];
+    if (h == d->skip || d->n >= COUNTOF(d->list) || !IsWindowVisible(h) || !IsWindowEnabled(h)) return TRUE;
+    GetClassNameW(h, cn, 32);
+    if (wcmp(cn, APP_CLASS) != 0 && !(cn[0] == 'm' && cn[1] == 'p' && cn[2] == '_')) return TRUE;   /* ime windows etc. */
+    EnableWindow(h, FALSE);
+    d->list[d->n++] = h;
+    return TRUE;
+}
+
 void DlgRunModal(DlgBase *b)
 {
     MSG m;
-    HWND owner = b->owner;
-    if (owner) EnableWindow(owner, FALSE);
+    Disabled dis;
+    int i;
+    dis.n = 0; dis.skip = b->hwnd;
+    EnumThreadWindows(GetCurrentThreadId(), DisableOne, (LPARAM)&dis);
+    if (b->owner && IsWindowEnabled(b->owner) && dis.n < COUNTOF(dis.list)) {   /* an owner the walk skipped (not visible) */
+        EnableWindow(b->owner, FALSE);
+        dis.list[dis.n++] = b->owner;
+    }
     ShowWindow(b->hwnd, SW_SHOW);
     while (!b->done) {
         BOOL r = GetMessageW(&m, NULL, 0, 0);
@@ -562,7 +597,8 @@ void DlgRunModal(DlgBase *b)
             DispatchMessageW(&m);
         }
     }
-    if (owner) EnableWindow(owner, TRUE);
+    for (i = dis.n - 1; i >= 0; i--)                           /* before the dialog goes away, so the activation returns to our own windows */
+        if (IsWindow(dis.list[i])) EnableWindow(dis.list[i], TRUE);
     DestroyWindow(b->hwnd);
     b->hwnd = NULL;
 }
@@ -628,6 +664,35 @@ HWND UiLabel(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWOR
     return c;
 }
 
+/* the stock single-line edit inserts a DEL character for ctrl+backspace (a box in the text, and a find pattern that can
+ * never match): delete the word before the caret instead, like the main editor does (edit.c) */
+static WNDPROC g_stockEdit;
+
+static LRESULT CALLBACK DlgEditProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    if (m == WM_CHAR && w == 0x7F) {
+        WCHAR t[PATH_CAP + 1];
+        DWORD s = 0, e = 0;
+        int n, a;
+        SendMessageW(h, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
+        if (s != e) { SendMessageW(h, WM_CLEAR, 0, 0); return 0; }
+        n = GetWindowTextW(h, t, PATH_CAP + 1);
+        a = (int)s;
+        if (a > n) a = n;
+        while (a > 0 && WordClass(t[a - 1]) == 0) a--;                 /* blanks, then one run of a kind */
+        if (a > 0) {
+            int k = WordClass(t[a - 1]);
+            while (a > 0 && WordClass(t[a - 1]) == k) a--;
+        }
+        if (a != (int)s) {
+            SendMessageW(h, EM_SETSEL, (WPARAM)a, (LPARAM)s);
+            SendMessageW(h, EM_REPLACESEL, TRUE, (LPARAM)L"");
+        }
+        return 0;
+    }
+    return CallWindowProcW(g_stockEdit, h, m, w, l);
+}
+
 /* single-line edit inside a drawn 2px sunken frame */
 HWND UiEdit(DlgBase *b, const WCHAR *text, int x, int y, int w, int h, int id, DWORD extra)
 {
@@ -636,6 +701,10 @@ HWND UiEdit(DlgBase *b, const WCHAR *text, int x, int y, int w, int h, int id, D
     c = CreateWindowExW(0, L"EDIT", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | extra,
                         S(x) + 2, S(y) + 2, S(w) - 4, S(h) - 4, b->hwnd, (HMENU)(ULONG_PTR)id, g_hinst, NULL);
     SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
+    if (c) {
+        if (!g_stockEdit) g_stockEdit = (WNDPROC)(LONG_PTR)GetWindowLongPtrW(c, GWLP_WNDPROC);
+        SetWindowLongPtrW(c, GWLP_WNDPROC, (LONG_PTR)DlgEditProc);
+    }
     return c;
 }
 
@@ -725,6 +794,7 @@ void UiInit(HINSTANCE hi)
 {
     HMODULE m;
     g_hinst = hi;
+    SetErrorMode(SetErrorMode(0) | SEM_FAILCRITICALERRORS);   /* no system "there is no disk in the drive" box when a dialog probes an empty card reader */
     m = LoadLibraryW(L"dwmapi.dll");
     if (m) pDwmSet = (DwmSetFn)GetProcAddress(m, "DwmSetWindowAttribute");
     m = LoadLibraryW(L"uxtheme.dll");
