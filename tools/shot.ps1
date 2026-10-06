@@ -13,6 +13,7 @@ param(
     [int]$PadR = 0,
     [int]$PadB = 0,
     [string]$Size = "",          # "WxH": resize the window (outer size, device px) before the keys
+    [int]$Cmd = 0,               # post WM_COMMAND with this IDM_* id (see src\mp.h) to the main window before the keys
     [switch]$Keep,
     [string]$Exe = (Join-Path $PSScriptRoot "..\build\notepad mint.exe")
 )
@@ -45,6 +46,7 @@ public class W {
     }
     return false;
   }
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int sz);
@@ -66,6 +68,8 @@ $fgok = [W]::Force($h)
 if (-not $fgok) { Write-Output "WARNING: could not get the window into the foreground" }
 Start-Sleep -Milliseconds 300
 if ($Size -match '^(\d+)x(\d+)$') { [void][W]::SetWindowPos($h, [IntPtr]::new(-1), 0, 0, [int]$Matches[1], [int]$Matches[2], 0x0002); Start-Sleep -Milliseconds 500 }   # SWP_NOMOVE
+
+if ($Cmd -ne 0) { [void][W]::PostMessage($h, 0x111, [IntPtr]$Cmd, [IntPtr]::Zero); Start-Sleep -Milliseconds 700 }
 
 if ($Keys -ne "") {
     foreach ($k in $Keys.Split('|')) {
