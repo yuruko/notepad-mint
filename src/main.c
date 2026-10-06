@@ -49,11 +49,21 @@ static int IniGet(const WCHAR *sec, const WCHAR *key, int def)
     return b[0] ? wtoi(b) : def;
 }
 
+/* WritePrivateProfileStringW fails while something else (an antivirus scan, a backup tool) has the file open for a moment: try again a few times */
+static void IniPutStr(const WCHAR *sec, const WCHAR *key, const WCHAR *v)
+{
+    int n;
+    for (n = 0; n < 8; n++) {
+        if (WritePrivateProfileStringW(sec, key, v, g_ini)) return;
+        Sleep(25);
+    }
+}
+
 static void IniPutInt(const WCHAR *sec, const WCHAR *key, int v)
 {
     WCHAR b[16];
     wsprintfW(b, L"%d", v);
-    WritePrivateProfileStringW(sec, key, b, g_ini);
+    IniPutStr(sec, key, b);
 }
 
 static int Clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -118,15 +128,15 @@ void AppSavePrefs(void)
     f = CreateFileW(g_ini, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);   /* utf-16 ini: font names can be anything */
     if (f != INVALID_HANDLE_VALUE) { WriteFile(f, bom, 2, &wr, NULL); CloseHandle(f); }
 
-    WritePrivateProfileStringW(L"editor", L"font", g_pf.font, g_ini);
+    IniPutStr(L"editor", L"font", g_pf.font);
     IniPutInt(L"editor", L"size", g_pf.pt);
     IniPutInt(L"editor", L"bold", g_pf.bold);
     IniPutInt(L"editor", L"italic", g_pf.italic);
-    WritePrivateProfileStringW(L"editor", L"text", NULL, g_ini);          /* old custom colours: the theme decides now */
-    WritePrivateProfileStringW(L"editor", L"background", NULL, g_ini);
+    IniPutStr(L"editor", L"text", NULL);          /* old custom colours: the theme decides now */
+    IniPutStr(L"editor", L"background", NULL);
     IniPutInt(L"editor", L"wrap", g_pf.wrap);
     IniPutInt(L"view", L"statusbar", g_pf.statusbar);
-    WritePrivateProfileStringW(L"view", L"theme", g_pf.theme == THEME_LIGHT ? L"light" : L"dark", g_ini);
+    IniPutStr(L"view", L"theme", g_pf.theme == THEME_LIGHT ? L"light" : L"dark");
     IniPutInt(L"window", L"x", g_pf.winx);
     IniPutInt(L"window", L"y", g_pf.winy);
     IniPutInt(L"window", L"w", g_pf.winw);
