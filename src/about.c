@@ -6,6 +6,107 @@
 
 typedef struct { DlgBase b; HICON icon; HWND edit; } InfoDlg;
 
+/* ------------------------------------------------------------------- link -- */
+/* a text link: accent coloured and underlined, accent background while hovered, opens its address in the default browser
+ * (shell32 is loaded at run time like everywhere else). the address is the control's text ("yuru.be" -> https://yuru.be) */
+#define ID_LINK 1060
+typedef struct { int hot, focus, down; } LinkSt;
+
+static void LinkOpen(HWND h)
+{
+    typedef HINSTANCE (WINAPI *ShellExecFn)(HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, int);
+    WCHAR url[160];
+    HMODULE m = LoadLibraryW(L"shell32.dll");
+    ShellExecFn f = m ? (ShellExecFn)GetProcAddress(m, "ShellExecuteW") : NULL;
+    wcopy(url, L"https://", COUNTOF(url));
+    GetWindowTextW(h, url + 8, COUNTOF(url) - 8);
+    if (f) f(GetParent(h), L"open", url, NULL, NULL, SW_SHOWNORMAL);
+}
+
+static LRESULT CALLBACK LinkProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    LinkSt *s = (LinkSt *)GetWindowLongPtrW(h, GWLP_USERDATA);
+    if (m == WM_NCCREATE) {
+        s = (LinkSt *)mem_zalloc(sizeof *s);
+        SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)s);
+        return DefWindowProcW(h, m, w, l);                          /* this is what stores the caption text */
+    }
+    if (!s) return DefWindowProcW(h, m, w, l);
+    switch (m) {
+    case WM_NCDESTROY:
+        mem_free(s);
+        SetWindowLongPtrW(h, GWLP_USERDATA, 0);
+        break;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_GETDLGCODE:
+        return DLGC_BUTTON | DLGC_UNDEFPUSHBUTTON;
+    case WM_SETFOCUS:  s->focus = 1; InvalidateRect(h, NULL, FALSE); return 0;
+    case WM_KILLFOCUS: s->focus = 0; InvalidateRect(h, NULL, FALSE); return 0;
+    case WM_SETCURSOR:
+        SetCursor(LoadCursorW(NULL, IDC_HAND));
+        return TRUE;
+    case WM_MOUSEMOVE:
+        if (!s->hot) {
+            TRACKMOUSEEVENT te;
+            s->hot = 1;
+            te.cbSize = sizeof te; te.dwFlags = TME_LEAVE; te.hwndTrack = h; te.dwHoverTime = 0;
+            TrackMouseEvent(&te);
+            InvalidateRect(h, NULL, FALSE);
+        }
+        return 0;
+    case WM_MOUSELEAVE:
+        s->hot = 0;
+        InvalidateRect(h, NULL, FALSE);
+        return 0;
+    case WM_LBUTTONDOWN:
+        SetFocus(h);
+        SetCapture(h);
+        s->down = 1;
+        return 0;
+    case WM_LBUTTONUP:
+        if (s->down) {
+            RECT rc;
+            POINT pt;
+            s->down = 0;
+            ReleaseCapture();
+            pt.x = GET_X_LPARAM(l); pt.y = GET_Y_LPARAM(l);
+            GetClientRect(h, &rc);
+            if (PtInRect(&rc, pt)) LinkOpen(h);
+        }
+        return 0;
+    case WM_KEYUP:
+        if (w == VK_SPACE) { LinkOpen(h); return 0; }
+        break;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(h, &ps);
+        RECT rc, tr, cr, ul;
+        WCHAR t[96];
+        int n, th;
+        HGDIOBJ of = SelectObject(dc, g_fontUI);
+        GetClientRect(h, &rc);
+        FillC(dc, &rc, s->hot ? C_ACCENT : C_FACE);
+        n = GetWindowTextW(h, t, COUNTOF(t));
+        tr = rc; tr.left += S(2);
+        cr = tr;
+        DrawTextW(dc, t, n, &cr, DT_LEFT | DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
+        th = cr.bottom - cr.top;
+        TextC(dc, t, n, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, s->hot ? C_ON_ACCENT : C_ACCENT_FG);
+        ul.left = tr.left; ul.right = cr.right; ul.top = (rc.bottom + th) / 2 - 1; ul.bottom = ul.top + 1;      /* the underline */
+        FillC(dc, &ul, s->hot ? C_ON_ACCENT : C_ACCENT_FG);
+        if (s->focus) {
+            RECT f = rc;
+            InflateRect(&f, -1, -1);
+            DrawFocusRect(dc, &f);
+        }
+        SelectObject(dc, of);
+        EndPaint(h, &ps);
+        return 0; }
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+
 /* ------------------------------------------------------------------ about -- */
 static LRESULT CALLBACK AboutProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -31,6 +132,9 @@ static LRESULT CALLBACK AboutProc(HWND h, UINT m, WPARAM w, LPARAM l)
         UiLabel(h, L"written in c and assembly with no runtime libraries. one small 32-bit exe runs on "
                    L"32-bit, 64-bit and arm windows.", 20, 138, 340, 34, IDC_DIM, SS_NOPREFIX);
         UiLabel(h, L"settings: %appdata%\\notepad mint\\settings.ini", 20, 176, 340, 16, IDC_DIM, SS_NOPREFIX);
+        c = CreateWindowExW(0, L"mp_link", L"yuru.be", WS_CHILD | WS_VISIBLE | WS_TABSTOP, S(20), S(206), S(76), S(20),
+                            h, (HMENU)(ULONG_PTR)ID_LINK, g_hinst, NULL);
+        SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
         b->focus = UiButton(h, L"ok", 272, 204, 88, 24, IDOK, BS_DEFPUSHBUTTON);
         return 0; }
     case WM_COMMAND:
@@ -48,7 +152,7 @@ void AboutDlg(HWND owner)
 {
     static BOOL reg;
     InfoDlg d;
-    if (!reg) { RegClass(L"mp_about", AboutProc, 0, NULL); reg = TRUE; }
+    if (!reg) { RegClass(L"mp_about", AboutProc, 0, NULL); RegClass(L"mp_link", LinkProc, 0, NULL); reg = TRUE; }
     memset(&d, 0, sizeof d);
     DlgBaseInit(&d.b, owner);
     if (!DlgOpen(&d.b, L"mp_about", L"about notepad mint", 380, 244, 0)) return;

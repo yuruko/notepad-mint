@@ -12,19 +12,19 @@ Palette   g_pal;
 
 /* ------------------------------------------------------------ themes ---- */
 /* dark: everything derived from the #161418 face + the mint; the editor is black.
- * light: the classic win2000 gray (#d4d0c8 face, white fields); the mint stays the highlight fill, a dark
- * mint is used where the accent is text or a thin line on a light surface; the editor is white.
- * light contrast (wcag): text >= 13.6, dark mint text on face 5.0, dim on face 4.5 (info labels use it as reading text),
- * shadow #737373 on face 3.1 */
+ * light: a light warm gray (#e4e1da face, white fields); the accent is a DARK green (#0a552d) both as a fill (hover,
+ * selection, caret) and as text / thin lines, with white text on it; the editor is white.
+ * light contrast (wcag): text >= 14, accent on face >= 7, white on the accent fill ~9, dim #595959 on face ~5.7
+ * (info labels use it as reading text), shadow #737373 on face ~3.5 */
 static const Palette g_themes[2] = {
     { RGB(0x9d, 0xf5, 0xbd), RGB(0x9d, 0xf5, 0xbd), RGB(0x16, 0x14, 0x18),
       RGB(0x16, 0x14, 0x18), RGB(0x21, 0x1e, 0x24), RGB(0x10, 0x0f, 0x12),
       RGB(0x55, 0x4f, 0x5c), RGB(0x36, 0x32, 0x3c), RGB(0x05, 0x04, 0x06), RGB(0x0c, 0x0b, 0x0e),
       RGB(0xff, 0xff, 0xff), RGB(0x80, 0x7a, 0x88),
       RGB(0xff, 0xff, 0xff), RGB(0x00, 0x00, 0x00) },
-    { RGB(0x9d, 0xf5, 0xbd), RGB(0x0b, 0x60, 0x33), RGB(0x00, 0x00, 0x00),
-      RGB(0xd4, 0xd0, 0xc8), RGB(0xe4, 0xe1, 0xda), RGB(0xff, 0xff, 0xff),
-      RGB(0xff, 0xff, 0xff), RGB(0xe9, 0xe7, 0xe2), RGB(0x40, 0x40, 0x40), RGB(0x73, 0x73, 0x73),
+    { RGB(0x0a, 0x55, 0x2d), RGB(0x0a, 0x55, 0x2d), RGB(0xff, 0xff, 0xff),
+      RGB(0xe4, 0xe1, 0xda), RGB(0xf0, 0xee, 0xe9), RGB(0xff, 0xff, 0xff),
+      RGB(0xff, 0xff, 0xff), RGB(0xf3, 0xf1, 0xed), RGB(0x40, 0x40, 0x40), RGB(0x73, 0x73, 0x73),
       RGB(0x00, 0x00, 0x00), RGB(0x59, 0x59, 0x59),
       RGB(0x00, 0x00, 0x00), RGB(0xff, 0xff, 0xff) },
 };
@@ -228,9 +228,14 @@ void DarkFrame(HWND h, int active)
     pDwmSet(h, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof corner);
 }
 
+/* dark: the dark explorer scrollbar (thin, arrows only while the mouse is over it). light: visual styles off for this
+ * window (empty theme names), which gives the classic scrollbar with its arrow buttons ALWAYS visible: windows 11's themed
+ * scrollbars, the default one as well as the explorer one, are thin and hide their arrows until the mouse is over them */
 void DarkScroll(HWND h)
 {
-    if (pSetTheme) pSetTheme(h, g_theme == THEME_DARK ? L"DarkMode_Explorer" : L"Explorer", NULL);
+    if (!pSetTheme) return;
+    if (g_theme == THEME_DARK) pSetTheme(h, L"DarkMode_Explorer", NULL);
+    else pSetTheme(h, L"", L"");
 }
 
 void RegClass(const WCHAR *name, WNDPROC proc, UINT style, HBRUSH bg)
@@ -301,7 +306,8 @@ static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
     WCHAR text[128];
     int n = GetWindowTextW(h, text, 128), t = BtnType(h);
     BOOL en = IsWindowEnabled(h) ? TRUE : FALSE;
-    COLORREF tc = !en ? C_DIM : (s->hot ? C_ACCENT_FG : C_TEXT);
+    BOOL hot = s->hot && en;                         /* hover = the accent as the BACKGROUND with on-accent text (never just a coloured text) */
+    COLORREF tc = !en ? C_DIM : C_TEXT;
     HGDIOBJ of = SelectObject(dc, s->font ? s->font : g_fontUI);
 
     FillC(dc, &rc, C_FACE);
@@ -311,10 +317,10 @@ static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
         Bevel(dc, &r, s->down ? BV_SUNKEN : BV_RAISED);
         in = r;
         InflateRect(&in, -2, -2);
-        FillC(dc, &in, s->down ? C_FACE : C_FACE2);
+        FillC(dc, &in, s->down ? C_FACE : (hot ? C_ACCENT : C_FACE2));
         tr = in;
         if (s->down) OffsetRect(&tr, 1, 1);
-        TextC(dc, text, n, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE, tc);
+        TextC(dc, text, n, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE, (hot && !s->down) ? C_ON_ACCENT : tc);
         if (s->focus && en) {
             RECT f = in;
             InflateRect(&f, -S(3), -S(3));
@@ -345,7 +351,14 @@ static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
             if (s->check) CheckGlyph(dc, box.left, box.top, en ? C_ACCENT_FG : C_DIM);
         }
         tr.left = bx + S(7); tr.top = 0; tr.right = rc.right; tr.bottom = rc.bottom;
-        TextC(dc, text, n, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE, tc);
+        if (hot) {                                   /* the label gets the accent background, like a menu item */
+            RECT hl = tr;
+            DrawTextW(dc, text, n, &hl, DT_LEFT | DT_SINGLELINE | DT_CALCRECT);
+            hl.left = tr.left - S(4); hl.right = hl.right + S(4);
+            hl.top = (rc.bottom - (hl.bottom - hl.top)) / 2 - S(2); hl.bottom = hl.top + (hl.bottom - hl.top) + S(4);
+            FillC(dc, &hl, C_ACCENT);
+        }
+        TextC(dc, text, n, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE, hot ? C_ON_ACCENT : tc);
         if (s->focus && en) {
             cr = tr;
             DrawTextW(dc, text, n, &cr, DT_LEFT | DT_SINGLELINE | DT_CALCRECT);
@@ -554,7 +567,14 @@ HWND DlgOpen(DlgBase *b, const WCHAR *cls, const WCHAR *title, int cw, int ch, i
     if (y < wa.top)  y = wa.top;
 
     b->hwnd = CreateWindowExW(0, cls, title, st, x, y, w, h, b->owner, NULL, g_hinst, b);
-    if (b->hwnd) DarkFrame(b->hwnd, 1);
+    if (b->hwnd) {
+        static HICON big, small_;                       /* every dialog wears the app icon (resource 1) */
+        if (!big) big = LoadIconW(g_hinst, MAKEINTRESOURCEW(1));
+        if (!small_) small_ = (HICON)LoadImageW(g_hinst, MAKEINTRESOURCEW(1), IMAGE_ICON, UiMetric(SM_CXSMICON), UiMetric(SM_CYSMICON), LR_DEFAULTCOLOR);
+        SendMessageW(b->hwnd, WM_SETICON, ICON_BIG, (LPARAM)big);
+        SendMessageW(b->hwnd, WM_SETICON, ICON_SMALL, (LPARAM)small_);
+        DarkFrame(b->hwnd, 1);
+    }
     return b->hwnd;
 }
 

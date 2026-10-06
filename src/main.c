@@ -168,9 +168,62 @@ static void FileError(DWORD er, const WCHAR *path, BOOL saving)
     Say(msg);
 }
 
+/* ------------------------------------------------------------ dirty state -- */
+/* "modified" means: different from what was last loaded / saved (or from blank for a new document). the stock edit
+ * only has a sticky flag, so typing something and deleting it again, or undoing back to the original, would still ask
+ * "save changes?". the clean state is kept as length + two 32-bit hashes (no 64-bit math, nothing to copy for big files);
+ * a content compare only happens when the flag is set and the length is back to the clean one */
+static struct { int n; DWORD h1, h2; int enc, eol; } g_clean;
+
+static void HashText(const WCHAR *t, int n, DWORD *a, DWORD *b)
+{
+    DWORD h1 = 2166136261u, h2 = 5381u;
+    int i;
+    for (i = 0; i < n; i++) {
+        h1 = (h1 ^ t[i]) * 16777619u;
+        h2 = (h2 * 33u) ^ t[i];
+    }
+    *a = h1;
+    *b = h2;
+}
+
+static void CleanMark(void)                         /* the document as it is now is the clean state: just loaded, created or saved */
+{
+    void *h = NULL;
+    int n = 0;
+    const WCHAR *p = EditLockText(&h, &n);
+    HashText(p ? p : L"", p ? n : 0, &g_clean.h1, &g_clean.h2);
+    EditUnlockText(h);
+    g_clean.n = p ? n : 0;
+    g_clean.enc = g_doc.enc;
+    g_clean.eol = g_doc.eol;
+    SendMessageW(g_edit, EM_SETMODIFY, FALSE, 0);
+}
+
+static BOOL TextChanged(void)
+{
+    void *h = NULL;
+    int n = 0;
+    const WCHAR *p;
+    DWORD a, b;
+    BOOL same;
+    if (!SendMessageW(g_edit, EM_GETMODIFY, 0, 0)) return FALSE;     /* untouched since the last load / save */
+    if (GetWindowTextLengthW(g_edit) != g_clean.n) return TRUE;      /* another length: certainly changed (cheap) */
+    p = EditLockText(&h, &n);
+    HashText(p ? p : L"", p ? n : 0, &a, &b);
+    EditUnlockText(h);
+    same = (a == g_clean.h1 && b == g_clean.h2);
+    if (same) SendMessageW(g_edit, EM_SETMODIFY, FALSE, 0);          /* back to the clean text: the control's own flag follows */
+    return !same;
+}
+
 BOOL AppIsDirty(void)
 {
-    return g_edit && SendMessageW(g_edit, EM_GETMODIFY, 0, 0) != 0;
+    if (!g_edit) return FALSE;
+    if ((g_doc.enc != g_clean.enc || g_doc.eol != g_clean.eol) &&    /* a new encoding / line ending needs a save ... */
+        (g_doc.path[0] || GetWindowTextLengthW(g_edit) > 0))         /* ... unless it is an empty unsaved document: nothing to save */
+        return TRUE;
+    return TextChanged();
 }
 
 static void FocusEdit(void)
@@ -252,9 +305,8 @@ static void Layout(void)
 }
 
 /* ===================================================== document state ==== */
-static void MarkChanged(void)                       /* encoding / line ending changed: needs a save */
+static void MarkChanged(void)                       /* encoding / line ending changed: AppIsDirty compares them with the clean state */
 {
-    if (g_doc.path[0] || GetWindowTextLengthW(g_edit) > 0) SendMessageW(g_edit, EM_SETMODIFY, TRUE, 0);
     AppUpdateTitle();
     AppUpdateStatus();
 }
@@ -293,6 +345,7 @@ static BOOL OpenDoc(const WCHAR *path, int force)
     wcopy(g_doc.path, path, PATH_CAP);
     g_doc.enc = enc;
     g_doc.eol = eol;
+    CleanMark();
     AppUpdateTitle();
     AppUpdateStatus();
     return TRUE;
@@ -325,7 +378,7 @@ static BOOL WriteDoc(const WCHAR *path, int enc, int eol)
     wcopy(g_doc.path, path, PATH_CAP);
     g_doc.enc = enc;
     g_doc.eol = eol;
-    SendMessageW(g_edit, EM_SETMODIFY, FALSE, 0);
+    CleanMark();                                     /* what is on disk is the new clean state */
     AppUpdateTitle();
     AppUpdateStatus();
     return TRUE;
@@ -366,6 +419,7 @@ static void FileNew(void)
     NewDocName();                                            /* every new document gets its own default name */
     g_doc.enc = ENC_UTF8;
     g_doc.eol = EOL_CRLF;
+    CleanMark();                                             /* blank is the clean state: typing and deleting again is not a change */
     AppUpdateTitle();
     AppUpdateStatus();
 }
@@ -521,7 +575,11 @@ static void Cmd(int id)
     case IDM_EDIT_FINDNEXT: FindNext(0); return;          /* may open the find dialog: don't take its focus */
     case IDM_EDIT_FINDPREV: FindNext(1); return;
     case IDM_EDIT_GOTO:     GotoDlg(g_hwnd); break;
-    case IDM_EDIT_SELALL:   SendMessageW(g_edit, EM_SETSEL, 0, (LPARAM)-1); break;
+    case IDM_EDIT_SELALL: {
+        HWND f = GetFocus();
+        if (f && f != g_edit && f != g_hwnd) { SendMessageW(f, EM_SETSEL, 0, (LPARAM)-1); return; }   /* ctrl+a inside a text box of the find dialog */
+        SendMessageW(g_edit, EM_SETSEL, 0, (LPARAM)-1);
+        break; }
     case IDM_EDIT_TIMEDATE: InsertTimeDate(); break;
 
     case IDM_FMT_WRAP:      ToggleWrap(); break;
@@ -661,6 +719,7 @@ static LRESULT OnCreate(HWND h)
     g_bar = MenuBarCreate(h, MenuState);
     g_status = StatusCreate(h);
     if (!EditCreate(h)) return -1;
+    CleanMark();                                    /* the new blank document (enc / eol were set in mp_main) is the clean state */
     Layout();
     AppUpdateTitle();
     AppUpdateStatus();
@@ -814,6 +873,7 @@ static ACCEL g_acc[] = {
     { FVIRTKEY | FCONTROL,           'S',            IDM_FILE_SAVE },
     { FVIRTKEY | FCONTROL | FSHIFT,  'S',            IDM_FILE_SAVEAS },
     { FVIRTKEY | FCONTROL,           'P',            IDM_FILE_PRINT },
+    { FVIRTKEY | FCONTROL,           'A',            IDM_EDIT_SELALL },        /* the stock multiline edit has no ctrl+a of its own */
     { FVIRTKEY | FCONTROL,           'F',            IDM_EDIT_FIND },
     { FVIRTKEY | FCONTROL,           'H',            IDM_EDIT_REPLACE },
     { FVIRTKEY | FCONTROL,           'G',            IDM_EDIT_GOTO },

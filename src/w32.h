@@ -275,6 +275,9 @@ typedef struct {
 #define WM_RBUTTONUP 0x0205
 #define WM_MOUSEWHEEL 0x020A
 #define WM_CAPTURECHANGED 0x0215
+#define WM_PRINTCLIENT 0x0318
+#define PRF_CLIENT 0x00000004L
+#define PRF_ERASEBKGND 0x00000008L
 #define WM_DROPFILES 0x0233
 #define WM_DPICHANGED 0x02E0
 #define WM_MOUSELEAVE 0x02A3
@@ -369,6 +372,7 @@ typedef struct {
 #define TME_LEAVE 2
 #define MONITOR_DEFAULTTONULL 0
 #define MONITOR_DEFAULTTONEAREST 2
+#define SPI_GETCARETWIDTH 0x2006
 #define SPI_GETWORKAREA 0x0030
 #define SPI_GETNONCLIENTMETRICS 0x0029
 
@@ -771,6 +775,10 @@ API HWND    WINAPI GetActiveWindow(void);
 API DWORD   WINAPI SetClassLongW(HWND, int, LONG);              /* SetClassLongPtrW on 32-bit */
 API LRESULT WINAPI SendDlgItemMessageW(HWND, int, UINT, WPARAM, LPARAM);
 API BOOL    WINAPI GetCaretPos(POINT *);
+API BOOL    WINAPI SetCaretPos(int, int);
+API BOOL    WINAPI CreateCaret(HWND, HBITMAP, int, int);
+API BOOL    WINAPI DestroyCaret(void);
+API BOOL    WINAPI ShowCaret(HWND);
 API BOOL    WINAPI GetScrollInfo(HWND, int, SCROLLINFO *);
 API BOOL    WINAPI ShowScrollBar(HWND, int, BOOL);
 API BOOL    WINAPI IsClipboardFormatAvailable(UINT);
@@ -809,6 +817,7 @@ API int      WINAPI SaveDC(HDC);
 API BOOL     WINAPI RestoreDC(HDC, int);
 API int      WINAPI IntersectClipRect(HDC, int, int, int, int);
 API int      WINAPI SetMapMode(HDC, int);
+API BOOL     WINAPI SetViewportOrgEx(HDC, int, int, POINT *);
 API HDC      WINAPI CreateDCW(LPCWSTR, LPCWSTR, LPCWSTR, const void *);
 API int      WINAPI StartDocW(HDC, const DOCINFOW *);
 API int      WINAPI EndDoc(HDC);

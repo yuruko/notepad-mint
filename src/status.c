@@ -101,17 +101,15 @@ static void Paint(HWND h)
     old = SelectObject(mdc, bmp);
     of = SelectObject(mdc, g_fontMenu);
 
-    FillC(mdc, &rc, C_FACE);
-    r = rc; r.bottom = 1; FillC(mdc, &r, C_LO2);             /* etched line on top */
-    r.top = 1; r.bottom = 2; FillC(mdc, &r, C_HI2);
+    FillC(mdc, &rc, C_FACE);                                 /* no line on top: the editor's frame above is the one border */
 
     Panels(&rc, p);
     for (i = 0; i < SB_COUNT; i++) {
-        BOOL click = (i != SB_POS);
-        COLORREF c = (click && i == g_hotp) ? C_ACCENT_FG : C_TEXT;
+        BOOL hot = (i != SB_POS && i == g_hotp);             /* the clickable panels: hover = the accent as the background */
         Bevel(mdc, &p[i], BV_FLAT_DN);
+        if (hot) { r = p[i]; InflateRect(&r, -1, -1); FillC(mdc, &r, C_ACCENT); }
         r = p[i]; r.left += S(7); r.right -= S(3);
-        TextC(mdc, g_txt[i], -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, c);
+        TextC(mdc, g_txt[i], -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, hot ? C_ON_ACCENT : C_TEXT);
     }
 
     BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY);

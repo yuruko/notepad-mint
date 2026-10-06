@@ -14,6 +14,8 @@ param(
     [int]$PadB = 0,
     [string]$Size = "",          # "WxH": resize the window (outer size, device px) before the keys
     [int]$Cmd = 0,               # post WM_COMMAND with this IDM_* id (see src\mp.h) to the main window before the keys
+    [string]$Mouse = "",         # "x,y": park the real mouse there (device px from the window's top-left, as in the screenshot) just before the capture
+    [int]$Burst = 0,             # N > 0: take N captures 90 ms apart as <Out>_0.png ... (a blinking caret shows in some of them)
     [switch]$Keep,
     [string]$Exe = (Join-Path $PSScriptRoot "..\build\notepad mint.exe")
 )
@@ -47,6 +49,7 @@ public class W {
     return false;
   }
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int sz);
@@ -95,14 +98,25 @@ if ($Keys -ne "") {
 if ([W]::FgPid() -ne $p.Id) { [void][W]::Force($h) }
 $r = New-Object W+RECT
 [void][W]::DwmGetWindowAttribute($h, 9, [ref]$r, 16)
+if ($Mouse -match '^(\d+),(\d+)$') {                                # hover states: the real cursor, a few moves so the window sees it arrive
+    $mx = $r.L + [int]$Matches[1]; $my = $r.T + [int]$Matches[2]
+    [void][W]::SetCursorPos($mx - 5, $my - 5); Start-Sleep -Milliseconds 120
+    [void][W]::SetCursorPos($mx, $my); Start-Sleep -Milliseconds 900
+}
 $w = $r.R - $r.L + $PadR
 $ht = $r.B - $r.T + $PadB
-$bmp = New-Object System.Drawing.Bitmap($w, $ht)
-$g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.CopyFromScreen($r.L, $r.T, 0, 0, (New-Object System.Drawing.Size($w, $ht)))
-$g.Dispose()
-$bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
-$bmp.Dispose()
+$shots = 1; if ($Burst -gt 0) { $shots = $Burst }
+for ($i = 0; $i -lt $shots; $i++) {
+    $bmp = New-Object System.Drawing.Bitmap($w, $ht)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($r.L, $r.T, 0, 0, (New-Object System.Drawing.Size($w, $ht)))
+    $g.Dispose()
+    $name = $Out
+    if ($Burst -gt 0) { $name = $Out -replace '\.png$', ("_" + $i + ".png") }
+    $bmp.Save($name, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
+    if ($i -lt $shots - 1) { Start-Sleep -Milliseconds 90 }
+}
 Write-Output ("saved {0}  ({1}x{2})  title='{3}' responding={4}" -f $Out, $w, $ht, $p.MainWindowTitle, $p.Responding)
 
 if (-not $Keep) { Get-Process -Name "notepad mint" -ErrorAction SilentlyContinue | Stop-Process -Force }

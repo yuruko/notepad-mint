@@ -275,17 +275,14 @@ static void BarPaint(HWND h)
     old = SelectObject(mdc, bmp);
     of = SelectObject(mdc, g_fontMenu);
 
-    FillC(mdc, &rc, C_FACE);
-    r = rc; r.top = rc.bottom - 2; r.bottom = rc.bottom - 1; FillC(mdc, &r, C_LO2);   /* etched line */
-    r.top = rc.bottom - 1; r.bottom = rc.bottom;             FillC(mdc, &r, C_HI2);
+    FillC(mdc, &rc, C_FACE);                                   /* no underline of its own: the editor's sunken frame right below is the one border */
 
     for (i = 0; i < (int)NBAR; i++) {
-        BOOL on = (i == g_open || i == g_kbd);
+        BOOL on = (i == g_open || i == g_kbd || i == g_hot);   /* open, keyboard-selected or hovered: the accent as the BACKGROUND */
         r.left = g_itemL[i]; r.right = g_itemL[i + 1];
-        r.top = S(1); r.bottom = rc.bottom - 3;
+        r.top = S(1); r.bottom = rc.bottom - S(1);
         if (on) FillC(mdc, &r, C_ACCENT);
-        TextC(mdc, g_ent[i].title, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-              on ? C_ON_ACCENT : (i == g_hot ? C_ACCENT_FG : C_TEXT));
+        TextC(mdc, g_ent[i].title, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE, on ? C_ON_ACCENT : C_TEXT);
     }
     BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY);
     SelectObject(mdc, of);

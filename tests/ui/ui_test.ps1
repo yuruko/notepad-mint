@@ -52,6 +52,9 @@ public static class U {
     [DllImport("user32.dll")] static extern IntPtr GetDlgItem(IntPtr h, int id);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] static extern int GetWindowLongW(IntPtr h, int i);
+    [StructLayout(LayoutKind.Sequential)] struct SCRINFO { public uint cbSize, fMask; public int nMin, nMax; public uint nPage; public int nPos, nTrackPos; }
+    [DllImport("user32.dll")] static extern bool GetScrollInfo(IntPtr h, int bar, ref SCRINFO si);
     [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, IntPtr l, uint fl, uint to, out IntPtr res);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageTimeoutW")] static extern IntPtr SendMessageTimeoutS(IntPtr h, uint m, IntPtr w, string l, uint fl, uint to, out IntPtr res);
@@ -111,6 +114,8 @@ public static class U {
     public static bool Visible(long h) { return IsWindow(H(h)) && IsWindowVisible(H(h)); }
     public static bool Enabled(long h) { return IsWindowEnabled(H(h)); }
     public static bool Iconic(long h) { return IsIconic(H(h)); }
+    public static int[] Scroll(long h, int bar) { SCRINFO s = new SCRINFO(); s.cbSize = 28; s.fMask = 7; GetScrollInfo(H(h), bar, ref s); return new int[] { s.nMin, s.nMax, (int)s.nPage, s.nPos }; }   // bar 0 = horizontal, 1 = vertical: min, max, page, pos
+    public static int Style(long h) { return GetWindowLongW(H(h), -16); }          // GWL_STYLE: WS_VSCROLL 0x200000 / WS_HSCROLL 0x100000 = the bar is shown
     [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr h);
     public static bool Zoomed(long h) { return IsZoomed(H(h)); }
@@ -1207,12 +1212,49 @@ function Test-T13 {                                                             
     Ck 'T13.6 ... the file exists in the dialog''s folder' (Test-Path -LiteralPath $f) ('missing: ' + $f)
 }
 
+# =========================================================================================================== T15
+function Bars($app) { $st = [U]::Style((Get-Edit $app)); return @{ V = [bool]($st -band 0x00200000); H = [bool]($st -band 0x00100000) } }
+function CkBars([string]$n, $app, [bool]$v, [bool]$h) {                           # the edit's scrollbars reach the wanted state (they follow posted messages)
+    [void](WaitFor { $b = Bars $app; ($b.V -eq $v) -and ($b.H -eq $h) } 2500)
+    $b = Bars $app
+    $sh = [U]::Scroll((Get-Edit $app), 0)
+    $extra = ''
+    if (($b.V -ne $v) -or ($b.H -ne $h)) {                                       # a failure: how stable is the state? (samples 100 ms apart) + the edit's client size
+        $s = @(); for ($k = 0; $k -lt 6; $k++) { $x = Bars $app; $s += ('V' + [int]$x.V + 'H' + [int]$x.H); Start-Sleep -Milliseconds 100 }
+        $cr = [U]::CRect((Get-Edit $app))
+        $extra = ' samples ' + ($s -join ',') + ' client ' + (($cr[2] - $cr[0]) -as [string]) + 'x' + (($cr[3] - $cr[1]) -as [string])
+    }
+    Ck $n (($b.V -eq $v) -and ($b.H -eq $h)) ('wanted vertical=' + $v + ' horizontal=' + $h + ', got vertical=' + $b.V + ' horizontal=' + $b.H + ' (horizontal range min/max/page/pos ' + ($sh -join '/') + ')' + $extra)
+}
+function Test-T15 {                                                              # scrollbars only when needed (edit.c UpdateBars)
+    $app = Start-App
+    $wide = 'wide text ' * 60                                                    # one line far wider than the window
+    $tall = (1..150 | ForEach-Object { 'line ' + $_ }) -join "`r`n"
+    CkBars 'T15.1 an empty document has no scrollbars' $app $false $false
+    Ed-Set $app $wide
+    CkBars 'T15.2 one very wide line: the horizontal bar shows, no vertical bar' $app $false $true
+    Ed-Set $app 'short'
+    CkBars 'T15.3 ... short text again: no bars' $app $false $false
+    Ed-Set $app $tall
+    CkBars 'T15.4 150 short lines: the vertical bar shows, no horizontal bar' $app $true $false
+    Ed-Set $app ($tall + "`r`n" + $wide)
+    CkBars 'T15.5 150 lines and a wide one: both bars' $app $true $true
+    Cmd $app 'IDM_FMT_WRAP'
+    CkBars 'T15.6 word wrap on: the wide line wraps, only the vertical bar' $app $true $false
+    Cmd $app 'IDM_FMT_WRAP'
+    CkBars 'T15.7 word wrap off again: both bars' $app $true $true
+    Ed-Set $app $wide
+    CkBars 'T15.8 wide line only (wrap off): horizontal bar only' $app $false $true
+    Cmd $app 'IDM_FMT_WRAP'
+    CkBars 'T15.9 wide line only, wrap on: no bars (it wraps into a few rows)' $app $false $false
+}
+
 # ====================================================================================================== run them all
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine
