@@ -14,7 +14,7 @@ and what was never verified; this file is what is still open, plus the rules for
   (see `UiInit` in `ui.c`). win10-only apis must be looked up at run time too (see `UiDpiForWindow`).
 - **all user-visible text is lowercase** (labels, buttons, titles, messages).
 - dpi: coordinates you hand to the ui helpers (`UiLabel/UiEdit/UiButton/DlgFrame/DlgOpen`) are 96-dpi pixels; any raw pixel math goes through `S()`.
-- fonts: dialogs use `g_fontUI` (segoe ui 9pt, `DEFAULT_CHARSET`), the main window chrome (menu bar, status bar, title strip) uses `g_fontMenu` = the editor font face at a static `CHROME_PT` (10) pt.
+- fonts: dialogs use `g_fontUI` (segoe ui 9pt, `DEFAULT_CHARSET`), the main window chrome (menu bar, status bar, title strip) uses `g_fontMenu` = the editor font face at a static `CHROME_PX` (10) pt.
   **never use tahoma / microsoft sans serif for ui text**: on a japanese system locale (the dev machine is ja-JP) they draw `\` as a yen sign in every charset (measured, see `tools/fonttest.c`).
 - the palette `C_*` is a set of **runtime values** (`g_pal`, dark / light): never use them in static initialisers, `case` labels or constant expressions, and never cache a brush made from them across a theme switch.
 - a custom window class that handles `WM_NCCREATE` must still call `DefWindowProcW` for it (that is what stores the window text, otherwise buttons are blank).

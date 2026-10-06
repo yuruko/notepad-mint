@@ -358,7 +358,7 @@ function Read-Ini([string]$path) {                                              
     }
     return $r
 }
-function Ini-Val($app, [string]$sec, [string]$key, [string]$want = $null, [int]$ms = 6000) {   # polls settings.ini (written by the app, ~25 separate file rewrites) for key (= want); one run once saw a late italic=1 with a 2.5 s window
+function Ini-Val($app, [string]$sec, [string]$key, [string]$want = $null, [int]$ms = 15000) {  # polls settings.ini (written by the app, ~25 separate file rewrites) for key (= want); one run once saw a late italic=1 with a 2.5 s window, and a busy machine (other sessions rendering) made 6 s too short
     $v = $null
     $ok = WaitFor { $i = Read-Ini $app.Ini; if ($i.ContainsKey($sec) -and $i[$sec].ContainsKey($key)) { $script:iniV = $i[$sec][$key]; if ($want -eq $null -or $script:iniV -ceq $want) { $true } } } $ms
     if ($ok) { return $script:iniV }
@@ -727,6 +727,8 @@ using System.Runtime.InteropServices;
 public static class Nd {
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
     public static long Owner(long h) { return GetWindow(new IntPtr(h), 4).ToInt64(); }       // GW_OWNER (0 = unowned)
+    [DllImport("user32.dll")] static extern uint GetClassLongW(IntPtr h, int i);
+    public static uint ClassStyle(long h) { return GetClassLongW(new IntPtr(h), -26); }      // GCL_STYLE
 }
 '@
 $TDM_CLICK_BUTTON = 0x466                                                        # WM_USER + 102: the overwrite prompt of save as is a task dialog, its buttons have no control ids
@@ -1596,21 +1598,24 @@ function Test-T19 {
     Ck 'T19.3 zooming the editor in four steps leaves the menu bar and the status bar heights alone (static chrome font)' ((($b[3] - $b[1]) -eq $h0[0]) -and (($s[3] - $s[1]) -eq $h0[1])) ('heights before ' + ($h0 -join ',') + ' after ' + ($b[3] - $b[1]) + ',' + ($s[3] - $s[1]))
     foreach ($i in 1..4) { Cmd $app 'IDM_ZOOM_OUT'; Start-Sleep -Milliseconds 100 }
 
+    Ck 'T19.3a the status bar repaints all of itself on a size change (class styles CS_HREDRAW | CS_VREDRAW: its panels are right aligned)' (([Nd]::ClassStyle($st) -band 3) -eq 3) ('class style ' + [Nd]::ClassStyle($st))
     $acc = Accent-Colours; $pal = Read-Palette
-    if ($acc -and $pal) {                                                        # the title strip: 14% accent at the left edge, fading to 4% where the window buttons start (and staying 4% under them)
+    if ($acc -and $pal) {                                                        # the title strip: 14% accent at the left edge (19% in the light theme), fading to 4% (9%) where the window buttons start and staying there under them
         foreach ($th in @('dark', 'light')) {
             if ($th -eq 'light') { Cmd $app 'IDM_THEME_LIGHT'; Start-Sleep -Milliseconds 500 }
             $face = $pal[$th].face; $a = $acc[$th]
-            $want = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * 35 / 255) })          # 14% (35 / 255)
-            $want4 = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * 10 / 255) })         # 4% (10 / 255)
+            $aL = 35; $aR = 10; $pL = 14; $pR = 4                                          # 14% / 4% of 255 (dark)
+            if ($th -eq 'light') { $aL = 48; $aR = 22; $pL = 19; $pR = 9 }                  # +5 points at both ends in the light theme
+            $want = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * $aL / 255) })
+            $want4 = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * $aR / 255) })
             $bw = [int](($w[2] - $w[0] - [U]::CRect([long]$app.Main)[2]) / 2)                  # the sizing border left of the client area (the strip starts after it)
             $left = Strip-Pixel $app ($bw + 2) 3
-            Ck ('T19.4 ' + $th + ': the title strip starts with 14% of the accent at its left edge (rgb ' + ($want -join ',') + ')') (Near $left $want 6) ('actual ' + $left.Info)
+            Ck ('T19.4 ' + $th + ': the title strip starts with ' + $pL + '% of the accent at its left edge (rgb ' + ($want -join ',') + ')') (Near $left $want 6) ('actual ' + $left.Info)
             $btn = [int](($w[2] - $w[0]) - 3 * [Math]::Round(46 * $dpi / 96) - 4)
             $right = Strip-Pixel $app $btn 3
-            Ck ('T19.5 ' + $th + ': ... and fades to 4% of it where the window buttons start (rgb ' + ($want4 -join ',') + ')') (Near $right $want4 3) ('actual ' + $right.Info)
+            Ck ('T19.5 ' + $th + ': ... and fades to ' + $pR + '% of it where the window buttons start (rgb ' + ($want4 -join ',') + ')') (Near $right $want4 3) ('actual ' + $right.Info)
             $under = Strip-Pixel $app ($btn + 8) 3                                       # inside the minimize button, away from its glyph: transparent at rest, the strip shows through
-            Ck ('T19.6 ' + $th + ': ... and stays 4% under the window buttons (they are transparent at rest: no seam)') (Near $under $want4 3) ('actual ' + $under.Info)
+            Ck ('T19.6 ' + $th + ': ... and stays ' + $pR + '% under the window buttons (they are transparent at rest: no seam)') (Near $under $want4 3) ('actual ' + $under.Info)
         }
     } else { Skip 'T19.4 / T19.5 title strip pixels' 'could not parse the g_themes palette table in src\ui.c' }
 }

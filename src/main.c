@@ -265,7 +265,7 @@ void AppUpdateStatus(void)
     EditCaretPos(&line, &col);
     wsprintfW(b, L"%d:%d", line, col);
     StatusSet(g_status, SB_POS, b);
-    wsprintfW(b, L"%d pt", g_pf.cur);
+    wsprintfW(b, L"%dpt", g_pf.cur);
     StatusSet(g_status, SB_ZOOM, b);
     StatusSet(g_status, SB_EOL, g_eolShort[g_doc.eol]);
     EncShort(g_doc.enc, b, COUNTOF(b));
@@ -637,7 +637,7 @@ static void Cmd(int id)
     FocusEdit();
 }
 
-/* the chrome (menu bar, popups, status bar, title strip) uses the editor font face at a static size (CHROME_PT) */
+/* the chrome (menu bar, popups, status bar, title strip) uses the editor font face at a static size (CHROME_PX) */
 static void ApplyChrome(void)
 {
     UiSetChromeFont(g_pf.font);
@@ -753,6 +753,7 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return OnCreate(h);
     case WM_SIZE:
         MenuCancel();
+        FrameInvalidate(h);                              /* the title strip's fade and buttons depend on the width: repaint all of it */
         if (w != SIZE_MINIMIZED && g_edit) Layout();
         return 0;
     case WM_MOVE:

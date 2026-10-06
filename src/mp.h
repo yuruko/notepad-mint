@@ -109,8 +109,8 @@ enum { BV_RAISED, BV_SUNKEN, BV_ETCHED, BV_FLAT_UP, BV_FLAT_DN };
 extern HINSTANCE g_hinst;
 extern int       g_dpi;
 extern HFONT     g_fontUI, g_fontUIB;                 /* dialogs: segoe ui 9pt */
-extern HFONT     g_fontMenu;                          /* menu bar / popups / status bar / title strip: the editor font face at a static CHROME_PT */
-#define CHROME_PT 10                                  /* the chrome font size in points: static, it does not follow the editor size */
+extern HFONT     g_fontMenu;                          /* menu bar / popups / status bar / title strip: the editor font face at a static CHROME_PX */
+#define CHROME_PX 11                                  /* the chrome font height in 96-dpi pixels (em height): static, scaled by the dpi, it does not follow the editor size */
 extern HBRUSH    g_brFace, g_brField;
 
 int   S(int v);                                       /* scale 96-dpi px -> device px */
@@ -119,7 +119,7 @@ void  UiInit(HINSTANCE hi);
 void  UiSetDpi(int dpi);
 void  ThemeSet(int theme);                            /* THEME_*: switches g_pal + g_brFace / g_brField (no repaint) */
 int   ThemeGet(void);
-void  UiSetChromeFont(const WCHAR *face);                /* rebuilds g_fontMenu (the editor font face, CHROME_PT points); callers then refont the bar + status bar */
+void  UiSetChromeFont(const WCHAR *face);                /* rebuilds g_fontMenu (the editor font face, CHROME_PX pixels); callers then refont the bar + status bar */
 int   UiSystemDpi(void);
 int   UiDpiForWindow(HWND h);                         /* falls back to g_dpi before windows 10 */
 int   UiMetric(int idx);                              /* GetSystemMetrics at the current dpi */

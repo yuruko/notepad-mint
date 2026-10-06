@@ -56,7 +56,7 @@ static DpiSysFn pDpiSys;
 static AdjDpiFn pAdjDpi;
 static MetricFn pMetric;
 
-static WCHAR g_chromeFace[32] = L"Consolas";   /* menu bar / popups / status bar / title strip font: the editor font face, CHROME_PT points */
+static WCHAR g_chromeFace[32] = L"Consolas";   /* menu bar / popups / status bar / title strip font: the editor font face, CHROME_PX pixels */
 
 int S(int v)    { return MulDiv(v, g_dpi, 96); }
 int UnS(int px) { return MulDiv(px, 96, g_dpi); }
@@ -102,6 +102,12 @@ static HFONT Face(const WCHAR *face, int pt, int weight)
                        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
 }
 
+static HFONT FacePx(const WCHAR *face, int px, int weight)       /* px = 96-dpi pixels (em height), scaled by the dpi */
+{
+    return CreateFontW(-S(px), 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                       CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
+}
+
 /* the dialog fonts (g_fontUI / g_fontUIB) are handed to controls with WM_SETFONT and stay in use for as long as a dialog
  * lives (the modeless find dialog outlives a format > font change), so a chrome font change leaves them alone. a dpi
  * change does rebuild them, and the replaced pair is deliberately NOT deleted: an open find dialog may still hold it
@@ -115,7 +121,7 @@ static void MakeDialogFonts(void)
 static void MakeMenuFont(void)
 {
     if (g_fontMenu) DeleteObject(g_fontMenu);
-    g_fontMenu = Face(g_chromeFace, CHROME_PT, FW_NORMAL);    /* main window chrome */
+    g_fontMenu = FacePx(g_chromeFace, CHROME_PX, FW_NORMAL);   /* main window chrome */
 }
 
 static void MakeFonts(void)
@@ -124,7 +130,7 @@ static void MakeFonts(void)
     MakeMenuFont();
 }
 
-/* chrome font = the editor's font face at a static size (CHROME_PT): zooming the editor does not touch the menu bar, status bar or title */
+/* chrome font = the editor's font face at a static size (CHROME_PX): zooming the editor does not touch the menu bar, status bar or title */
 void UiSetChromeFont(const WCHAR *face)
 {
     wcopy(g_chromeFace, face, 32);

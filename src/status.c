@@ -30,7 +30,7 @@ static void Measure(void)
     GetTextMetricsW(dc, &tm);
     g_sbH = tm.tmHeight + S(8);
     g_floor[SB_POS] = TextWidth(dc, L"99999999:99999");              /* line:column of a very big file */
-    g_floor[SB_ZOOM] = TextWidth(dc, L"96 pt");
+    g_floor[SB_ZOOM] = TextWidth(dc, L"96pt");
     for (m = 0, i = 0; i < EOL_COUNT; i++) { w = TextWidth(dc, g_eolShort[i]); if (w > m) m = w; }
     g_floor[SB_EOL] = m;
     for (m = 0, i = 0; i < ENC_COUNT; i++) { w = TextWidth(dc, g_encShort[i]); if (w > m) m = w; }
@@ -144,6 +144,9 @@ static LRESULT CALLBACK StatusProc(HWND h, UINT m, WPARAM w, LPARAM l)
     switch (m) {
     case WM_ERASEBKGND:
         return 1;
+    case WM_SIZE:
+        InvalidateRect(h, NULL, FALSE);                      /* (also when the size changes without the class styles noticing: SetWindowPos with copy bits ...) */
+        return 0;
     case WM_PAINT:
         Paint(h);
         return 0;
@@ -181,7 +184,7 @@ static LRESULT CALLBACK StatusProc(HWND h, UINT m, WPARAM w, LPARAM l)
 
 HWND StatusCreate(HWND parent)
 {
-    RegClass(L"mp_status", StatusProc, 0, NULL);
+    RegClass(L"mp_status", StatusProc, CS_HREDRAW | CS_VREDRAW, NULL);      /* the panels are right aligned: a size change repaints all of it, not just the new part */
     StatusHeight();
     g_sb = CreateWindowExW(0, L"mp_status", NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
                            0, 0, 100, g_sbH, parent, NULL, g_hinst, NULL);
