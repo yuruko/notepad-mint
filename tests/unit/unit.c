@@ -632,12 +632,18 @@ static void TestEncList(void)
         Want(g_encShort[i][0] && Lower(g_encShort[i]) && wlen(g_encShort[i]) <= wlen(g_encName[i]), L"it isn't", 0, 0);
         Done(name);
     }
+    EncShort(ENC_UTF8, lab, COUNTOF(lab));
+    Str(L"encshort utf-8", lab, L"utf8");
     EncShort(ENC_UTF8BOM, lab, COUNTOF(lab));
-    Str(L"encshort utf-8 with bom", lab, L"utf-8 bom");
+    Str(L"encshort utf-8 with bom", lab, L"utf8 bom");
     EncShort(ENC_UTF16LE, lab, COUNTOF(lab));
-    Str(L"encshort utf-16 le", lab, L"utf-16 le");
+    Str(L"encshort utf-16 le", lab, L"utf16 le");
+    EncShort(ENC_UTF16BE, lab, COUNTOF(lab));
+    Str(L"encshort utf-16 be", lab, L"utf16 be");
     EncShort(1252, lab, COUNTOF(lab));
-    Str(L"encshort 1252 = the code page name", lab, L"windows-1252");
+    Str(L"encshort 1252 = the code page name without hyphens", lab, L"windows1252");
+    EncShort(932, lab, COUNTOF(lab));
+    Str(L"encshort 932", lab, L"shiftjis");
     EncShort(12345, lab, COUNTOF(lab));
     Str(L"encshort a code page the table doesn't know", lab, L"cp 12345");
 

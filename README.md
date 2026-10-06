@@ -6,7 +6,7 @@ a free, dark replacement for `notepad.exe`: plain text only. no ai, no sign-in, 
   (checked against the real sdk by `tools/layout_check`). the exe imports only kernel32 / user32 / gdi32 (everything else is loaded at run time).
 - one small 32-bit exe runs on 32-bit windows, 64-bit windows and windows on arm.
 - behaves like notepad (same menus, status bar and wording) plus: a dark theme (the default, mint accent `#9df5bd`) and a light one (a softer green accent `#2f7d58`);
-  hover and the caret use the accent; classic style scrollbars in both themes' colours; an 8 px padding around the text; title bar (white / black over a soft accent fade), menu bar and status bar in the editor's font face at a fixed 11 px, the status bar compact (`12:5`, `crlf`, `utf-8 bom`) and never cut off; ctrl+plus / ctrl+minus / ctrl+0 font-size zoom (10-96 pt);
+  hover and the caret use the accent; classic style scrollbars in both themes' colours; an 8 px padding around the text; title bar (white / black over a soft accent fade), menu bar and status bar in the editor's font face at a fixed 11 px, the status bar compact (`12:5`, `crlf`, `utf8 bom`) and never cut off; ctrl+plus / ctrl+minus / ctrl+0 font-size zoom (10-96 pt);
   line ending and encoding pickers (format menu, status bar); utf-8 / utf-16 / legacy code pages; right-to-left toggle; unicode control characters; drag and drop; per-monitor dpi;
   an unsaved document is called `mintXXXX` (4 characters of 0-9 a-z from the date and time) instead of "untitled"; "modified" means *different from the file* (type and delete again, or undo back, is not a change).
 

@@ -12,7 +12,7 @@ static int   g_sbH, g_hotp = -1;
 static int   g_floor[SB_COUNT];                 /* device px: the widest text the panel can normally show, padding included */
 static int   g_need[SB_COUNT];                  /* device px: the text it shows now, padding included */
 
-/* names the encoding panel can show besides g_encShort[]: the widest code page names */
+/* the widest code page names (hyphens counted: the basis of the panel width, see Measure) */
 static const WCHAR *const g_wide[] = { L"ks_c_5601-1987", L"x-mac-cyrillic", L"x-mac-icelandic", L"windows-1252", L"iso-8859-8-i" };
 
 static int PadL(void) { return S(8); }
@@ -33,9 +33,8 @@ static void Measure(void)
     g_floor[SB_ZOOM] = TextWidth(dc, L"96pt");
     for (m = 0, i = 0; i < EOL_COUNT; i++) { w = TextWidth(dc, g_eolShort[i]); if (w > m) m = w; }
     g_floor[SB_EOL] = m;
-    for (m = 0, i = 0; i < ENC_COUNT; i++) { w = TextWidth(dc, g_encShort[i]); if (w > m) m = w; }
-    for (i = 0; i < COUNTOF(g_wide); i++) { w = TextWidth(dc, g_wide[i]); if (w > m) m = w; }
-    g_floor[SB_ENC] = m;
+    for (m = 0, i = 0; i < COUNTOF(g_wide); i++) { w = TextWidth(dc, g_wide[i]); if (w > m) m = w; }
+    g_floor[SB_ENC] = m * 53 / 100;                                /* deliberately about half of what the widest name needs (maintainer's request): "utf8" fits, a longer name widens the panel (nothing is cut off) */
     for (i = 0; i < SB_COUNT; i++) g_need[i] = TextWidth(dc, g_txt[i]);
     SelectObject(dc, of);
     ReleaseDC(NULL, dc);
@@ -128,7 +127,7 @@ static void Paint(HWND h)
         Bevel(mdc, &p[i], BV_FLAT_DN);
         if (hot) { r = p[i]; InflateRect(&r, -1, -1); FillC(mdc, &r, C_ACCENT); }
         r = p[i]; r.left += PadL(); r.right -= PadR();
-        TextC(mdc, g_txt[i], -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, hot ? C_ON_ACCENT : C_TEXT);
+        TextC(mdc, g_txt[i], -1, &r, (i == SB_ENC ? DT_RIGHT : DT_LEFT) | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, hot ? C_ON_ACCENT : C_TEXT);   /* the encoding is right aligned */
     }
 
     BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY);
