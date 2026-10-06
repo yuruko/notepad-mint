@@ -46,6 +46,11 @@ tools/         shot.ps1 (launch+keys+screenshot), crop.ps1, px.ps1, cc.bat (comp
 ## decisions / design notes
 - edit control = native EDIT (multiline, ES_NOHIDESEL). text kept utf-16 + CRLF inside; DocRead normalises, DocWrite converts.
   word wrap toggle = recreate the edit control (like notepad). colors via WM_CTLCOLOREDIT. selection color stays system blue (unavoidable with native edit).
+- scrollbars only when needed (edit.c `UpdateBars`): a native multiline edit always shows its bars (greyed). we show/hide them with `ShowScrollBar` after text / size / font changes
+  (`EditScrollSoon` posts `WM_BARS` so the control finishes its own layout first). pitfalls found the hard way: (1) a hidden bar (WS_xSCROLL cleared) is no longer maintained by the control,
+  so its range can't be read -> vertical need = `EM_GETLINECOUNT` vs lines that fit (`EM_GETRECT` / line height); horizontal need = show the bar with redraw off, read `GetScrollInfo`, hide again if unneeded;
+  (2) that show/hide resizes the edit -> `WM_SIZE` -> re-schedule = endless posted-message loop that starves `WM_PAINT` (unpainted children) -> `g_inBars` guard; (3) reset scroll position when a bar goes away.
+  verified: short doc = none, tall = vertical, wide = horizontal, both, word wrap on (vertical only), typing past the window, window enlarged (bar disappears).
 - logical line/col (status bar, goto) = lf count over the edit's own buffer (EM_GETHANDLE + LocalLock), so they stay right with word wrap on.
   goto works with wrap on too (modern notepad behaviour, not the classic "grayed out").
 - menus: bar = child window `mp_menubar`; popups = `mp_popup` (WS_EX_NOACTIVATE), private modal loop in `RunMenu` handles mouse/keys/mnemonics/submenus.

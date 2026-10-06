@@ -15,6 +15,94 @@ static HFONT   g_font;
 static HBRUSH  g_brEdit;
 static int     g_wheel;
 
+/* -------------------------------------------------- scrollbars on demand -- */
+/* a native multiline edit always shows its bars (greyed out when there is nothing to scroll). we want them only when
+ * needed, so after anything that can change the content or the room for it we ask the control for the range / page it
+ * keeps for each bar and show or hide the bar to match. the check runs from a posted message so the control has finished
+ * its own layout first; toggling a bar resizes the client area, which comes back here until nothing changes (it always
+ * converges: showing a bar only ever makes the other one more needed, hiding one only ever less). */
+#define WM_BARS (WM_APP + 7)
+static int g_barsPending, g_inBars;
+
+void EditScrollSoon(void)
+{
+    if (g_edit && !g_barsPending && !g_inBars) { g_barsPending = 1; PostMessageW(g_edit, WM_BARS, 0, 0); }
+}
+
+/* NB: once a bar is hidden (ShowScrollBar clears its WS_xSCROLL style) the control stops maintaining the range it keeps for it,
+ * so a hidden bar can't be asked. vertical: exact from the line count vs the lines that fit (works with the bar hidden).
+ * horizontal: show the bar for a moment (redraw off, nothing flickers) so the control reports its range, then hide it again if unneeded. */
+static int LineHeight(void)
+{
+    HDC dc = GetDC(g_edit);
+    HGDIOBJ of = SelectObject(dc, g_font);
+    TEXTMETRICW tm;
+    GetTextMetricsW(dc, &tm);
+    SelectObject(dc, of);
+    ReleaseDC(g_edit, dc);
+    return tm.tmHeight + tm.tmExternalLeading > 0 ? tm.tmHeight + tm.tmExternalLeading : 1;
+}
+
+static int VNeeded(void)
+{
+    RECT r;
+    int lines = (int)SendMessageW(g_edit, EM_GETLINECOUNT, 0, 0), vis;
+    SendMessageW(g_edit, EM_GETRECT, 0, (LPARAM)&r);
+    vis = (r.bottom - r.top) / LineHeight();
+    if (vis < 1) vis = 1;
+    return lines > vis;
+}
+
+static int HNeeded(void)                          /* only meaningful while the bar exists */
+{
+    SCROLLINFO si;
+    memset(&si, 0, sizeof si);
+    si.cbSize = sizeof si;
+    si.fMask = SIF_RANGE | SIF_PAGE;
+    if (!GetScrollInfo(g_edit, SB_HORZ, &si)) return 0;
+    DBG(L"bar h range/page", si.nMax - si.nMin + 1, si.nPage);
+    return si.nMax - si.nMin + 1 > (int)si.nPage;
+}
+
+#define BARS(e) (GetWindowLongPtrW(e, GWL_STYLE) & (WS_VSCROLL | WS_HSCROLL))
+
+static void UpdateBars(void)
+{
+    int pass;
+    LONG_PTR before;
+    if (!g_edit) return;
+    before = BARS(g_edit);
+    g_inBars = 1;                                 /* our own show / hide resizes the edit: that must not schedule another check
+                                                     (an endless posted-message loop would starve WM_PAINT) */
+    SendMessageW(g_edit, WM_SETREDRAW, FALSE, 0);
+    for (pass = 0; pass < 4; pass++) {            /* toggling one bar can change the other one's need: repeat until stable */
+        int changed = 0, v = VNeeded(), hadV = (GetWindowLongPtrW(g_edit, GWL_STYLE) & WS_VSCROLL) != 0;
+        if (v != hadV) {
+            if (!v) {                             /* going away: make sure nothing is left scrolled out of view */
+                int first = (int)SendMessageW(g_edit, EM_GETFIRSTVISIBLELINE, 0, 0);
+                if (first) SendMessageW(g_edit, EM_LINESCROLL, 0, (LPARAM)-first);
+            }
+            ShowScrollBar(g_edit, SB_VERT, v);
+            changed = 1;
+        }
+        if (!g_pf.wrap) {                         /* (a wrapping edit has no horizontal bar at all) */
+            int hadH = (GetWindowLongPtrW(g_edit, GWL_STYLE) & WS_HSCROLL) != 0, h;
+            if (!hadH) ShowScrollBar(g_edit, SB_HORZ, TRUE);
+            h = HNeeded();
+            DBG(L"bars pass v/h", v, h);
+            if (!h) {
+                SendMessageW(g_edit, EM_LINESCROLL, (WPARAM)-100000, 0);       /* back to column 0 */
+                ShowScrollBar(g_edit, SB_HORZ, FALSE);
+            }
+            if (h != hadH) changed = 1;
+        }
+        if (!changed) break;
+    }
+    SendMessageW(g_edit, WM_SETREDRAW, TRUE, 0);
+    if (BARS(g_edit) != before) RedrawWindow(g_edit, NULL, NULL, RDW_INVALIDATE | RDW_FRAME);   /* only when a bar really came or went */
+    g_inBars = 0;
+}
+
 /* ----------------------------------------------------- text buffer access - */
 /* the control keeps its text in a local-memory block we can read in place (no copy) */
 static const WCHAR *TextLock(HLOCAL *h, int *n)
@@ -186,6 +274,7 @@ void EditApplyFont(void)
     if (g_edit) {
         SendMessageW(g_edit, WM_SETFONT, (WPARAM)nf, TRUE);
         SendMessageW(g_edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(S(4), S(4)));
+        EditScrollSoon();
     }
     if (old) DeleteObject(old);
 }
@@ -320,8 +409,11 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     LRESULT r;
 
-    if (m == WM_KEYDOWN || m == WM_CHAR || m == WM_SYSCHAR || m == WM_SYSKEYDOWN || m == WM_KEYUP) DBG(L"edit", m, w);
     switch (m) {
+    case WM_BARS:
+        g_barsPending = 0;
+        UpdateBars();
+        return 0;
     case WM_MOUSEWHEEL:
         if (GetKeyState(VK_CONTROL) & 0x8000) {                /* ctrl+wheel = font size, one step per notch */
             g_wheel += GET_WHEEL_DELTA_WPARAM(w);
@@ -359,6 +451,11 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
 
     r = CallWindowProcW(g_orig, h, m, w, l);
 
+    switch (m) {                                                /* anything that can change the room the text needs */
+    case WM_SIZE: case WM_SETFONT: case WM_SETTEXT:
+        EditScrollSoon();
+        break;
+    }
     switch (m) {                                                /* anything that can move the caret / change the text */
     case WM_KEYDOWN: case WM_KEYUP: case WM_CHAR:
     case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_TIMER:
@@ -417,6 +514,8 @@ HWND EditCreate(HWND parent)
         SendMessageW(e, WM_SETREDRAW, TRUE, 0);
         mem_free(text);
     }
+    UpdateBars();                                   /* before it is shown: no flash of empty scrollbars */
+    EditScrollSoon();
     ShowWindow(e, SW_SHOW);
     if (old) DestroyWindow(old);
     if (focus || !old) SetFocus(e);

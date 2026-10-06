@@ -110,7 +110,8 @@ delete the placeholders from `stubs.c` as modules land (and the file when empty)
 - **title bar in the chrome font** (the user asked for it): `src/frame.c` is an experiment that draws a custom title strip (`FRAME_CUSTOM`, currently 0 = off). when switched on, windows still drew its own caption above ours
   (the `WM_NCCALCSIZE` override had no effect, `FrameNcCalc` never logged). find out why (suspects: the system only applies the shrunken client rect when ...; `DwmExtendFrameIntoClientArea`; `SetWindowPos(SWP_FRAMECHANGED)` after creation;
   an earlier handler consuming the message) - only turn it on if a ci screenshot (or other evidence) shows a single title bar, correct maximize / restore / snap behaviour and working min / max / close buttons; otherwise leave it off and write down what you found in `NOTES.md`.
-- **scrollbars that only appear when needed - NOT yours**: the maintainer is doing this locally in `src/edit.c` / `src/main.c` (needs a real display). do not touch the scrollbar logic; just don't regress it.
+- **scrollbars that only appear when needed - DONE (maintainer, verified with screenshots)**: `UpdateBars` / `EditScrollSoon` in `src/edit.c` (see the comments there and `NOTES.md`). do not touch it; just don't regress it
+  (a ci screenshot test of a short / tall / wide document would be a welcome addition).
 - polish / review pass over what you wrote: ime composition in the edit, per-monitor dpi change while a dialog is open, a 50 mb file, ctrl+backspace / ctrl+delete, rtl toggle, new window cascade, `settings.ini` round trip.
 
 ## 4. verification the project still owes (do these in ci where possible)

@@ -712,6 +712,7 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
             case EN_CHANGE:
                 AppUpdateTitle();
                 AppUpdateStatus();
+                EditScrollSoon();                              /* scrollbars only when the text needs them */
                 break;
             case EN_ERRSPACE:
             case EN_MAXTEXT:

@@ -11,8 +11,8 @@ a free, dark replacement for `notepad.exe`: plain text only. no ai, no sign-in, 
 
 ## status: work in progress
 
-works: the main window, menus, status bar, word wrap, font-size zoom, about + help, opening files from the command line or by drag and drop,
-saving in place (ctrl+s) , the 32-bit build.
+works: the main window, menus, status bar, word wrap, font-size zoom, scrollbars that only show when needed, about + help,
+opening files from the command line or by drag and drop, saving in place (ctrl+s), the 32-bit build.
 
 not written yet (the menu items show an "isn't written yet" message): find / replace / go to, the open and save as dialogs,
 the encoding pickers, the font & colors dialog, print and page setup. see `NOTES.md` for the design, the decisions and the exact to-do list.

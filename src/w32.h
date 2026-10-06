@@ -326,6 +326,11 @@ typedef struct {
 #define GW_HWNDPREV 3
 #define GW_OWNER 4
 
+#define SB_HORZ 0
+#define SB_VERT 1
+#define SIF_RANGE 0x0001
+#define SIF_PAGE 0x0002
+#define SIF_POS 0x0004
 #define SM_CXVSCROLL 2
 #define SM_CYHSCROLL 3
 #define SM_CYFRAME 33
@@ -350,6 +355,10 @@ typedef struct {
 #define MB_OK 0
 #define MB_ICONERROR 0x10
 
+#define RDW_INVALIDATE 0x0001
+#define RDW_ERASE 0x0004
+#define RDW_FRAME 0x0400
+#define RDW_ALLCHILDREN 0x0080
 #define PM_NOREMOVE 0
 #define PM_REMOVE 1
 #define TME_LEAVE 2
@@ -735,6 +744,8 @@ API int     WINAPI GetClassNameW(HWND, LPWSTR, int);
 API BOOL    WINAPI EnumChildWindows(HWND, BOOL (CALLBACK *)(HWND, LPARAM), LPARAM);
 API LRESULT WINAPI SendDlgItemMessageW(HWND, int, UINT, WPARAM, LPARAM);
 API BOOL    WINAPI GetCaretPos(POINT *);
+API BOOL    WINAPI GetScrollInfo(HWND, int, SCROLLINFO *);
+API BOOL    WINAPI ShowScrollBar(HWND, int, BOOL);
 API BOOL    WINAPI IsClipboardFormatAvailable(UINT);
 API HWND    WINAPI FindWindowExW(HWND, HWND, LPCWSTR, LPCWSTR);
 API BOOL    WINAPI GetKeyboardState(BYTE *);

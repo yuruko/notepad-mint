@@ -214,6 +214,7 @@ void   FontResolve(WCHAR *face);                /* swaps a missing face for cons
 void   EditSetDocText(const WCHAR *t);          /* load a document: resets undo + modified flag */
 WCHAR *EditGetDocText(int *len);                /* heap copy (CRLF text), caller mem_free()s */
 BOOL   EditHasSel(void);
+void   EditScrollSoon(void);                    /* re-check which scrollbars are needed (they only show when the text needs them) */
 const WCHAR *EditLockText(void **h, int *n);    /* zero-copy view of the text (CRLF), not nul terminated; pair with EditUnlockText */
 void   EditUnlockText(void *h);
 void   EditCaretPos(int *line, int *col);       /* 1-based, logical lines (also with word wrap on) */
