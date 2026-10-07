@@ -242,13 +242,13 @@ static void TestDocName(void)
     WCHAR b[16], prev[16], c;
     int h, mi, s, i, bad, same;
 
-    Group(L"util.c default document name (mint + 4 base-36 chars)");
+    Group(L"util.c default document name (mint- + 4 base-36 chars)");
     /* year + month*100 + day + seconds since midnight, base 36 (0-9 a-z), zero padded */
-    NameAt(L"2026-10-05 21:53:42 = 2026 + 1005 + 78822 = 81853", 2026, 10, 5, 21, 53, 42, L"mint1r5p");
-    NameAt(L"the next second is the next name", 2026, 10, 5, 21, 53, 43, L"mint1r5q");
-    NameAt(L"midnight, 1 january 2026 (zero padded)", 2026, 1, 1, 0, 0, 0, L"mint01n3");
-    NameAt(L"midnight, 6 october 2026", 2026, 10, 6, 0, 0, 0, L"mint02c8");
-    NameAt(L"the last second of year 9999", 9999, 12, 31, 23, 59, 59, L"mint23bx");
+    NameAt(L"2026-10-05 21:53:42 = 2026 + 1005 + 78822 = 81853", 2026, 10, 5, 21, 53, 42, L"mint-1r5p");
+    NameAt(L"the next second is the next name", 2026, 10, 5, 21, 53, 43, L"mint-1r5q");
+    NameAt(L"midnight, 1 january 2026 (zero padded)", 2026, 1, 1, 0, 0, 0, L"mint-01n3");
+    NameAt(L"midnight, 6 october 2026", 2026, 10, 6, 0, 0, 0, L"mint-02c8");
+    NameAt(L"the last second of year 9999", 9999, 12, 31, 23, 59, 59, L"mint-23bx");
 
     memset(&st, 0, sizeof st);
     st.wYear = 2026; st.wMonth = 10; st.wDay = 5;
@@ -258,25 +258,25 @@ static void TestDocName(void)
             for (s = 0; s < 60; s++) {
                 st.wHour = (WORD)h; st.wMinute = (WORD)mi; st.wSecond = (WORD)s;
                 DefaultDocName(&st, b, COUNTOF(b));
-                if (wlen(b) != 8 || b[0] != 'm' || b[1] != 'i' || b[2] != 'n' || b[3] != 't') bad++;
-                for (i = 4; i < 8; i++) {
+                if (wlen(b) != 9 || b[0] != 'm' || b[1] != 'i' || b[2] != 'n' || b[3] != 't' || b[4] != '-') bad++;
+                for (i = 5; i < 9; i++) {
                     c = b[i];
                     if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z'))) bad++;
                 }
                 if (wcmp(b, prev) == 0) same++;
                 wcopy(prev, b, COUNTOF(prev));
             }
-    Int(L"all 86400 seconds of a day: \"mint\" + exactly four of 0-9 a-z", bad, 0);
+    Int(L"all 86400 seconds of a day: \"mint-\" + exactly four of 0-9 a-z", bad, 0);
     Int(L"no two consecutive seconds share a name", same, 0);
 
     memset(b, 0x55, sizeof b);
-    DefaultDocName(&st, b, 8);
-    Want(b[0] == 0 && b[1] == 0x5555, L"cap 8: expected an empty string and nothing written past it", 0, 0);
-    Done(L"a buffer that cannot hold 8 chars + nul gets an empty string");
-    memset(b, 0x55, sizeof b);
     DefaultDocName(&st, b, 9);
-    Want(wlen(b) == 8 && b[9] == 0x5555, L"cap 9: expected 8 characters and nothing written past the nul", 0, 0);
-    Done(L"cap 9 is exactly enough");
+    Want(b[0] == 0 && b[1] == 0x5555, L"cap 9: expected an empty string and nothing written past it", 0, 0);
+    Done(L"a buffer that cannot hold 9 chars + nul gets an empty string");
+    memset(b, 0x55, sizeof b);
+    DefaultDocName(&st, b, 10);
+    Want(wlen(b) == 9 && b[10] == 0x5555, L"cap 10: expected 9 characters and nothing written past the nul", 0, 0);
+    Done(L"cap 10 is exactly enough");
 }
 
 /* ------------------------------------------------------------- paths --- */
@@ -1011,6 +1011,84 @@ static void TestDocLossy(void)
     Done(L"utf-8 / utf-16 are never lossy");
 }
 
+/* DocEncodedSize (the status bar's "124b") is exactly the number of bytes DocWrite puts on disk: every encoding x every line ending x a few texts
+ * (empty, ascii, breaks, accents + cjk, a surrogate pair, lone surrogates). the texts have CR LF breaks only, like the edit control's */
+static void TestDocSize(void)
+{
+    static const WCHAR *const texts[] = {
+        L"",
+        L"abc",
+        L"a\r\nb\r\n\r\nc",
+        L"café 日本\ttab\r\nx\r\n",
+        L"a\xD83D\xDE00" L"b\r\n",
+        L"\xD83D lone high, \xDE00 lone low\r\n",
+    };
+    static const int encs[] = { ENC_UTF8, ENC_UTF8BOM, ENC_UTF16LE, ENC_UTF16BE, ENC_ANSI, 1252 };
+    int t, e, l, checked = 0;
+    Group(L"doc.c encoded size");
+    for (t = 0; t < (int)COUNTOF(texts); t++)
+        for (e = 0; e < (int)COUNTOF(encs); e++)
+            for (l = 0; l < EOL_COUNT; l++) {
+                BOOL lossy = TRUE;                                 /* what the code page lacks is written as '?': still one byte */
+                int len = wlen(texts[t]), n = -1;
+                DWORD want = DocEncodedSize(texts[t], len, encs[e], l), r;
+                BYTE *b;
+                WCHAR m[160];
+                DeleteFileW(g_file);
+                r = DocWrite(g_file, texts[t], len, encs[e], l, &lossy);
+                b = r ? NULL : FileGet(g_file, &n);
+                mem_free(b);
+                wsprintfW(m, L"text %d, encoding %d, line ending %d: DocEncodedSize says %u bytes, DocWrite (returned %u) wrote %d", t, encs[e], l, want, r, n);
+                Want(r == 0 && n >= 0 && (DWORD)n == want, m, 0, 0);
+                checked++;
+            }
+    Want(checked == (int)COUNTOF(texts) * (int)COUNTOF(encs) * EOL_COUNT, L"the loops did not run %d x", checked, 0);
+    Done(L"DocEncodedSize == the bytes DocWrite writes (6 texts x 6 encodings x 3 line endings)");
+}
+
+/* DocBodySize (the status bar's size of the SELECTION, "54 B") is DocEncodedSize without the byte order mark, and a text cut at a line break adds up:
+ * the selection of a piece of the document is what the piece would take in the file */
+static void TestDocBodySize(void)
+{
+    static const WCHAR *const texts[] = {
+        L"",
+        L"abc",
+        L"a\r\nb\r\n\r\nc",
+        L"café 日本\ttab\r\nx\r\n",
+        L"a\xD83D\xDE00" L"b\r\n",
+    };
+    static const int encs[] = { ENC_UTF8, ENC_UTF8BOM, ENC_UTF16LE, ENC_UTF16BE, ENC_ANSI, 1252 };
+    static const WCHAR whole[] = L"héllo 日本\r\nsecond line\r\n\r\nthird";
+    static const WCHAR head[] = L"héllo 日本\r\n", tail[] = L"second line\r\n\r\nthird";
+    int t, e, l, checked = 0;
+    Group(L"doc.c selection size");
+    for (t = 0; t < (int)COUNTOF(texts); t++)
+        for (e = 0; e < (int)COUNTOF(encs); e++)
+            for (l = 0; l < EOL_COUNT; l++) {
+                int len = wlen(texts[t]);
+                DWORD bom = (encs[e] == ENC_UTF16LE || encs[e] == ENC_UTF16BE) ? 2 : (encs[e] == ENC_UTF8BOM ? 3 : 0);
+                WCHAR m[160];
+                wsprintfW(m, L"text %d, encoding %d, line ending %d: the whole file is the mark (%u) + the body", t, encs[e], l, bom);
+                Want(DocEncodedSize(texts[t], len, encs[e], l) == bom + DocBodySize(texts[t], len, encs[e], l), m, 0, 0);
+                checked++;
+            }
+    Want(checked == (int)COUNTOF(texts) * (int)COUNTOF(encs) * EOL_COUNT, L"the loops did not run %d x", checked, 0);
+    Done(L"DocEncodedSize == byte order mark + DocBodySize");
+    Want(DocBodySize(L"abc", 3, ENC_UTF8BOM, EOL_CRLF) == 3, L"abc in utf-8 with a bom: the selection has no mark: %d", (int)DocBodySize(L"abc", 3, ENC_UTF8BOM, EOL_CRLF), 0);
+    Want(DocBodySize(L"abc", 3, ENC_UTF16LE, EOL_CRLF) == 6, L"abc in utf-16: 6 bytes, no mark: %d", (int)DocBodySize(L"abc", 3, ENC_UTF16LE, EOL_CRLF), 0);
+    Want(DocBodySize(L"a\r\nb", 4, ENC_UTF8, EOL_CRLF) == 4 && DocBodySize(L"a\r\nb", 4, ENC_UTF8, EOL_LF) == 3 && DocBodySize(L"a\r\nb", 4, ENC_UTF16BE, EOL_CR) == 6,
+         L"a, a break, b: 4 bytes as crlf, 3 as lf, 3 utf-16 units as cr: %d", (int)DocBodySize(L"a\r\nb", 4, ENC_UTF8, EOL_CRLF), 0);
+    Want(DocBodySize(L"", 0, ENC_UTF16LE, EOL_CRLF) == 0 && DocBodySize(L"", 0, ENC_UTF8BOM, EOL_LF) == 0, L"an empty piece has no bytes at all", 0, 0);
+    Done(L"a selection has no byte order mark");
+    for (e = 0; e < (int)COUNTOF(encs); e++)
+        for (l = 0; l < EOL_COUNT; l++) {
+            WCHAR m[160];
+            wsprintfW(m, L"encoding %d, line ending %d: the pieces do not add up to the whole", encs[e], l);
+            Want(DocBodySize(head, wlen(head), encs[e], l) + DocBodySize(tail, wlen(tail), encs[e], l) == DocBodySize(whole, wlen(whole), encs[e], l), m, 0, 0);
+        }
+    Done(L"the body of two pieces cut at a line break adds up to the body of the whole");
+}
+
 static void TestDocBig(void)
 {
     WCHAR *t, line[64];
@@ -1047,6 +1125,8 @@ static void TestDoc(void)
     TestDocDetect();
     TestDocEol();
     TestDocLossy();
+    TestDocSize();
+    TestDocBodySize();
     TestDocBig();
     DeleteFileW(g_file);
     RemoveDirectoryW(g_dir);

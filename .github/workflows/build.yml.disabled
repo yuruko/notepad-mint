@@ -35,7 +35,7 @@ jobs:
 
       - name: dumpbin /imports (for the log)
         shell: cmd
-        run: dumpbin /imports "build\notepad mint.exe"
+        run: dumpbin /imports build\notepad-mint.exe
 
       # src/w32.h is hand written: prove its struct layouts, constants and api byte counts match the real 32-bit sdk
       - name: layout check (w32.h vs the real sdk)
@@ -51,7 +51,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: notepad-mint-x86
-          path: build/notepad mint.exe
+          path: build/notepad-mint.exe
 
       # needs a desktop session on the runner. does not fail the job yet: harden it as it proves stable
       - name: smoke test (starts, opens a file, stays alive, right title)

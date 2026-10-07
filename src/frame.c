@@ -26,6 +26,7 @@ static HICON g_icon;
 
 static int BtnW(void) { return S(38); }                 /* (was 46) */
 static int Edge(void) { return UiMetric(SM_CYFRAME) + UiMetric(SM_CXPADDEDBORDER); }     /* the system's sizing border */
+static int Crop(void) { return S(1); }                  /* padding taken off the BOTTOM of the strip: the icon and the title are laid out as if it were this much higher (they do not move), its last rows are just not there */
 
 static void Metrics(void)
 {
@@ -35,8 +36,8 @@ static void Metrics(void)
     GetTextMetricsW(dc, &tm);
     SelectObject(dc, of);
     ReleaseDC(NULL, dc);
-    g_capH = tm.tmHeight + S(10);
-    if (g_capH < S(24)) g_capH = S(24);                      /* (was 30: the strip is 6 px lower than it was) */
+    g_capH = tm.tmHeight + S(10) - Crop();
+    if (g_capH < S(24) - Crop()) g_capH = S(24) - Crop();    /* (was 30, then 24: the strip is 7 px lower than it was) */
 }
 
 int FrameHeight(void)
@@ -45,6 +46,8 @@ int FrameHeight(void)
     if (!g_capH) Metrics();
     return g_capH;
 }
+
+static int ContentH(void) { return FrameHeight() + Crop(); }   /* the height the icon / title are centered in (the strip before Crop) */
 
 /* fonts or dpi changed */
 void FrameRefont(HWND h)
@@ -95,7 +98,8 @@ static int HitBtn(int x, int y, int cw)
     return -1;
 }
 
-static int IconRight(void) { return S(10) + S(16) + S(6); }
+static int IconLeft(void) { return S(8); }               /* padding left of the icon (was 10); the title follows the icon */
+static int IconRight(void) { return IconLeft() + S(16) + S(6); }
 static int InIcon(int x, int y) { return x >= 0 && x < IconRight() && y >= 0 && y < FrameHeight(); }
 
 /* ------------------------------------------------------------- painting --- */
@@ -154,14 +158,13 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
     DeleteObject(pen);
 }
 
-/* the strip's background: the face colour with a fade of the accent over it, FADE_FROM % at the left edge down to FADE_TO % where the window
- * buttons start, and FADE_TO % under the buttons (their normal state is transparent, so the strip reads as one piece). the light theme
- * has FADE_LIGHT_PLUS points more at both ends (the dark accent needs more to show on the light face), and an inactive window has
- * FADE_INACTIVE_MINUS points less at both ends (clamped at 0). one fill per distinct colour */
-#define FADE_FROM 14
-#define FADE_TO   4
-#define FADE_LIGHT_PLUS 5
-#define FADE_INACTIVE_MINUS 7
+/* the strip's background: the face colour with a FLAT tint of the accent over it, STRIP_TINT % of the accent (the middle of the 14% -> 4% fade it
+ * used to have: there is no gradient any more). the light theme has STRIP_TINT_LIGHT_PLUS points more (the dark accent needs more to show on the
+ * light face), and an inactive window has STRIP_TINT_INACTIVE_MINUS points less (clamped at 0). the window buttons are transparent at rest, so
+ * the strip reads as one piece */
+#define STRIP_TINT 9                                                 /* dark: (14 + 4) / 2 */
+#define STRIP_TINT_LIGHT_PLUS 12                                     /* light: (26 + 16) / 2 = 21 */
+#define STRIP_TINT_INACTIVE_MINUS 7
 static COLORREF Tint(COLORREF face, COLORREF acc, int a)         /* a = 0..255: how much of the accent */
 {
     int r = GetRValue(face) + (GetRValue(acc) - GetRValue(face)) * a / 255;
@@ -170,26 +173,13 @@ static COLORREF Tint(COLORREF face, COLORREF acc, int a)         /* a = 0..255: 
     return RGB(r, g, b);
 }
 
-static void FillStrip(HDC dc, int cw, int ch, int fadeEnd)
+static void FillStrip(HDC dc, int cw, int ch)
 {
     RECT r;
-    int adj = (ThemeGet() == THEME_LIGHT ? FADE_LIGHT_PLUS : 0) - (g_active ? 0 : FADE_INACTIVE_MINUS);
-    int pf = FADE_FROM + adj, pt = FADE_TO + adj;
-    if (pf < 0) pf = 0;
-    if (pt < 0) pt = 0;
-    COLORREF base = Tint(C_FACE, C_ACCENT, pt * 255 / 100), last = base, c;
-    int x, from = 0;
+    int p = STRIP_TINT + (ThemeGet() == THEME_LIGHT ? STRIP_TINT_LIGHT_PLUS : 0) - (g_active ? 0 : STRIP_TINT_INACTIVE_MINUS);
+    if (p < 0) p = 0;
     r.left = 0; r.top = 0; r.right = cw; r.bottom = ch;
-    FillC(dc, &r, base);
-    if (fadeEnd > cw) fadeEnd = cw;
-    for (x = 0; x <= fadeEnd; x++) {
-        c = x < fadeEnd ? Tint(C_FACE, C_ACCENT, 255 * (pt * fadeEnd + (pf - pt) * (fadeEnd - x)) / (100 * fadeEnd)) : base;
-        if (c != last || x == fadeEnd) {
-            if (last != base) { r.left = from; r.right = x; FillC(dc, &r, last); }
-            from = x;
-            last = c;
-        }
-    }
+    FillC(dc, &r, Tint(C_FACE, C_ACCENT, p * 255 / 100));
 }
 
 /* called from the main window's WM_PAINT: the colours are read here, so a theme switch only needs a repaint */
@@ -200,7 +190,8 @@ void FramePaint(HWND h, HDC dc)
     HBITMAP bmp;
     HGDIOBJ ob, of;
     WCHAR t[PATH_CAP + 64];
-    int cw, ch, b, isz = S(16);
+    int cw, ch, b, isz = S(16), n, cut, hw;
+    COLORREF fg;
 
     if (!FRAME_CUSTOM) return;
     GetClientRect(h, &rc);
@@ -212,16 +203,25 @@ void FramePaint(HWND h, HDC dc)
     ob = SelectObject(mdc, bmp);
     of = SelectObject(mdc, g_fontMenu);
 
-    BtnRect(FB_MIN, cw, &r);
-    FillStrip(mdc, cw, ch, r.left);
+    FillStrip(mdc, cw, ch);
     if (!g_icon) g_icon = (HICON)LoadImageW(g_hinst, MAKEINTRESOURCEW(1), IMAGE_ICON, isz, isz, LR_DEFAULTCOLOR);
-    if (g_icon) DrawIconEx(mdc, S(10), (ch - isz) / 2, g_icon, isz, isz, 0, NULL, DI_NORMAL);
+    if (g_icon) DrawIconEx(mdc, IconLeft(), (ContentH() - isz) / 2, g_icon, isz, isz, 0, NULL, DI_NORMAL);
 
     GetWindowTextW(h, t, COUNTOF(t));
     BtnRect(FB_MIN, cw, &r);
-    tr.left = IconRight() + S(4); tr.right = r.left - S(8); tr.top = 0; tr.bottom = ch;
-    TextC(mdc, t, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-          g_active ? (ThemeGet() == THEME_DARK ? RGB(0xff, 0xff, 0xff) : RGB(0, 0, 0)) : C_DIM);      /* plain white / black: readable on the accent fade */
+    tr.left = IconRight() + S(4); tr.right = r.left - S(8); tr.top = 0; tr.bottom = ContentH();
+    fg = g_active ? (ThemeGet() == THEME_DARK ? RGB(0xff, 0xff, 0xff) : RGB(0, 0, 0)) : C_DIM;     /* plain white / black: readable on the tint */
+    n = wlen(t);
+    cut = n - wlen(TITLE_TAIL);                                      /* "<name>" + " - notepad mint": the name is bold, the tail is not */
+    if (cut < 0 || wcmp(t + cut, TITLE_TAIL) != 0) cut = n;          /* (no tail: all of it is the name) */
+    SelectObject(mdc, g_fontMenuB);
+    hw = TextW(mdc, t, cut);
+    TextC(mdc, t, cut, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX, fg);
+    SelectObject(mdc, g_fontMenu);
+    if (cut < n && hw < tr.right - tr.left) {                        /* the tail follows the name, when there is room for any of it */
+        tr.left += hw;
+        TextC(mdc, t + cut, n - cut, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX, fg);
+    }
 
     for (b = 0; b < FB_COUNT; b++) {
         BtnRect(b, cw, &r);

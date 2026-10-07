@@ -345,6 +345,31 @@ static WCHAR *EolConvert(const WCHAR *t, int len, int eol, int *outLen)
     return out;
 }
 
+/* the size in bytes DocWrite would produce for this text (the byte order mark not counted), without converting anything into a buffer: the status bar
+ * shows it, for the document and for the selection. `text` is what the edit control holds (every line break CR LF); a LF / CR file has one byte
+ * (unit) less per break. the code page conversions are asked for their length only, with the same flags DocWrite uses, so the number is exact
+ * (a lossy '?' is still one byte) */
+DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol)
+{
+    size_t breaks = len > 0 ? mp_count_lf(text, (size_t)len) : 0;
+    size_t cut = (eol == EOL_CRLF) ? 0 : breaks;
+    if (len < 0) len = 0;
+    if (enc == ENC_UTF16LE || enc == ENC_UTF16BE) return (DWORD)(((size_t)len - cut) * 2);
+    {
+        UINT cp = CpOf(enc);
+        DWORD fl = CpHasDefaultChar(cp) ? WC_NO_BEST_FIT_CHARS : 0;
+        size_t need = len ? (size_t)WideCharToMultiByte(cp, fl, text, len, NULL, 0, NULL, NULL) : 0;
+        return (DWORD)(need - cut);
+    }
+}
+
+/* a whole file: the byte order mark (utf-8 with bom 3 bytes, utf-16 2) + its text. a piece of the text, like the selection, has no mark: DocBodySize */
+DWORD DocEncodedSize(const WCHAR *text, int len, int enc, int eol)
+{
+    DWORD bom = (enc == ENC_UTF16LE || enc == ENC_UTF16BE) ? 2 : (enc == ENC_UTF8BOM ? 3 : 0);
+    return bom + DocBodySize(text, len, enc, eol);
+}
+
 /* *lossy: in = "allowed to lose characters", out = "characters were (or would be) lost" */
 DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, BOOL *lossy)
 {

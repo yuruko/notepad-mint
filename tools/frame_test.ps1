@@ -3,7 +3,7 @@
 # prints one PASS / FAIL line per check, exit code 1 if anything failed. it moves the real mouse for a few seconds:
 # don't touch the mouse / keyboard while it runs.
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot "..\build\probe\notepad mint.exe"),
+    [string]$Exe = (Join-Path $PSScriptRoot "..\build\probe\notepad-mint.exe"),
     [string]$Shots = (Join-Path $PSScriptRoot "..\build")
 )
 
@@ -57,7 +57,7 @@ function Shot([IntPtr]$h, [string]$name) {
 }
 
 $exeFull = (Resolve-Path -LiteralPath $Exe).Path
-Get-Process -Name "notepad mint" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exeFull } | Stop-Process -Force   # copies of THIS exe only (the gui tests run temp copies)
+Get-Process -Name "notepad-mint" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exeFull } | Stop-Process -Force   # copies of THIS exe only (the gui tests run temp copies)
 Start-Sleep -Milliseconds 300
 $p = Start-Process -FilePath $Exe -PassThru
 Start-Sleep -Milliseconds 1800
@@ -73,7 +73,7 @@ $cx0 = $pt.X; $cy0 = $pt.Y; $cw = $rc.R
 $dpi = [int][F]::GetDpiForWindow($h)
 if ($dpi -lt 96) { $dpi = 96 }
 $btn = [int](38 * $dpi / 96)
-$capH = [int](24 * $dpi / 96)                       # FrameHeight(): at least 24 px (96 dpi); the 11 px chrome font is below that
+$capH = [int](23 * $dpi / 96)                       # FrameHeight(): at least 23 px (96 dpi: 24 minus the 1 px Crop); the 11 px chrome font is below that
 $yMid = $cy0 + [int]($capH / 2)
 $rc2 = New-Object F+RECT; [void][F]::GetClientRect($h, [ref]$rc2); $cw = $rc2.R
 $xClose = $cx0 + $cw - [int]($btn / 2)

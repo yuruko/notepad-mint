@@ -97,21 +97,21 @@ int wtoi(const WCHAR *s)
     return neg ? -v : v;
 }
 
-/* the default name of an unsaved document: "mint" + four characters from 0-9 a-z (base 36, zero padded) of the sum
+/* the default name of an unsaved document: "mint-" + four characters from 0-9 a-z (base 36, zero padded) of the sum
  * year + month * 100 + day + seconds since midnight (local time). that is at most about 97600 for any year up to 9999,
  * far below 36^4 = 1679616, so it always fits four characters; the modulo only guards against a nonsense SYSTEMTIME.
- * out needs room for 9 characters (cap < 9 gives an empty string) */
+ * out needs room for 10 characters (cap < 10 gives an empty string) */
 void DefaultDocName(const SYSTEMTIME *st, WCHAR *out, int cap)
 {
     static const WCHAR dig[] = L"0123456789abcdefghijklmnopqrstuvwxyz";
     unsigned v = (unsigned)st->wYear + (unsigned)st->wMonth * 100u + (unsigned)st->wDay +
                  (unsigned)st->wHour * 3600u + (unsigned)st->wMinute * 60u + (unsigned)st->wSecond;
     int i;
-    if (cap < 9) { if (cap > 0) out[0] = 0; return; }
+    if (cap < 10) { if (cap > 0) out[0] = 0; return; }
     v %= 1679616u;
-    wcopy(out, L"mint", cap);
-    for (i = 7; i >= 4; i--) { out[i] = dig[v % 36u]; v /= 36u; }
-    out[8] = 0;
+    wcopy(out, L"mint-", cap);
+    for (i = 8; i >= 5; i--) { out[i] = dig[v % 36u]; v /= 36u; }
+    out[9] = 0;
 }
 
 static int hexval(WCHAR c)

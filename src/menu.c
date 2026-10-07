@@ -2,7 +2,8 @@
  *
  * no native menus anywhere: the bar is a child window, popups are tiny
  * WS_EX_NOACTIVATE windows, and a private message loop drives hover / keyboard /
- * mnemonics / submenus. keeps the app window itself a plain native frame. */
+ * mnemonics / submenus. keeps the app window itself a plain native frame.
+ * the bar also carries two buttons at its right end (word wrap; the theme: a sun or a moon), each with a tooltip. */
 #include "mp.h"
 
 /* ---------------------------------------------------------- definitions -- */
@@ -10,17 +11,49 @@
 #define IT(l, a, i) { l, a, i, NULL }
 #define SUB(l, d)   { l, NULL, 0, d }
 
+/* file > recent: the items are rebuilt by MenuSetRecent whenever the list changes. a label is "&1  " + the path (shortened in the middle when long: the
+ * drive, "..." and the end), with every & doubled so that a path never makes a mnemonic */
+static MenuItem g_recItem[RECENT_MAX] = { { L"(none)", NULL, IDM_RECENT_NONE, NULL } };
+static WCHAR    g_recLbl[RECENT_MAX][64];
+MenuDef g_mdRecent = { g_recItem, 1 };
+
+void MenuSetRecent(const WCHAR (*paths)[PATH_CAP], int n)
+{
+    int i;
+    if (n > RECENT_MAX) n = RECENT_MAX;
+    if (n < 1) {
+        g_recItem[0].label = L"(none)"; g_recItem[0].accel = NULL; g_recItem[0].id = IDM_RECENT_NONE; g_recItem[0].sub = NULL;
+        g_mdRecent.n = 1;
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        const WCHAR *p = paths[i];
+        WCHAR *o = g_recLbl[i];
+        int len = lstrlenW(p), j = 0, k;
+        o[j++] = '&'; o[j++] = (WCHAR)('1' + i); o[j++] = ' '; o[j++] = ' ';
+        for (k = 0; k < len && j < 56; k++) {
+            if (len > 50 && k == 3) { o[j++] = '.'; o[j++] = '.'; o[j++] = '.'; k = len - 44; }      /* long: the first three characters, "...", the last 44 */
+            if (p[k] == '&') o[j++] = '&';
+            o[j++] = p[k];
+        }
+        o[j] = 0;
+        g_recItem[i].label = o; g_recItem[i].accel = NULL; g_recItem[i].id = IDM_RECENT_BASE + i; g_recItem[i].sub = NULL;
+    }
+    g_mdRecent.n = n;
+}
+
 static const MenuItem miFile[] = {
     IT(L"&new",          L"ctrl+n",       IDM_FILE_NEW),
     IT(L"new &window",   L"ctrl+shift+n", IDM_FILE_NEWWIN),
     IT(L"&open...",      L"ctrl+o",       IDM_FILE_OPEN),
-    IT(L"&save",         L"ctrl+s",       IDM_FILE_SAVE),
+    SUB(L"&recent",      &g_mdRecent),
+    IT(L"&save",      L"ctrl+s",       IDM_FILE_SAVE),
     IT(L"save &as...",   L"ctrl+shift+s", IDM_FILE_SAVEAS),
     SEP,
     IT(L"page set&up...", NULL,           IDM_FILE_PAGESETUP),
     IT(L"&print...",     L"ctrl+p",       IDM_FILE_PRINT),
     SEP,
-    IT(L"e&xit",         NULL,            IDM_FILE_EXIT),
+    IT(L"e&xit",         L"ctrl+w",       IDM_FILE_EXIT),
 };
 static const MenuItem miEdit[] = {
     IT(L"&undo",          L"ctrl+z",   IDM_EDIT_UNDO),
@@ -29,6 +62,7 @@ static const MenuItem miEdit[] = {
     IT(L"&copy",          L"ctrl+c",   IDM_EDIT_COPY),
     IT(L"&paste",         L"ctrl+v",   IDM_EDIT_PASTE),
     IT(L"de&lete",        L"del",      IDM_EDIT_DELETE),
+    IT(L"cl&ear line",    L"ctrl+k",   IDM_EDIT_CLEARLINE),
     SEP,
     IT(L"&find...",       L"ctrl+f",   IDM_EDIT_FIND),
     IT(L"find &next",     L"f3",       IDM_EDIT_FINDNEXT),
@@ -81,10 +115,19 @@ static const MenuItem miZoom[] = {
 static const MenuItem miTheme[] = {
     IT(L"&dark",               NULL, IDM_THEME_DARK),
     IT(L"&light",              NULL, IDM_THEME_LIGHT),
+    SEP,
+    IT(L"&toggle",             L"alt+x", IDM_THEME_TOGGLE),
 };
+static const MenuItem miTab[] = {
+    IT(L"&2",                  NULL, IDM_TAB_2),
+    IT(L"&4",                  NULL, IDM_TAB_4),
+    IT(L"&8",                  NULL, IDM_TAB_8),
+};
+const MenuDef g_mdTab = { miTab, COUNTOF(miTab) };
 static const MenuItem miFormat[] = {
-    IT(L"&word wrap",          NULL, IDM_FMT_WRAP),
+    IT(L"&word wrap",          L"alt+z", IDM_FMT_WRAP),
     IT(L"&font...",            NULL, IDM_FMT_FONT),
+    SUB(L"&tab size",          &g_mdTab),
     SEP,
     SUB(L"line &ending",       &g_mdEol),
     SUB(L"e&ncoding",          &g_mdEnc),
@@ -92,7 +135,7 @@ static const MenuItem miFormat[] = {
 static const MenuDef mdTheme  = { miTheme,  COUNTOF(miTheme)  };
 static const MenuItem miView[] = {
     SUB(L"&zoom",              &g_mdZoom),
-    IT(L"&status bar",         NULL, IDM_VIEW_STATUS),
+    IT(L"&status bar",         L"ctrl+u", IDM_VIEW_STATUS),
     SUB(L"&theme",             &mdTheme),
 };
 static const MenuItem miHelp[] = {
@@ -164,6 +207,7 @@ static int         g_np;
 static HWND        g_bar, g_owner;
 static MenuStateFn g_stateFn;
 static int         g_hot = -1, g_open = -1, g_kbd = -1, g_barIdx = -1, g_barH;
+static int         g_hotBtn = -1;                        /* the button (BT_*) under the pointer */
 static int         g_itemL[NBAR + 1];
 static BOOL        g_active, g_done, g_cancel;
 static int         g_result;
@@ -260,6 +304,103 @@ int MenuBarMnemonic(WCHAR ch)
     return -1;
 }
 
+/* ---------------------------------------------- theme button (right end) -- */
+/* the theme button, the very right one of the bar's two buttons (word wrap is left of it), switches the theme (the same command as alt+x / view > theme > toggle). its icon shows the theme in
+ * use: a sun in the light theme, a moon in the dark one, so a click just swaps the two icons. no frame and no sunken state. at rest the icon is
+ * drawn at BAR_BTN_OPACITY percent over the bar; hover = the accent as the background with the icon at full strength, like the menu items. a click
+ * acts on the press, like the menu items do. no bitmaps: the icons are two shapes worked out here pixel by pixel (GDI has no antialiased shapes, and
+ * stretching a big drawing down with halftone mode leaves a halo around it) */
+enum { TB_LIGHT, TB_DARK, TB_WRAP };                           /* the icons: sun, moon (the theme button), wrapped text (the word wrap button) */
+enum { BT_WRAP, BT_THEME, BT_COUNT };                          /* the buttons, left to right: the theme button is the last, flush with the right edge */
+static const struct { int id; const WCHAR *tip; } g_btn[BT_COUNT] = {   /* per button: the command a click runs and what its tooltip says (the key combo is added from the menu item that runs the same command); indexed by BT_* so that the order above is the only place that says which is left */
+    [BT_WRAP]  = { IDM_FMT_WRAP,     L"toggle word wrap" },
+    [BT_THEME] = { IDM_THEME_TOGGLE, L"toggle dark / light theme" },
+};
+#define ICON_SS  8                                             /* every icon pixel is sampled ICON_SS x ICON_SS times: its coverage is the share inside the shape */
+#define ICON_MAX 64                                            /* the biggest icon box in device pixels (a bigger one is drawn at this size) */
+
+int MenuBarMinWidth(void)
+{
+    if (!g_barH) BarLayout();
+    return g_itemL[NBAR] + BT_COUNT * S(BAR_BTN_W);
+}
+
+static void BtnRect(int cw, int b, RECT *r)                    /* right aligned */
+{
+    r->left = cw - (BT_COUNT - b) * S(BAR_BTN_W);
+    r->right = r->left + S(BAR_BTN_W);
+    r->top = 0;
+    r->bottom = g_barH - S(1);                                 /* (as tall as the menu items) */
+}
+
+static int BtnHit(HWND h, int x, int y)                        /* the button under the point, or -1 */
+{
+    RECT rc, r;
+    int b;
+    if (y < 0 || y >= g_barH) return -1;
+    GetClientRect(h, &rc);
+    for (b = 0; b < BT_COUNT; b++) {
+        BtnRect(rc.right, b, &r);
+        if (x >= r.left && x < r.right) return b;
+    }
+    return -1;
+}
+
+/* is the point (x, y) inside the icon's shape? the shapes live on a 56 x 56 grid; x and y are in 1/64 of a grid unit (so a 12 px icon has about 4.7 units per pixel).
+ * the sun: a disc with eight short rays around it (four straight, four diagonal and a little shorter), centred in the box.
+ * the moon: a disc minus a smaller one over its upper right */
+#define D(v) ((v) * 64)
+static int IconInside(int kind, int x, int y)
+{
+    int dx = x - D(28), dy = y - D(28), ax, ay, bx, by;
+    if (kind == TB_WRAP) {                                       /* wrapped text: a line, a line that turns down and comes back as an arrow, a short line. PX(k) = the left / top edge of pixel k of a 12 px icon (it is moved half a pixel, see ThemeIcon) */
+#define PX(k) ((k) * 299 - 149)
+        if (y >= PX(1) && y < PX(2) && x >= PX(1) && x < PX(11)) return 1;                         /* the first line */
+        if (y >= PX(3) && y < PX(4) && x >= PX(1) && x < PX(10)) return 1;                         /* the second line ... */
+        if (x >= PX(9) && x < PX(10) && y >= PX(3) && y < PX(7)) return 1;                         /* ... turns down at its end ... */
+        if (y >= PX(6) && y < PX(7) && x >= PX(3) && x < PX(10)) return 1;                         /* ... and runs back left ... */
+        ax = x - PX(2); ay = y - (PX(6) + 150); if (ay < 0) ay = -ay;
+        if (ax >= 0 && x < PX(5) && ay * 2 <= ax + 150) return 1;                            /* ... into an arrow head */
+        return y >= PX(9) && y < PX(10) && x >= PX(1) && x < PX(6);                                /* the third line, short */
+#undef PX
+    }
+    if (kind == TB_LIGHT) {
+        if (dx * dx + dy * dy < D(11) * D(11)) return 1;         /* the disc: centre (28, 28), radius 11 */
+        if (dx < 0) dx = -dx;                                    /* (the rays are symmetric: look at one quarter) */
+        if (dy < 0) dy = -dy;
+        if (dx < 154 && dy >= 1043 && dy < D(25)) return 1;     /* the straight rays: 4.8 wide (one pixel at 12 px), from 16.3 to 25 away from the centre ... */
+        if (dy < 154 && dx >= 1043 && dx < D(25)) return 1;
+        return dx - dy < 217 && dy - dx < 217 && dx + dy >= 1448 && dx + dy < 2037;                       /* ... and the diagonal ones, as wide, from 16 to 22.5 */
+    }
+    ax = x - D(26); ay = y - D(30); bx = x - D(38); by = y - D(22);
+    return ax * ax + ay * ay < D(22) * D(22) && bx * bx + by * by >= D(19) * D(19);       /* disc (26, 30) r 22 without disc (38, 22) r 19 */
+}
+#undef D
+
+/* a sun (TB_LIGHT) or a crescent moon (TB_DARK) in a size x size box at x, y: fg over bg at `pct` percent opacity (bg is what is under it already: only the
+ * pixels the shape touches are drawn). antialiased by area: each pixel takes the share of its ICON_SS x ICON_SS sample points that are inside the shape,
+ * times pct, as the share of fg in the mix */
+static void ThemeIcon(HDC dc, int kind, int x, int y, int size, COLORREF fg, COLORREF bg, int pct)
+{
+    int g[ICON_MAX * ICON_SS], n, i, j, a, b, cov, num, den = ICON_SS * ICON_SS * 100, shift;
+    if (size > ICON_MAX) size = ICON_MAX;
+    n = size * ICON_SS;
+    shift = (size & 1) ? 0 : 1792 / size;                       /* an even size puts the middle of the 56 grid on the line between two pixels: the picture moves half a pixel right and down, so the middle is the middle of a pixel (the sun's straight rays are then one crisp pixel wide, not two faint ones) */
+    for (i = 0; i < n; i++) g[i] = (2 * i + 1) * 56 * 32 / n - shift;   /* the middle of sample i, in 1/64 grid units (the same for x and y) */
+    for (j = 0; j < size; j++) {
+        for (i = 0; i < size; i++) {
+            cov = 0;
+            for (b = 0; b < ICON_SS; b++)
+                for (a = 0; a < ICON_SS; a++) cov += IconInside(kind, g[i * ICON_SS + a], g[j * ICON_SS + b]);
+            if (!cov) continue;
+            num = cov * pct;                                    /* the share of fg is num / den */
+            SetPixelV(dc, x + i, y + j, num >= den ? fg : RGB(GetRValue(bg) + (GetRValue(fg) - GetRValue(bg)) * num / den,
+                                                              GetGValue(bg) + (GetGValue(fg) - GetGValue(bg)) * num / den,
+                                                              GetBValue(bg) + (GetBValue(fg) - GetBValue(bg)) * num / den));
+        }
+    }
+}
+
 static void BarPaint(HWND h)
 {
     PAINTSTRUCT ps;
@@ -267,7 +408,7 @@ static void BarPaint(HWND h)
     HBITMAP bmp;
     HGDIOBJ old, of;
     RECT rc, r;
-    int i;
+    int i, isz = S(BAR_BTN_ICON);
 
     GetClientRect(h, &rc);
     mdc = CreateCompatibleDC(dc);
@@ -284,12 +425,126 @@ static void BarPaint(HWND h)
         if (on) FillC(mdc, &r, C_ACCENT);
         TextC(mdc, g_ent[i].title, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE, on ? C_ON_ACCENT : C_TEXT);
     }
+    for (i = 0; i < BT_COUNT; i++) {                           /* the buttons: BAR_BTN_OPACITY percent opaque unless hovered; the word wrap one is BAR_BTN_OPACITY_ON while word wrap is on */
+        BOOL hot = (i == g_hotBtn);
+        int kind = i == BT_WRAP ? TB_WRAP : (ThemeGet() == THEME_LIGHT ? TB_LIGHT : TB_DARK);        /* the theme button shows the theme in use */
+        int pct = (i == BT_WRAP && g_pf.wrap) ? BAR_BTN_OPACITY_ON : BAR_BTN_OPACITY;
+        BtnRect(rc.right, i, &r);
+        if (hot) FillC(mdc, &r, C_ACCENT);
+        ThemeIcon(mdc, kind, (r.left + r.right - isz) / 2, (r.top + r.bottom - isz) / 2 + (i == BT_WRAP ? S(BAR_WRAP_ICON_DY) : 0), isz,
+                  hot ? C_ON_ACCENT : C_TEXT, hot ? C_ACCENT : C_FACE, hot ? 100 : pct);
+    }
     BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY);
     SelectObject(mdc, of);
     SelectObject(mdc, old);
     DeleteObject(bmp);
     DeleteDC(mdc);
     EndPaint(h, &ps);
+}
+
+/* --------------------------------------------------------------- tooltips -- */
+/* the two bar buttons say what they do: once the pointer has rested BAR_TIP_DELAY ms on one, a small popup (class mp_tip) shows right under it, its right edge on
+ * the button's: "toggle word wrap (alt+z)". our own window, not the system's tooltip control: that one lives in comctl32 (a 4th dll) and would ignore the palette.
+ * it looks like a menu popup (the same fill, bevel and font), never takes the mouse or the focus, and goes away when the pointer leaves the button, on a click,
+ * when a menu opens, after BAR_TIP_SHOW ms, or with its owner. the bar's one timer (TIP_TIMER) first times the delay, then how long the tip stays. while a tip is
+ * up, moving to the other button shows that button's tip at once. the key combo is read from the menu item that runs the same command, so it can not drift */
+#define TIP_TIMER 1
+static HWND g_tip;                                             /* the tip window while one is up */
+
+static const WCHAR *AccelOf(int id)                            /* the key combo the menus show for a command (NULL: none) */
+{
+    static const struct { const MenuItem *it; int n; } l[] = { { miFormat, COUNTOF(miFormat) }, { miTheme, COUNTOF(miTheme) } };
+    int i, j;
+    for (i = 0; i < (int)COUNTOF(l); i++)
+        for (j = 0; j < l[i].n; j++)
+            if (l[i].it[j].id == id) return l[i].it[j].accel;
+    return NULL;
+}
+
+static void TipHide(void)                                      /* no tip up, none pending */
+{
+    if (g_bar) KillTimer(g_bar, TIP_TIMER);
+    if (g_tip) DestroyWindow(g_tip);
+    g_tip = NULL;
+}
+
+static void TipShow(int b)                                     /* the tip of button b: right under the bar, right aligned to the button */
+{
+    WCHAR t[96];
+    const WCHAR *a = AccelOf(g_btn[b].id);
+    HDC dc = GetDC(NULL);
+    HGDIOBJ of = SelectObject(dc, g_fontMenu);
+    TEXTMETRICW tm;
+    MONITORINFO mi;
+    RECT r;
+    POINT pt;
+    int w, h;
+
+    wcopy(t, g_btn[b].tip, 96);
+    if (a) { wcat(t, L" (", 96); wcat(t, a, 96); wcat(t, L")", 96); }
+    GetTextMetricsW(dc, &tm);
+    w = TextW(dc, t, -1) + 2 * (BW + S(7));
+    h = tm.tmHeight + 2 * (BW + S(3));
+    SelectObject(dc, of);
+    ReleaseDC(NULL, dc);
+
+    GetClientRect(g_bar, &r);
+    BtnRect(r.right, b, &r);
+    pt.x = r.right - w; pt.y = g_barH + S(2);
+    ClientToScreen(g_bar, &pt);
+    mi.cbSize = sizeof mi;
+    GetMonitorInfoW(MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST), &mi);
+    if (pt.x + w > mi.rcWork.right) pt.x = mi.rcWork.right - w;
+    if (pt.x < mi.rcWork.left) pt.x = mi.rcWork.left;
+    g_tip = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"mp_tip", t, WS_POPUP, pt.x, pt.y, w, h, GetParent(g_bar), NULL, g_hinst, NULL);
+    ShowWindow(g_tip, SW_SHOWNOACTIVATE);
+    SetTimer(g_bar, TIP_TIMER, BAR_TIP_SHOW, NULL);            /* (the same timer: from now on it times how long the tip stays) */
+}
+
+static void TipTrack(int b)                                    /* the pointer is over button b now (-1: over none) */
+{
+    BOOL was = g_tip != NULL;
+    TipHide();
+    if (b < 0 || g_active) return;                             /* (no tips while a menu is open) */
+    if (was) TipShow(b);                                       /* a tip was up: the next one shows at once ... */
+    else SetTimer(g_bar, TIP_TIMER, BAR_TIP_DELAY, NULL);      /* ... else after the pointer has rested on the button for a moment */
+}
+
+static LRESULT CALLBACK TipProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    switch (m) {
+    case WM_NCHITTEST:
+        return (LRESULT)-1;                                    /* HTTRANSPARENT: the pointer goes through to the bar, the tip never takes the mouse */
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(h, &ps), mdc;
+        HBITMAP bmp;
+        HGDIOBJ old, of;
+        RECT rc, tr;
+        WCHAR t[96];
+        int n = GetWindowTextW(h, t, 96);
+        GetClientRect(h, &rc);
+        mdc = CreateCompatibleDC(dc);
+        bmp = CreateCompatibleBitmap(dc, rc.right, rc.bottom);
+        old = SelectObject(mdc, bmp);
+        of = SelectObject(mdc, g_fontMenu);
+        FillC(mdc, &rc, C_FACE2);
+        Bevel(mdc, &rc, BV_RAISED);
+        tr = rc; tr.left = BW + S(7);
+        TextC(mdc, t, n, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, C_TEXT);
+        BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY);
+        SelectObject(mdc, of);
+        SelectObject(mdc, old);
+        DeleteObject(bmp);
+        DeleteDC(mdc);
+        EndPaint(h, &ps);
+        return 0; }
+    }
+    return DefWindowProcW(h, m, w, l);
 }
 
 /* -------------------------------------------------------------- popups -- */
@@ -615,7 +870,7 @@ static void RunMenu(HWND owner, int barIdx, int openPopup, const MenuDef *root, 
     DBG(L"runmenu", barIdx, g_active);
     if (g_active) return;
     g_active = TRUE; g_done = FALSE; g_cancel = FALSE; g_result = 0; g_haveRedisp = FALSE;
-    g_owner = owner; g_np = 0; g_hot = -1;
+    g_owner = owner; g_np = 0; g_hot = -1; g_hotBtn = -1; TipHide();
     g_barIdx = root ? -1 : barIdx;
     g_open = -1; g_kbd = -1;
 
@@ -744,24 +999,45 @@ static LRESULT CALLBACK BarProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_PAINT:
         BarPaint(h);
         return 0;
+#ifdef MENU_NO_TRACK
+    case WM_APP + 91:                                   /* probe builds only: "this exe keeps a hover" (the gui tests look for it before they try one) */
+        return 0x4D494E54;
+#endif
     case WM_MOUSEMOVE: {
         int i = BarHit(GET_X_LPARAM(l), GET_Y_LPARAM(l));
-        if (i != g_hot) {
+        int b = i < 0 ? BtnHit(h, GET_X_LPARAM(l), GET_Y_LPARAM(l)) : -1;
+        if (i != g_hot || b != g_hotBtn) {
             TRACKMOUSEEVENT te;
-            g_hot = i;
+            if (b != g_hotBtn) TipTrack(b);                 /* (a tip follows the pointer from button to button) */
+            g_hot = i; g_hotBtn = b;
             te.cbSize = sizeof te; te.dwFlags = TME_LEAVE; te.hwndTrack = h; te.dwHoverTime = 0;
+#ifndef MENU_NO_TRACK                                   /* probe builds only (tools\probe.bat /DMENU_NO_TRACK): the system answers the leave request at once when the real pointer is elsewhere (the gui tests send WM_MOUSEMOVE on a private desktop), which would end every hover before it can be looked at */
             TrackMouseEvent(&te);
+#endif
             InvalidateRect(h, NULL, FALSE);
         }
         return 0; }
+    case WM_TIMER:                                      /* the tip's timer: the delay is over (show the tip), or the tip has been up long enough (hide it) */
+        if (w == TIP_TIMER) {
+            if (g_tip || g_hotBtn < 0 || g_active) TipHide();
+            else TipShow(g_hotBtn);
+        }
+        return 0;
     case WM_MOUSELEAVE:
-        g_hot = -1;
+        TipTrack(-1);
+        g_hot = -1; g_hotBtn = -1;
+        InvalidateRect(h, NULL, FALSE);
+        return 0;
+    case WM_SIZE:                                       /* the buttons are right aligned: a size change repaints all of the bar (no stale icons left in the middle) */
         InvalidateRect(h, NULL, FALSE);
         return 0;
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK: {
         int i = BarHit(GET_X_LPARAM(l), GET_Y_LPARAM(l));
+        int b = i < 0 ? BtnHit(h, GET_X_LPARAM(l), GET_Y_LPARAM(l)) : -1;
+        TipHide();                                      /* (a click ends the tip; it comes back once the pointer has left the button and returned) */
         if (i >= 0) { g_hot = -1; RunMenu(GetParent(h), i, 1, NULL, 0, 0, 0); }
+        else if (b >= 0) PostMessageW(GetParent(h), WM_COMMAND, MAKEWPARAM(g_btn[b].id, 0), 0);   /* the same commands as alt+z / alt+x */
         return 0; }
     }
     return DefWindowProcW(h, m, w, l);
@@ -771,6 +1047,7 @@ HWND MenuBarCreate(HWND parent, MenuStateFn fn)
 {
     g_stateFn = fn;
     RegClass(L"mp_popup", PopProc, CS_DROPSHADOW, NULL);
+    RegClass(L"mp_tip", TipProc, CS_DROPSHADOW, NULL);
     RegClass(L"mp_menubar", BarProc, CS_DBLCLKS, NULL);
     BarLayout();
     g_bar = CreateWindowExW(0, L"mp_menubar", NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,

@@ -3,7 +3,7 @@
 # needs a desktop session (a hosted windows runner has one). the screenshot is best effort: no screen => no png, not a failure.
 # exit code 1 = the exe died, never showed a window, or the title is wrong.
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot "..\build\notepad mint.exe"),
+    [string]$Exe = (Join-Path $PSScriptRoot "..\build\notepad-mint.exe"),
     [string]$Sample = (Join-Path $PSScriptRoot "..\tests\multilingual-sample.txt"),
     [string]$Shot = (Join-Path $PSScriptRoot "..\build\smoke.png"),
     [int]$Wait = 4

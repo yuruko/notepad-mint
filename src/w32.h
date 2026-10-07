@@ -53,6 +53,7 @@ DECLARE_HANDLE(HRGN);
 DECLARE_HANDLE(HMONITOR);
 DECLARE_HANDLE(HACCEL);
 DECLARE_HANDLE(HHOOK);
+DECLARE_HANDLE(HDWP);
 typedef HINSTANCE HMODULE;
 typedef HICON     HCURSOR;
 
@@ -172,6 +173,7 @@ typedef struct {
 #define INVALID_HANDLE_VALUE ((HANDLE)(LONG_PTR)-1)
 #define CW_USEDEFAULT        ((int)0x80000000)
 #define HWND_TOP        ((HWND)0)
+#define HWND_BOTTOM     ((HWND)1)
 #define HWND_TOPMOST    ((HWND)(LONG_PTR)-1)
 #define HWND_NOTOPMOST  ((HWND)(LONG_PTR)-2)
 #define HWND_DESKTOP    ((HWND)0)
@@ -267,6 +269,8 @@ typedef struct {
 #define WM_SYSKEYUP 0x0105
 #define WM_SYSCHAR 0x0106
 #define WM_SYSDEADCHAR 0x0107
+#define WM_IME_ENDCOMPOSITION 0x010E
+#define WM_IME_COMPOSITION 0x010F
 #define WM_INITDIALOG 0x0110
 #define WM_COMMAND 0x0111
 #define WM_SYSCOMMAND 0x0112
@@ -292,6 +296,7 @@ typedef struct {
 #define WM_DROPFILES 0x0233
 #define WM_DPICHANGED 0x02E0
 #define WM_MOUSELEAVE 0x02A3
+#define WM_IME_CHAR 0x0286
 #define WM_CUT 0x0300
 #define WM_COPY 0x0301
 #define WM_PASTE 0x0302
@@ -390,6 +395,7 @@ typedef struct {
 #define MONITOR_DEFAULTTONEAREST 2
 #define SPI_GETCARETWIDTH 0x2006
 #define COLOR_HIGHLIGHT 13
+#define COLOR_HIGHLIGHTTEXT 14
 #define SPI_GETWORKAREA 0x0030
 #define SPI_GETNONCLIENTMETRICS 0x0029
 
@@ -727,6 +733,9 @@ API LONG    WINAPI GetWindowLongW(HWND, int);
 #define GetWindowLongPtrW GetWindowLongW
 API BOOL    WINAPI SetWindowPos(HWND, HWND, int, int, int, int, UINT);
 API BOOL    WINAPI MoveWindow(HWND, int, int, int, int, BOOL);
+API HDWP    WINAPI BeginDeferWindowPos(int);                  /* the child windows of a resized window move in one go (Layout) */
+API HDWP    WINAPI DeferWindowPos(HDWP, HWND, HWND, int, int, int, int, UINT);
+API BOOL    WINAPI EndDeferWindowPos(HDWP);
 API BOOL    WINAPI GetClientRect(HWND, RECT *);
 API BOOL    WINAPI GetWindowRect(HWND, RECT *);
 API BOOL    WINAPI ClientToScreen(HWND, POINT *);
@@ -808,12 +817,16 @@ API BOOL    WINAPI SetCaretPos(int, int);
 API BOOL    WINAPI CreateCaret(HWND, HBITMAP, int, int);
 API BOOL    WINAPI DestroyCaret(void);
 API BOOL    WINAPI ShowCaret(HWND);
+API BOOL    WINAPI HideCaret(HWND);
+API BOOL    WINAPI GetUpdateRect(HWND, RECT *, BOOL);
 API BOOL    WINAPI GetScrollInfo(HWND, int, SCROLLINFO *);
 API BOOL    WINAPI ShowScrollBar(HWND, int, BOOL);
 API BOOL    WINAPI IsClipboardFormatAvailable(UINT);
 API HWND    WINAPI FindWindowExW(HWND, HWND, LPCWSTR, LPCWSTR);
 API BOOL    WINAPI GetKeyboardState(BYTE *);
 API BOOL    WINAPI DrawIconEx(HDC, int, int, HICON, int, int, UINT, HBRUSH, UINT);
+API LONG    WINAPI TabbedTextOutW(HDC, int, int, LPCWSTR, int, int, const INT *, int);      /* low word of the result = the width of the text, high word = its height */
+API DWORD   WINAPI GetTabbedTextExtentW(HDC, LPCWSTR, int, int, const INT *);               /* same result, nothing drawn; the text starts at the tab origin */
 
 /* --------------------------------------------------------------- gdi32 ---- */
 API HFONT    WINAPI CreateFontW(int, int, int, int, int, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, LPCWSTR);
@@ -837,6 +850,7 @@ API int      WINAPI EnumFontFamiliesExW(HDC, LOGFONTW *, FONTENUMPROCW, LPARAM, 
 API HDC      WINAPI CreateCompatibleDC(HDC);
 API HBITMAP  WINAPI CreateCompatibleBitmap(HDC, int, int);
 API BOOL     WINAPI BitBlt(HDC, int, int, int, int, HDC, int, int, DWORD);
+API BOOL     WINAPI SetPixelV(HDC, int, int, COLORREF);
 API BOOL     WINAPI DeleteDC(HDC);
 API BOOL     WINAPI MoveToEx(HDC, int, int, POINT *);
 API BOOL     WINAPI LineTo(HDC, int, int);
@@ -845,6 +859,7 @@ API BOOL     WINAPI Ellipse(HDC, int, int, int, int);
 API int      WINAPI SaveDC(HDC);
 API BOOL     WINAPI RestoreDC(HDC, int);
 API int      WINAPI IntersectClipRect(HDC, int, int, int, int);
+API int      WINAPI ExcludeClipRect(HDC, int, int, int, int);
 API int      WINAPI SetMapMode(HDC, int);
 API BOOL     WINAPI SetViewportOrgEx(HDC, int, int, POINT *);
 API HDC      WINAPI CreateDCW(LPCWSTR, LPCWSTR, LPCWSTR, const void *);

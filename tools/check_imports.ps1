@@ -2,7 +2,7 @@
 #   powershell -NoProfile -File tools\check_imports.ps1 [-Exe <path>]
 # reads the pe import table itself (no dumpbin / vs environment needed), so it runs the same locally and in ci.
 # also checks the exe is a 32-bit (x86) pe and has no delay-load imports. exit code 1 = violation.
-param([string]$Exe = (Join-Path $PSScriptRoot "..\build\notepad mint.exe"))
+param([string]$Exe = (Join-Path $PSScriptRoot "..\build\notepad-mint.exe"))
 
 $allowed = @('kernel32.dll', 'user32.dll', 'gdi32.dll')
 $b = [System.IO.File]::ReadAllBytes((Resolve-Path $Exe))

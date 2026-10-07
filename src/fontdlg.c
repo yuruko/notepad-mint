@@ -423,7 +423,7 @@ static void FontCmd(FontSt *d, int id, int code)
     case ID_RESET:
         wcopy(d->face, L"Consolas", 32);
         FontResolve(d->face);
-        d->pt = 13;
+        d->pt = 12;
         d->bold = 0;
         d->italic = 0;
         ShowState(d);

@@ -6,15 +6,15 @@
 
 HINSTANCE g_hinst;
 int       g_dpi = 96;
-HFONT     g_fontUI, g_fontUIB, g_fontMenu;
+HFONT     g_fontUI, g_fontUIB, g_fontMenu, g_fontMenuB;
 HBRUSH    g_brFace, g_brField;
 Palette   g_pal;
 
 /* ------------------------------------------------------------ themes ---- */
 /* dark: everything derived from the #161418 face + the mint; the editor is black.
- * light: a light warm gray (#e4e1da face, white fields); the accent is a softer, minty green: #2f7d58 as a fill (hover, caret)
- * with white text on it, a little darker (#1f6a43) where it is text or a thin line on the face; the editor is white.
- * light contrast (wcag): text >= 14, accent text / lines on face ~5.0, white on the accent fill ~5.0, dim #595959 on face ~5.7
+ * light: a light cool gray (#dfdee1 face: it was #e4e1da, 5 less red, 3 less green, 7 more blue; white fields); the accent is a softer, minty green:
+ * #2f7d58 as a fill (hover) with white text on it, a little darker (#1f6a43) where it is text or a thin line on the face; the editor is white.
+ * light contrast (wcag): text >= 14, accent text / lines on face ~4.9, white on the accent fill ~5.0, dim #595959 on face ~5.2
  * (info labels use it as reading text), shadow #737373 on face ~3.5 */
 static const Palette g_themes[2] = {
     { RGB(0x9d, 0xf5, 0xbd), RGB(0x9d, 0xf5, 0xbd), RGB(0x16, 0x14, 0x18),
@@ -23,7 +23,7 @@ static const Palette g_themes[2] = {
       RGB(0xff, 0xff, 0xff), RGB(0x80, 0x7a, 0x88),
       RGB(0xff, 0xff, 0xff), RGB(0x00, 0x00, 0x00) },
     { RGB(0x2f, 0x7d, 0x58), RGB(0x1f, 0x6a, 0x43), RGB(0xff, 0xff, 0xff),
-      RGB(0xe4, 0xe1, 0xda), RGB(0xf0, 0xee, 0xe9), RGB(0xff, 0xff, 0xff),
+      RGB(0xdf, 0xde, 0xe1), RGB(0xf0, 0xee, 0xe9), RGB(0xff, 0xff, 0xff),
       RGB(0xff, 0xff, 0xff), RGB(0xf3, 0xf1, 0xed), RGB(0x40, 0x40, 0x40), RGB(0x73, 0x73, 0x73),
       RGB(0x00, 0x00, 0x00), RGB(0x59, 0x59, 0x59),
       RGB(0x00, 0x00, 0x00), RGB(0xff, 0xff, 0xff) },
@@ -121,7 +121,9 @@ static void MakeDialogFonts(void)
 static void MakeMenuFont(void)
 {
     if (g_fontMenu) DeleteObject(g_fontMenu);
+    if (g_fontMenuB) DeleteObject(g_fontMenuB);
     g_fontMenu = FacePx(g_chromeFace, CHROME_PX, FW_NORMAL);   /* main window chrome */
+    g_fontMenuB = FacePx(g_chromeFace, CHROME_PX, FW_BOLD);    /* ... and its bold twin: the title in the strip (only ever selected into a DC for one paint) */
 }
 
 static void MakeFonts(void)

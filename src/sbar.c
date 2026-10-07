@@ -38,7 +38,7 @@ typedef struct Sb {
 
 typedef struct { int len, btn, t0, t1, a0, a1, on; } Geo;     /* along the bar: length, button size, track start / end, thumb start / end, enabled */
 
-static struct { HWND target; Sb *v, *h; } g_tab[8];
+static struct { HWND target; Sb *v, *h; int trimR, trimB; } g_tab[8];
 static HBRUSH g_dither;
 
 /* ------------------------------------------------------------ geometry --- */
@@ -369,7 +369,7 @@ static LRESULT CALLBACK SbProc(HWND h, UINT m, WPARAM w, LPARAM l)
 
 /* ------------------------------------------------------------ placement --- */
 /* the native strips of `t`, in screen coordinates: thickness on the left / right (the left one is the rtl layout) and at the bottom */
-static void Strips(HWND t, RECT *wr, int *l, int *r, int *b)
+static void Strips(HWND t, RECT *wr, int *l, int *r, int *b, int trimR, int trimB)
 {
     RECT cr;
     POINT o;
@@ -380,6 +380,8 @@ static void Strips(HWND t, RECT *wr, int *l, int *r, int *b)
     *l = o.x - wr->left;
     *r = wr->right - (o.x + cr.right);
     *b = wr->bottom - (o.y + cr.bottom);
+    wr->right -= trimR; *r -= trimR;                         /* the window overhangs the visible area at the right and at the bottom on purpose (SbarTrim): that part is not ours to cover */
+    wr->bottom -= trimB; *b -= trimB;
     if (*l < 0) *l = 0;
     if (*r < 0) *r = 0;
     if (*b < 0) *b = 0;
@@ -421,7 +423,7 @@ static void SyncEntry(int i)
     int l, rt, b, vt, left, vis;
 
     if (!t || !IsWindow(t)) return;
-    Strips(t, &wr, &l, &rt, &b);
+    Strips(t, &wr, &l, &rt, &b, g_tab[i].trimR, g_tab[i].trimB);
     vis = (GetWindowLongPtrW(t, GWL_STYLE) & WS_VISIBLE) != 0;
     vt = l > rt ? l : rt;
     left = l > rt;                                           /* the vertical strip is on the left (rtl) */
@@ -479,9 +481,19 @@ void SbarAttach(HWND t)
     for (i = 0; i < COUNTOF(g_tab) && g_tab[i].target; i++) {}
     if (i == COUNTOF(g_tab)) return;
     g_tab[i].target = t;
+    g_tab[i].trimR = g_tab[i].trimB = 0;
     g_tab[i].v = Make(t, 0);
     g_tab[i].h = Make(t, 1);
     if (g_tab[i].v) SetTimer(g_tab[i].v->self, SBT_POLL, POLL_MS, NULL);
+    SyncEntry(i);
+}
+
+void SbarTrim(HWND t, int right, int bottom)
+{
+    int i = Find(t);
+    if (i < 0) return;
+    g_tab[i].trimR = right;
+    g_tab[i].trimB = bottom;
     SyncEntry(i);
 }
 

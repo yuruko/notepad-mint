@@ -22,7 +22,7 @@ BEGIN
             VALUE "FileVersion", "1.0.0.0"
             VALUE "InternalName", "notepad mint"
             VALUE "LegalCopyright", "free software. no ai, no sign-in, no telemetry."
-            VALUE "OriginalFilename", "notepad mint.exe"
+            VALUE "OriginalFilename", "notepad-mint.exe"
             VALUE "ProductName", "notepad mint"
             VALUE "ProductVersion", "1.0.0.0"
         END

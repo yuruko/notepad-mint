@@ -122,7 +122,8 @@ static BOOL RowFill(Rows *r, int need)
             r->wcap = cap;
         }
         if (c == '\t') {
-            int s = 8 - (r->col & 7);
+            int ts = g_pf.tab > 0 ? g_pf.tab : 8;               /* the tab size of the editor (format > tab size) */
+            int s = ts - (r->col % ts);
             r->col += s;
             while (s-- > 0) r->wb[r->wn++] = ' ';
         } else {

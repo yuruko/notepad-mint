@@ -4,16 +4,16 @@
 #
 #   powershell -NoProfile -File tests\ui\ui_test.ps1 [-Exe <path>] [-Only T2,T3] [-Dump] [-BigMB 20] [-Timeout 4000]
 #
-# - the exe is COPIED to a fresh temp dir first (the build may delete / rewrite build\notepad mint.exe while this runs),
+# - the exe is COPIED to a fresh temp dir first (the build may delete / rewrite build\notepad-mint.exe while this runs),
 #   and %APPDATA% is pointed at a fresh temp dir per launch, so the real settings.ini is never touched.
 # - the app is started with SW_SHOWNOACTIVATE: its window appears without taking the foreground.
 # - one PASS / FAIL / SKIP line per check, a summary line at the end, exit code 1 if anything failed.
-# - only the processes started here (their exe lives in the temp dir) are killed, never another "notepad mint" instance.
+# - only the processes started here (their exe lives in the temp dir) are killed, never another "notepad-mint" instance.
 # - command ids / control ids are parsed at run time from src\mp.h, src\find.c, src\filedlg.c, src\fontdlg.c, src\edit.c.
 # - -Dump prints every child (class, id, enabled, rect, text) of each dialog the tests open.
 # keep this file pure ascii (windows powershell 5.1 reads a bom-less file as ansi): non-ascii text is built from char codes.
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot '..\..\build\notepad mint.exe'),
+    [string]$Exe = (Join-Path $PSScriptRoot '..\..\build\notepad-mint.exe'),
     [string]$Only = '',
     [switch]$Dump,
     [int]$BigMB = 20,
@@ -323,7 +323,8 @@ function WaitFor([scriptblock]$cond, [int]$ms = 0) {                            
 }
 function Snd($h, $m, $w = 0, $l = 0) { [U]::Snd([long]$h, [uint32]$m, [long]$w, [long]$l) }
 function Pst($h, $m, $w = 0, $l = 0) { [void][U]::Post([long]$h, [uint32]$m, [long]$w, [long]$l) }
-function Get-Edit($app) {                                                        # re-found every time: toggling word wrap re-creates the control
+function Trim-Px($app) { return [int][Math]::Round($IDM.SBAR_TRIM * ([U]::Dpi([long]$app.Main)) / 96, [MidpointRounding]::AwayFromZero) }   # the editor's window overhangs the visible area by this many px at the right and at the bottom (SBAR_TRIM: thinner scrollbars)
+function Get-Edit($app) {                                                       # re-found every time: toggling word wrap re-creates the control
     foreach ($k in [U]::Kids([long]$app.Main)) { if ([U]::Cls($k) -eq 'Edit') { return [long]$k } }
     throw 'the editor (class EDIT) is not a child of the main window'
 }
@@ -332,8 +333,8 @@ function Ed-Set($app, [string]$t) { [U]::SetText((Get-Edit $app), $t) }
 function Ed-Modified($app) { (Snd (Get-Edit $app) $EM_GETMODIFY) -ne 0 }
 function Ed-Dirty($app, [string]$t = 'x') { [void][U]::SndStr((Get-Edit $app), $EM_REPLACESEL, 1, $t) }   # a real edit: sets the modified flag + EN_CHANGE
 function Title($app) { [U]::Text([long]$app.Main) }
-function Default-Name($app) {                                                    # the unsaved document's default name, read from the title: "mint" + 4 characters of 0-9 a-z (or $null)
-    if ((Title $app) -cmatch '^\*?(mint[0-9a-z]{4}) - notepad mint$') { return $Matches[1] }
+function Default-Name($app) {                                                    # the unsaved document's default name, read from the title: "mint-" + 4 characters of 0-9 a-z (or $null)
+    if ((Title $app) -cmatch '^\*?(mint-[0-9a-z]{4}) - notepad mint$') { return $Matches[1] }
     return $null
 }
 function Wait-Title($app, [string]$t, [int]$ms = 0) { [bool](WaitFor { (Title $app) -ceq $t } $ms) }
@@ -370,7 +371,7 @@ function Ini-Val($app, [string]$sec, [string]$key, [string]$want = $null, [int]$
 # ------------------------------------------------------------------------------------------------ app management
 $work = Join-Path ([IO.Path]::GetTempPath()) ('npm_ui_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 [void](New-Item -ItemType Directory -Force -Path $work)
-$exeCopy = Join-Path $work 'mint_ui_test.exe'                                    # (not "notepad mint.exe": the native file dialogs remember their last folder per exe NAME in the registry, the real app's entry must stay untouched)
+$exeCopy = Join-Path $work 'mint_ui_test.exe'                                    # (not "notepad-mint.exe": the native file dialogs remember their last folder per exe NAME in the registry, the real app's entry must stay untouched)
 for ($try = 0; $try -lt 8; $try++) {                                             # the lead's build may be rewriting the exe right now
     try { Copy-Item -LiteralPath $Exe -Destination $exeCopy -Force; if ((Get-Item -LiteralPath $exeCopy).Length -gt 50000) { break } } catch {}
     Start-Sleep -Milliseconds 500
@@ -729,6 +730,8 @@ public static class Nd {
     public static long Owner(long h) { return GetWindow(new IntPtr(h), 4).ToInt64(); }       // GW_OWNER (0 = unowned)
     [DllImport("user32.dll")] static extern uint GetClassLongW(IntPtr h, int i);
     public static uint ClassStyle(long h) { return GetClassLongW(new IntPtr(h), -26); }      // GCL_STYLE
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    public static bool Size(long h, int w, int hh) { return SetWindowPos(new IntPtr(h), IntPtr.Zero, 0, 0, w, hh, 0x16); }   // outer size; SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
 }
 '@
 $TDM_CLICK_BUTTON = 0x466                                                        # WM_USER + 102: the overwrite prompt of save as is a task dialog, its buttons have no control ids
@@ -1052,7 +1055,7 @@ function Read-Palette() {                                                       
     $c = @([regex]::Matches($m.Groups[1].Value, 'RGB\(\s*(0x[0-9a-fA-F]+)\s*,\s*(0x[0-9a-fA-F]+)\s*,\s*(0x[0-9a-fA-F]+)\s*\)') | ForEach-Object {
         , @([Convert]::ToInt32($_.Groups[1].Value.Substring(2), 16), [Convert]::ToInt32($_.Groups[2].Value.Substring(2), 16), [Convert]::ToInt32($_.Groups[3].Value.Substring(2), 16)) })
     if ($c.Count -ne 28) { return $null }                                        # 2 themes x 14 colours (struct Palette in mp.h)
-    return @{ dark = @{ face = $c[3]; edit = $c[13] }; light = @{ face = $c[17]; edit = $c[27] } }
+    return @{ dark = @{ face = $c[3]; face2 = $c[4]; edit = $c[13]; accent = $c[0]; onAccent = $c[2]; text = $c[10] }; light = @{ face = $c[17]; face2 = $c[18]; edit = $c[27]; accent = $c[14]; onAccent = $c[16]; text = $c[24] } }
 }
 function Get-Pixel($app, [string]$where) {                                       # a colour from PrintWindow of the main window (works when covered)
     $w = [U]::WRect([long]$app.Main)
@@ -1061,7 +1064,7 @@ function Get-Pixel($app, [string]$where) {                                      
         $bar = $null
         foreach ($k in [U]::Kids([long]$app.Main)) { if ([U]::Cls($k) -eq 'mp_menubar') { $bar = $k } }
         if (-not $bar) { return $null }
-        $e = [U]::WRect([long]$bar); $fx = 0.96; $fy = 0.4                       # the right end of the menu bar: plain chrome face
+        $e = [U]::WRect([long]$bar); $fx = 0.7; $fy = 0.4                        # the free part of the menu bar (right of the menus, left of the two buttons): plain chrome face
     }
     $bmp = [U]::Grab([long]$app.Main)
     try {
@@ -1127,7 +1130,7 @@ function Test-T9 {                                                              
     $sizes = @(([regex]::Match([IO.File]::ReadAllText((Join-Path $Src 'fontdlg.c')), 'g_sizes\[\d+\]\s*=\s*\{([^}]*)\}').Groups[1].Value -split '\s*,\s*') | ForEach-Object { [int]$_.Trim() })
     $app = Start-App
     Ed-Set $app ("a`r`nb")
-    $lh13 = Line-Height $app
+    $lh12 = Line-Height $app
     $dlg = Open-Font $app
     Pass 'T9.1 font dialog opens (class mp_font, title "font")'
     $defPt = [regex]::Match([IO.File]::ReadAllText((Join-Path $Src 'main.c')), 'g_pf\.pt\s*=\s*(\d+)\s*;').Groups[1].Value     # PrefsDefaults
@@ -1137,8 +1140,8 @@ function Test-T9 {                                                              
     Press $dlg $IDOK
     Ck 'T9.4 ok closes the dialog' (Gone $dlg) 'the dialog is still visible'
     CkEq 'T9.5 settings.ini has size=18 under [editor]' '18' (Ini-Val $app 'editor' 'size' '18')
-    $lh18 = 0; [void](WaitFor { $script:lh = Line-Height $app; $script:lh -gt $lh13 } 2000); $lh18 = $script:lh
-    Ck 'T9.6 the editor font really changed: the line height grew (13 pt -> 18 pt)' ($lh18 -gt $lh13) ('line height ' + $lh13 + ' px at 13 pt, ' + $lh18 + ' px at 18 pt')
+    $lh18 = 0; [void](WaitFor { $script:lh = Line-Height $app; $script:lh -gt $lh12 } 2000); $lh18 = $script:lh
+    Ck 'T9.6 the editor font really changed: the line height grew (12 pt -> 18 pt)' ($lh18 -gt $lh12) ('line height ' + $lh12 + ' px at 12 pt, ' + $lh18 + ' px at 18 pt')
 
     $dlg = Open-Font $app
     CkEq 'T9.7 reopened: the size box shows 18' '18' (Get-Field $dlg $IDT.ID_SIZE)
@@ -1181,10 +1184,10 @@ function Test-T9 {                                                              
 
     $dlg = Open-Font $app
     Press $dlg $IDT.ID_RESET
-    Ck 'T9.20 "reset": the size box shows 13' ([bool](WaitFor { (Get-Field $dlg $IDT.ID_SIZE) -eq '13' } 1500)) ('size box [' + (Get-Field $dlg $IDT.ID_SIZE) + ']')
+    Ck 'T9.20 "reset": the size box shows 12' ([bool](WaitFor { (Get-Field $dlg $IDT.ID_SIZE) -eq '12' } 1500)) ('size box [' + (Get-Field $dlg $IDT.ID_SIZE) + ']')
     CkChk 'T9.21 ... bold is off again' $dlg $IDT.ID_BOLD 0
     Press $dlg $IDOK
-    CkEq 'T9.22 ok after reset: size=13' '13' (Ini-Val $app 'editor' 'size' '13')
+    CkEq 'T9.22 ok after reset: size=12' '12' (Ini-Val $app 'editor' 'size' '12')
     CkEq 'T9.23 ... font=Consolas' 'Consolas' (Ini-Val $app 'editor' 'font' 'Consolas')
     CkEq 'T9.24 ... bold=0' '0' (Ini-Val $app 'editor' 'bold' '0')
     CkEq 'T9.25 ... italic=0' '0' (Ini-Val $app 'editor' 'italic' '0')
@@ -1247,7 +1250,7 @@ function Test-T11 {                                                             
     $state = WaitFor { if ($app.Proc.HasExited) { 'exited' } elseif ((Title $app) -ceq 'big.txt - notepad mint') { 'ok' } } 60000
     $ms = $sw.ElapsedMilliseconds
     Info ('T11 ' + [Math]::Round($written / 1MB, 1) + ' MB (' + $written + ' bytes, ' + $chars + ' chars, ' + $totalLines + ' lines) loaded in ' + $ms + ' ms (process start until the title shows the file name)')
-    if ($state -eq 'exited') { Fail 'T11.1 the title shows the file name within 60 s' ('the app process exited during the load after ' + $ms + ' ms, exit code 0x' + ('{0:X}' -f $app.Proc.ExitCode) + ': a crash, or killed from outside (another harness killing "notepad mint" by name?)'); return }
+    if ($state -eq 'exited') { Fail 'T11.1 the title shows the file name within 60 s' ('the app process exited during the load after ' + $ms + ' ms, exit code 0x' + ('{0:X}' -f $app.Proc.ExitCode) + ': a crash, or killed from outside (another harness killing "notepad-mint" by name?)'); return }
     if ($state -ne 'ok') { Fail 'T11.1 the title shows the file name within 60 s' ('title [' + (Title $app) + '] after ' + $ms + ' ms'); return }
     Pass 'T11.1 the title shows the file name within 60 s'
     $sw.Restart()
@@ -1296,19 +1299,19 @@ function Test-T12 {                                                             
 }
 
 # =========================================================================================================== T13
-function Expected-Name([DateTime]$t) {                                           # DefaultDocName (util.c): "mint" + base 36 of year + month*100 + day + seconds since midnight
+function Expected-Name([DateTime]$t) {                                           # DefaultDocName (util.c): "mint-" + base 36 of year + month*100 + day + seconds since midnight
     $v = ($t.Year + $t.Month * 100 + $t.Day + $t.Hour * 3600 + $t.Minute * 60 + $t.Second) % 1679616
     $d = '0123456789abcdefghijklmnopqrstuvwxyz'
     $s = ''
     for ($i = 0; $i -lt 4; $i++) { $s = [string]$d[$v % 36] + $s; $v = [int][Math]::Floor($v / 36) }
-    return 'mint' + $s
+    return 'mint-' + $s
 }
 function Test-T13 {                                                              # the default document name "mintXXXX"
     $t0 = Get-Date
     $app = Start-App
     $t1 = Get-Date
     $name = Default-Name $app
-    Ck 'T13.1 an unsaved document is called "mint" + 4 characters from 0-9 a-z (title "mintXXXX - notepad mint")' ($name -ne $null) ('title [' + (Title $app) + ']')
+    Ck 'T13.1 an unsaved document is called "mint-" + 4 characters from 0-9 a-z (title "mint-XXXX - notepad mint")' ($name -ne $null) ('title [' + (Title $app) + ']')
     $cands = @()                                                                 # the app computed the name some time between just before the launch and the first title
     for ($t = $t0.AddSeconds(-1); $t -le $t1.AddSeconds(1); $t = $t.AddSeconds(1)) { $cands += (Expected-Name $t) }
     Ck 'T13.2 ... it is the base-36 form of year + month*100 + day + seconds since midnight (local time, +-1 s)' ($cands -contains $name) ('name ' + $name + ', the formula gives ' + (($cands | Select-Object -Unique) -join ' '))
@@ -1503,9 +1506,9 @@ function Test-T18 {
     $ed = Get-Edit $app; $wr = [U]::WRect($ed); $cr = [U]::CRect($ed); $sb = Sbars $app
     if ($sb.V -and $sb.H) {
         $vr = [U]::WRect($sb.V); $hr = [U]::WRect($sb.H)
-        $vs = ($wr[2] - $wr[0]) - ($cr[2] - $cr[0]); $hs = ($wr[3] - $wr[1]) - ($cr[3] - $cr[1])
-        Ck 'T18.5 the vertical bar covers the editor''s whole right strip (the corner square included)' (($vr[0] -eq $wr[2] - $vs) -and ($vr[2] -eq $wr[2]) -and ($vr[1] -eq $wr[1]) -and ($vr[3] -eq $wr[3])) ('overlay ' + ($vr -join ',') + ' editor ' + ($wr -join ',') + ' strip ' + $vs)
-        Ck 'T18.6 the horizontal bar covers the bottom strip up to the corner' (($hr[1] -eq $wr[3] - $hs) -and ($hr[3] -eq $wr[3]) -and ($hr[0] -eq $wr[0]) -and ($hr[2] -eq $vr[0])) ('overlay ' + ($hr -join ',') + ' editor ' + ($wr -join ',') + ' strip ' + $hs)
+        $vs = ($wr[2] - $wr[0]) - ($cr[2] - $cr[0]); $hs = ($wr[3] - $wr[1]) - ($cr[3] - $cr[1]); $tr = Trim-Px $app
+        Ck 'T18.5 the vertical bar covers the editor''s whole right strip up to the overhang (the corner square included): SBAR_TRIM px thinner than the strip' (($vr[0] -eq $wr[2] - $vs) -and ($vr[2] -eq $wr[2] - $tr) -and ($vr[1] -eq $wr[1]) -and ($vr[3] -eq $wr[3] - $tr)) ('overlay ' + ($vr -join ',') + ' editor ' + ($wr -join ',') + ' strip ' + $vs + ' trim ' + $tr)
+        Ck 'T18.6 the horizontal bar covers the bottom strip up to the corner and the overhang' (($hr[1] -eq $wr[3] - $hs) -and ($hr[3] -eq $wr[3] - $tr) -and ($hr[0] -eq $wr[0]) -and ($hr[2] -eq $vr[0])) ('overlay ' + ($hr -join ',') + ' editor ' + ($wr -join ',') + ' strip ' + $hs + ' trim ' + $tr)
     } else { Fail 'T18.5 / T18.6 geometry' 'an overlay is missing' }
     Cmd $app 'IDM_FMT_WRAP'
     CkSb 'T18.7 word wrap on: the vertical bar only' $app $true $false
@@ -1563,7 +1566,7 @@ function Test-T18 {
 }
 
 # =========================================================================================================== T19
-# the main window's chrome: no frame around the editor but an 8 px padding inside it, the chrome font is static, the title strip fades the accent in
+# the main window's chrome: no frame around the editor but an 8 px padding inside it, the chrome font is static, the title strip is a flat tint of the accent
 function Chrome-Kid($app, [string]$cls) { foreach ($k in [U]::Kids([long]$app.Main)) { if ([U]::Cls($k) -eq $cls) { return [long]$k } }; return [long]0 }
 function Accent-Colours() {                                                      # the accents of the two themes, from the g_themes table in ui.c (first colour of each theme)
     $t = [IO.File]::ReadAllText((Join-Path $Src 'ui.c'))
@@ -1583,13 +1586,16 @@ function Strip-Pixel($app, [int]$x, [int]$y) {                                  
 }
 function Test-T19 {
     $app = Start-App
-    $dpi = [U]::Dpi([long]$app.Main); $pad = [int][Math]::Round(8 * $dpi / 96, [MidpointRounding]::AwayFromZero)
+    $dpi = [U]::Dpi([long]$app.Main)
+    $pad = [int][Math]::Round($IDM.EDIT_PAD * $dpi / 96, [MidpointRounding]::AwayFromZero)           # left / right / bottom (8 px at 96 dpi)
+    $padTop = [int][Math]::Round($IDM.EDIT_PAD_TOP * $dpi / 96, [MidpointRounding]::AwayFromZero)    # top (4 px at 96 dpi: 4 less than the others since 2026-10-06)
     $bar = Chrome-Kid $app 'mp_menubar'; $st = Chrome-Kid $app 'mp_status'; $ed = Get-Edit $app
     $b = [U]::WRect($bar); $s = [U]::WRect($st); $e = [U]::WRect($ed); $w = [U]::WRect([long]$app.Main)
-    Ck 'T19.1 no frame around the editor: it fills the space between the menu bar and the status bar' (($e[1] -eq $b[3]) -and ($e[3] -eq $s[1]) -and ($e[0] -eq $b[0]) -and ($e[2] -eq $b[2])) ('menu bar ' + ($b -join ',') + ' editor ' + ($e -join ',') + ' status bar ' + ($s -join ','))
+    $tr = Trim-Px $app
+    Ck 'T19.1 no frame around the editor: it fills the space between the menu bar and the status bar (its window overhangs by SBAR_TRIM px at the right and at the bottom: under the status bar, clipped by the window)' (($e[1] -eq $b[3]) -and ($e[3] -eq $s[1] + $tr) -and ($e[0] -eq $b[0]) -and ($e[2] -eq $b[2] + $tr)) ('menu bar ' + ($b -join ',') + ' editor ' + ($e -join ',') + ' status bar ' + ($s -join ',') + ' trim ' + $tr)
     Reset-Doc $app 'x'
     $p = [long](Snd $ed 0xD6 0 0)                                                # EM_POSFROMCHAR of the first character: the client position of the text
-    Ck 'T19.2 the text starts 8 px (dpi scaled) from the editor''s top left corner: the padding' ((($p -band 0xFFFF) -eq $pad) -and ((($p -shr 16) -band 0xFFFF) -eq $pad)) ('first character at ' + ($p -band 0xFFFF) + ',' + (($p -shr 16) -band 0xFFFF) + ', wanted ' + $pad + ',' + $pad)
+    Ck 'T19.2 the text starts 8 px from the left and 4 px from the top (dpi scaled) of the editor: the padding (EDIT_PAD, EDIT_PAD_TOP)' ((($p -band 0xFFFF) -eq $pad) -and ((($p -shr 16) -band 0xFFFF) -eq $padTop)) ('first character at ' + ($p -band 0xFFFF) + ',' + (($p -shr 16) -band 0xFFFF) + ', wanted ' + $pad + ',' + $padTop)
 
     $h0 = @(($b[3] - $b[1]), ($s[3] - $s[1]))                                    # the chrome font is static: zooming the editor leaves the bars alone
     foreach ($i in 1..4) { Cmd $app 'IDM_ZOOM_IN'; Start-Sleep -Milliseconds 150 }
@@ -1600,34 +1606,1165 @@ function Test-T19 {
 
     Ck 'T19.3a the status bar repaints all of itself on a size change (class styles CS_HREDRAW | CS_VREDRAW: its panels are right aligned)' (([Nd]::ClassStyle($st) -band 3) -eq 3) ('class style ' + [Nd]::ClassStyle($st))
     $acc = Accent-Colours; $pal = Read-Palette
-    if ($acc -and $pal) {                                                        # the title strip: 14% accent at the left edge (19% in the light theme), fading to 4% (9%) where the window buttons start and staying there under them
+    if ($acc -and $pal) {                                                        # the title strip is flat (no gradient): 9% of the accent (21% in the light theme), 7 points less in an inactive window (clamped at 0)
         foreach ($th in @('dark', 'light')) {
             if ($th -eq 'light') { Cmd $app 'IDM_THEME_LIGHT'; Start-Sleep -Milliseconds 500 }
             $face = $pal[$th].face; $a = $acc[$th]
-            $aL = 35; $aR = 10; $pL = 14; $pR = 4                                          # 14% / 4% of 255 (dark)
-            if ($th -eq 'light') { $aL = 48; $aR = 22; $pL = 19; $pR = 9 }                  # +5 points at both ends in the light theme
-            $want = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * $aL / 255) })
-            $want4 = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * $aR / 255) })
+            $pA = 9; $pI = 2                                                           # percent of the accent: active / inactive
+            if ($th -eq 'light') { $pA = 21; $pI = 14 }                                 # +12 points in the light theme
+            $want = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * [Math]::Floor($pA * 255 / 100) / 255) })     # (the app tints with alpha = percent * 255 / 100, integer)
+            $wantI = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * [Math]::Floor($pI * 255 / 100) / 255) })
             $bw = [int](($w[2] - $w[0] - [U]::CRect([long]$app.Main)[2]) / 2)                  # the sizing border left of the client area (the strip starts after it)
+            $btn = [int](($w[2] - $w[0]) - 3 * [Math]::Round(38 * $dpi / 96) - 4)              # where the window buttons start
+            $mid = [int](($w[2] - $w[0]) / 2)
             $left = Strip-Pixel $app ($bw + 2) 3
-            Ck ('T19.4 ' + $th + ': the title strip starts with ' + $pL + '% of the accent at its left edge (rgb ' + ($want -join ',') + ')') (Near $left $want 6) ('actual ' + $left.Info)
-            $btn = [int](($w[2] - $w[0]) - 3 * [Math]::Round(38 * $dpi / 96) - 4)
-            $right = Strip-Pixel $app $btn 3
-            Ck ('T19.5 ' + $th + ': ... and fades to ' + $pR + '% of it where the window buttons start (rgb ' + ($want4 -join ',') + ')') (Near $right $want4 3) ('actual ' + $right.Info)
+            Ck ('T19.4 ' + $th + ': the title strip is a flat ' + $pA + '% of the accent: at its left edge (rgb ' + ($want -join ',') + ')') (Near $left $want 3) ('actual ' + $left.Info)
+            $m = Strip-Pixel $app $mid 3; $right = Strip-Pixel $app $btn 3
+            Ck ('T19.5 ' + $th + ': ... the same in the middle and where the window buttons start (no gradient)') ((Near $m $want 3) -and (Near $right $want 3)) ('middle ' + $m.Info + ', buttons ' + $right.Info)
             $under = Strip-Pixel $app ($btn + 8) 3                                       # inside the minimize button, away from its glyph: transparent at rest, the strip shows through
-            Ck ('T19.6 ' + $th + ': ... and stays ' + $pR + '% under the window buttons (they are transparent at rest: no seam)') (Near $under $want4 3) ('actual ' + $under.Info)
-            [void](Snd $app.Main 0x6 0 0)                                                # WM_ACTIVATE(WA_INACTIVE): the fade has 7 points less of the accent at both ends (clamped at 0)
-            $iL = 17; $iR = 0; $qL = 7; $qR = 0
-            if ($th -eq 'light') { $iL = 30; $iR = 5; $qL = 12; $qR = 2 }
-            $wantIL = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * $iL / 255) })
-            $wantIR = @(0, 1, 2 | ForEach-Object { [int]($face[$_] + ($a[$_] - $face[$_]) * $iR / 255) })
-            $okL = WaitFor { Near (Strip-Pixel $app ($bw + 2) 3) $wantIL 5 } 3000
-            Ck ('T19.7 ' + $th + ': an inactive window: ' + $qL + '% of the accent at the left edge (rgb ' + ($wantIL -join ',') + ')') $okL ('actual ' + (Strip-Pixel $app ($bw + 2) 3).Info)
-            Ck ('T19.8 ' + $th + ': ... and ' + $qR + '% where the window buttons start (rgb ' + ($wantIR -join ',') + ')') (Near (Strip-Pixel $app $btn 3) $wantIR 3) ('actual ' + (Strip-Pixel $app $btn 3).Info)
+            Ck ('T19.6 ' + $th + ': ... and under the window buttons (they are transparent at rest: no seam)') (Near $under $want 3) ('actual ' + $under.Info)
+            [void](Snd $app.Main 0x6 0 0)                                                # WM_ACTIVATE(WA_INACTIVE): 7 points less of the accent (clamped at 0)
+            $okL = WaitFor { Near (Strip-Pixel $app ($bw + 2) 3) $wantI 3 } 3000
+            Ck ('T19.7 ' + $th + ': an inactive window: a flat ' + $pI + '% of the accent at the left edge (rgb ' + ($wantI -join ',') + ')') $okL ('actual ' + (Strip-Pixel $app ($bw + 2) 3).Info)
+            Ck ('T19.8 ' + $th + ': ... and the same in the middle and where the window buttons start') ((Near (Strip-Pixel $app $mid 3) $wantI 3) -and (Near (Strip-Pixel $app $btn 3) $wantI 3)) ('middle ' + (Strip-Pixel $app $mid 3).Info + ', buttons ' + (Strip-Pixel $app $btn 3).Info)
             [void](Snd $app.Main 0x6 1 0)                                                # active again
-            Ck ('T19.9 ' + $th + ': active again: back to ' + $pL + '% at the left edge') (WaitFor { Near (Strip-Pixel $app ($bw + 2) 3) $want 6 } 3000) ('actual ' + (Strip-Pixel $app ($bw + 2) 3).Info)
+            Ck ('T19.9 ' + $th + ': active again: back to ' + $pA + '% at the left edge') (WaitFor { Near (Strip-Pixel $app ($bw + 2) 3) $want 3 } 3000) ('actual ' + (Strip-Pixel $app ($bw + 2) 3).Info)
         }
     } else { Skip 'T19.4 / T19.5 title strip pixels' 'could not parse the g_themes palette table in src\ui.c' }
+
+    # the strip's geometry, through WM_NCHITTEST at screen points (messages only: no real mouse): the icon area is HTCLIENT (ours), the rest of the strip HTCAPTION
+    $w = [U]::WRect([long]$app.Main); $bw = [int](($w[2] - $w[0] - [U]::CRect([long]$app.Main)[2]) / 2); $b = [U]::WRect($bar)
+    function Px([int]$n) { [int][Math]::Round($n * $dpi / 96, [MidpointRounding]::AwayFromZero) }
+    function Hit([int]$cx, [int]$cy) { [int](Snd $app.Main 0x84 0 ([long]((($w[1] + $cy) -shl 16) -bor (($w[0] + $bw + $cx) -band 0xFFFF)))) }   # WM_NCHITTEST at a client point
+    $iconR = (Px 8) + (Px 16) + (Px 6); $capH = (Px 24) - (Px 1)
+    $yIn = [int]($capH / 2)
+    Ck 'T19.10 the strip is 1 px shorter than it was (24 px at 96 dpi -> 23): the menu bar starts right under it'(($b[1] - $w[1]) -eq $capH) ('menu bar top is ' + ($b[1] - $w[1]) + ' px below the window top, wanted ' + $capH)
+    Ck ('T19.11 the icon area ends ' + $iconR + ' px from the left edge of the client: the icon sits 8 px from it (10 px before) and the title follows') ((Hit ($iconR - 1) $yIn) -eq 1 -and (Hit $iconR $yIn) -eq 2) ('hit at x ' + ($iconR - 1) + ' = ' + (Hit ($iconR - 1) $yIn) + ' (wanted 1 HTCLIENT), at x ' + $iconR + ' = ' + (Hit $iconR $yIn) + ' (wanted 2 HTCAPTION)')
+    Ck 'T19.12 the strip''s last row (y = height - 1) is still caption, the row under it belongs to the menu bar (client)'((Hit 200 ($capH - 1)) -eq 2 -and (Hit 200 $capH) -eq 1) ('hit at y ' + ($capH - 1) + ' = ' + (Hit 200 ($capH - 1)) + ' (wanted 2), at y ' + $capH + ' = ' + (Hit 200 $capH) + ' (wanted 1)')
+
+    # the title: the NAME is bold, " - notepad mint" is not. a file called "notepad mint.txt" makes the title "notepad mint.txt - notepad mint": the same twelve glyphs
+    # "notepad mint" once in the bold name and once in the regular tail, so the ink of the two (the pixels' distance from the flat strip colour) compares the weights
+    # (measured: the bold copy has about 1.2 x the ink of the regular one; two regular copies would be 1.0)
+    $nm = Join-Path $work 'notepad mint.txt'; [IO.File]::WriteAllText($nm, 'x')
+    $app2 = Start-App $nm
+    [void](Wait-Title $app2 'notepad mint.txt - notepad mint')
+    Start-Sleep -Milliseconds 400
+    $w2 = [U]::WRect([long]$app2.Main); $bw2 = [int](($w2[2] - $w2[0] - [U]::CRect([long]$app2.Main)[2]) / 2)
+    $bmp = [U]::Grab([long]$app2.Main)
+    try {
+        function Lum($c) { 0.299 * $c.R + 0.587 * $c.G + 0.114 * $c.B }
+        function Ink([int]$xa, [int]$xb, [int]$ya, [int]$yb, [double]$bg) { $s = 0.0; for ($yy = $ya; $yy -lt $yb; $yy++) { for ($xx = $xa; $xx -lt $xb; $xx++) { $s += [Math]::Abs((Lum ($bmp.GetPixel($xx, $yy))) - $bg) } }; $s }
+        $x0 = $bw2 + $iconR + (Px 4); $xEnd = ($w2[2] - $w2[0]) - 3 * (Px 38) - (Px 8)
+        $bg = Lum ($bmp.GetPixel(200, 2))                                                # the strip is flat: any pixel above the text is its colour
+        $right = -1
+        for ($xx = $xEnd; $xx -gt $x0 -and $right -lt 0; $xx--) { if ((Ink $xx ($xx + 1) (Px 5) (Px 19) $bg) -gt 40) { $right = $xx } }     # the last inked column = the end of the title
+        $cell = ($right - $x0 + 1) / 31.0                                                # 31 characters, one advance each (a monospaced face)
+        $head = Ink $x0 ([int]($x0 + 12 * $cell)) (Px 4) (Px 20) $bg                     # "notepad mint" in the name
+        $tail = Ink ([int]($x0 + 19 * $cell)) ([int]($x0 + 31 * $cell)) (Px 4) (Px 20) $bg   # "notepad mint" after " - "
+        $ratio = if ($tail -gt 0) { $head / $tail } else { 0 }
+        Ck 'T19.13 the name in the title is bold, " - notepad mint" is not: the same twelve glyphs have at least 10% more ink in the name' ($ratio -ge 1.10) ('ink ratio name / tail = ' + [Math]::Round($ratio, 3) + ' (head ' + [Math]::Round($head) + ', tail ' + [Math]::Round($tail) + ', text from x ' + $x0 + ' to ' + $right + ', cell ' + [Math]::Round($cell, 2) + ')')
+    } finally { $bmp.Dispose() }
+
+    # three things whose values cannot be read from outside the process (a caret's colour, a font's size) or are plain palette numbers: checked in the sources.
+    # the caret is the edit control's own, an inverting rectangle (pure white on the dark editor's black, pure black on the light editor's white);
+    # the menu bar, popups, status bar and title strip all use the one chrome font, CHROME_PX = 11 (a 10 px menu / status font was tried and went back)
+    $mpH = [IO.File]::ReadAllText((Join-Path $Src 'mp.h')); $uiSrc = [IO.File]::ReadAllText((Join-Path $Src 'ui.c')); $frSrc = [IO.File]::ReadAllText((Join-Path $Src 'frame.c'))
+    $allSrc = ((Get-ChildItem -LiteralPath $Src -Filter *.c | ForEach-Object { [IO.File]::ReadAllText($_.FullName) }) -join "`n")
+    Ck 'T19.14 the caret is the edit control''s own inverting one (pure white on the dark theme, pure black on the light one): no source creates a caret' ($allSrc -notmatch '\bCreateCaret\s*\(') 'CreateCaret( found in src\*.c'
+    Ck 'T19.15 menu bar, popups, status bar and title strip all use the one chrome font, CHROME_PX = 11 (g_fontMenu, bold twin g_fontMenuB for the title)' (($mpH -match '#define\s+CHROME_PX\s+11\b') -and ($mpH -notmatch 'MENU_PX') -and ($uiSrc -match 'g_fontMenu\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*CHROME_PX\s*,\s*FW_NORMAL\s*\)') -and ($uiSrc -match 'g_fontMenuB\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*CHROME_PX\s*,\s*FW_BOLD\s*\)') -and ($frSrc -match 'SelectObject\(mdc,\s*g_fontMenuB\)')) 'the font sizes are not wired as expected (src\mp.h, src\ui.c, src\frame.c)'
+    if ($pal) { Ck 'T19.16 the light face is #dfdee1 = rgb(223,222,225) (it was #e4e1da: 5 less red, 3 less green, 7 more blue)' (($pal['light'].face -join ',') -eq '223,222,225') ('light face is ' + ($pal['light'].face -join ',')) }
+}
+
+# =========================================================================================================== T20
+# the minimum size is a size of the ENTIRE window (frame included): 320 px wide (the status panels may ask for more) and 140 px high, dpi scaled
+function Test-T20 {
+    $app = Start-App
+    $dpi = [U]::Dpi([long]$app.Main)
+    $wantW = [int][Math]::Round(320 * $dpi / 96, [MidpointRounding]::AwayFromZero)
+    $wantH = [int][Math]::Round(140 * $dpi / 96, [MidpointRounding]::AwayFromZero)
+    [void][Nd]::Size([long]$app.Main, 100, 50)                                   # far too small: the window stops at its minimum
+    $w = WaitFor { $r = [U]::WRect([long]$app.Main); if (($r[2] - $r[0]) -le 2000) { $r } } 3000
+    $gw = $w[2] - $w[0]; $gh = $w[3] - $w[1]
+    Ck ('T20.1 shrunk as far as it goes the whole window is ' + $wantW + ' px wide (320 px at 96 dpi; the status panels need less)') ($gw -eq $wantW) ('width ' + $gw + ', wanted ' + $wantW + ' (dpi ' + $dpi + ')')
+    Ck ('T20.2 ... and ' + $wantH + ' px high (140 px at 96 dpi), title strip and frame included') ($gh -eq $wantH) ('height ' + $gh + ', wanted ' + $wantH + ' (dpi ' + $dpi + ')')
+    $bar = Chrome-Kid $app 'mp_menubar'; $st = Chrome-Kid $app 'mp_status'; $ed = Get-Edit $app
+    $b = [U]::WRect($bar); $s = [U]::WRect($st); $e = [U]::WRect($ed)
+    Ck 'T20.3 at that size the menu bar, the editor (at least one pixel high) and the status bar still stack inside the window without overlapping' (($e[3] - (Trim-Px $app) -gt $e[1]) -and ($b[3] -le $e[1]) -and ($e[3] - (Trim-Px $app) -le $s[1]) -and ($s[3] -le $w[3])) ('menu bar ' + ($b -join ',') + ' editor ' + ($e -join ',') + ' status bar ' + ($s -join ',') + ' window ' + ($w -join ','))
+    [void][Nd]::Size([long]$app.Main, 900, 600)                                  # and it still grows
+    $g = WaitFor { $r = [U]::WRect([long]$app.Main); if (($r[2] - $r[0]) -eq 900 -and ($r[3] - $r[1]) -eq 600) { $r } } 3000
+    Ck 'T20.4 the window can still be made bigger again (900 x 600)' ($g -ne $null) ('size now ' + (([U]::WRect([long]$app.Main)) -join ','))
+}
+
+# =========================================================================================================== T21
+# ctrl+w closes the window like file > exit. an accelerator needs real keyboard state (the message loop asks the thread's key state, which posted
+# messages never change, and a private desktop gets no injected input): the table entry and the menu label are checked in the sources, the help
+# line in the real help window, the command itself (exit, with the unsaved prompt) is T12's
+function Test-T21 {
+    $main = [IO.File]::ReadAllText((Join-Path $Src 'main.c'))
+    $menu = [IO.File]::ReadAllText((Join-Path $Src 'menu.c'))
+    Ck 'T21.1 the accelerator table maps ctrl+w to file > exit' ($main -match 'FVIRTKEY\s*\|\s*FCONTROL\s*,\s*''W''\s*,\s*IDM_FILE_EXIT\s*\}') 'no { FVIRTKEY | FCONTROL, ''W'', IDM_FILE_EXIT } entry in src\main.c'
+    Ck 'T21.2 file > exit shows "ctrl+w" as its shortcut' ($menu -match 'IT\(L"e&xit",\s*L"ctrl\+w",\s*IDM_FILE_EXIT\)') 'the exit item in src\menu.c has no ctrl+w label'
+    $app = Start-App
+    Cmd $app 'IDM_HELP_TOPICS'
+    $h = Wait-Win $app 'mp_help' 'help topics'
+    $t = ''
+    foreach ($k in [U]::Kids($h)) { if ([U]::Cls($k) -eq 'Edit') { $t = [U]::GetText($k) } }
+    Ck 'T21.3 the help topics list ctrl+w' ($t -match 'ctrl\+w\s+close the window') ('help text [' + (Show $t) + ']')
+    Ck 'T21.4 ... and alt+x (theme; ctrl+t is gone) and ctrl+u (status bar)' (($t -match 'alt\+x\s+switch between the dark and light theme') -and ($t -notmatch 'ctrl\+t') -and ($t -match 'ctrl\+u\s+show / hide the status bar')) ('help text [' + (Show $t) + ']')
+    Pst $h $WM_CLOSE 0 0
+    [void](Gone $h)
+    Ck 'T21.5 the accelerator table maps alt+x to the theme toggle (ctrl+t no longer does) and ctrl+u to the status bar command' (($main -match 'FVIRTKEY\s*\|\s*FALT\s*,\s*''X''\s*,\s*IDM_THEME_TOGGLE\s*\}') -and ($main -notmatch 'FCONTROL\s*,\s*''T''\s*,') -and ($main -match 'FVIRTKEY\s*\|\s*FCONTROL\s*,\s*''U''\s*,\s*IDM_VIEW_STATUS\s*\}')) 'entries missing in src\main.c'
+    Ck 'T21.6 the menus show them: view > status bar "ctrl+u", view > theme > toggle "alt+x"' (($menu -match 'IT\(L"&status bar",\s*L"ctrl\+u",\s*IDM_VIEW_STATUS\)') -and ($menu -match 'IT\(L"&toggle",\s*L"alt\+x",\s*IDM_THEME_TOGGLE\)')) 'labels missing in src\menu.c'
+    Cmd $app 'IDM_THEME_TOGGLE'                                                  # (the commands the two accelerators run)
+    CkEq 'T21.7 the theme toggle switches dark -> light (settings.ini says theme=light)' 'light' (Ini-Val $app 'view' 'theme' 'light')
+    Cmd $app 'IDM_THEME_TOGGLE'
+    CkEq 'T21.8 ... and light -> dark' 'dark' (Ini-Val $app 'view' 'theme' 'dark')
+    $st = Chrome-Kid $app 'mp_status'
+    Ck 'T21.9 the status bar is shown at the start' ([U]::Visible($st)) 'the status bar window is not visible'
+    Cmd $app 'IDM_VIEW_STATUS'
+    Ck 'T21.10 the status bar command hides it' (WaitFor { -not [U]::Visible($st) } 3000) 'still visible 3 s after IDM_VIEW_STATUS'
+    Cmd $app 'IDM_VIEW_STATUS'
+    Ck 'T21.11 ... and shows it again' (WaitFor { [U]::Visible($st) } 3000) 'still hidden 3 s after the second IDM_VIEW_STATUS'
+    Ck 'T21.12 the accelerator table maps alt+z to word wrap (the command T15 / T18 run through format > word wrap)' ($main -match 'FVIRTKEY\s*\|\s*FALT\s*,\s*''Z''\s*,\s*IDM_FMT_WRAP\s*\}') 'no { FVIRTKEY | FALT, ''Z'', IDM_FMT_WRAP } entry in src\main.c'
+    Ck 'T21.13 format > word wrap shows "alt+z" as its shortcut' ($menu -match 'IT\(L"&word wrap",\s*L"alt\+z",\s*IDM_FMT_WRAP\)') 'the word wrap item in src\menu.c has no alt+z label'
+    Ck 'T21.14 the help topics list alt+z (word wrap on / off)' ($t -match 'alt\+z\s+word wrap on / off') ('help text [' + (Show $t) + ']')
+}
+
+# =========================================================================================================== T22
+# the status bar text: "line:col[ [N L N B]] | lines | size in bytes | line ending | encoding" (what WM_GETTEXT of the mp_status child answers).
+# the size is what a save would write: the encoding's bytes (+ bom), a line break as long as the chosen line ending; the lines are the number of the last line.
+# a selection shows the lines it covers and the bytes a save would write for it (same encoding and line ending, no bom): "1:3 [1 L 2 B]"
+function Status-Text($app) { [U]::Text((Chrome-Kid $app 'mp_status')) }
+function Status-Has($app, [string]$pat) { [bool](WaitFor { (Status-Text $app) -match $pat } 3000) }
+function Test-T22 {
+    $app = Start-App
+    $ed = Get-Edit $app
+    Reset-Doc $app 'abc'
+    CkEq 'T22.1 "abc": position 1:1, then 1 L, 3 B, crlf, utf8, in that order (the lines sit before the size, both before the line ending)' '1:1 | 1 L | 3 B | crlf | utf8' (Status-Text $app)
+    [void](Snd $ed $EM_SETSEL 0 2)
+    Ck 'T22.2 two characters selected: "1:3 [1 L 2 B]" after the position' ((Status-Text $app) -match '^1:\d+ \[1 L 2 B\] \| 1 L \| 3 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
+    [void](Snd $ed $EM_SETSEL 1 1)
+    Ck 'T22.3 nothing selected any more: the position is back to just line:column' ((Status-Text $app) -match '^1:2 \| 1 L \| 3 B \|') ('status [' + (Status-Text $app) + ']')
+
+    Reset-Doc $app ("ab`r`ncd")                                                  # a b CR LF c d
+    [void](Snd $ed $EM_SETSEL 1 5)                                               # "b", the line break, "c"
+    Ck 'T22.4 "b", the break and "c": 2 L, 4 B (the break is two bytes in a crlf file)' ((Status-Text $app) -match ' \[2 L 4 B\] \|') ('status [' + (Status-Text $app) + ']')
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    Ck 'T22.5 select all of "ab", break, "cd": 2 L, 6 B selected, and 2 L, 6 B in all' ((Status-Text $app) -match ' \[2 L 6 B\] \| 2 L \| 6 B \| crlf') ('status [' + (Status-Text $app) + ']')
+    Cmd $app 'IDM_EOL_LF'
+    Ck 'T22.6 line ending lf: the same text is 5 B (still 2 L), the selection too' (Status-Has $app ' \[2 L 5 B\] \| 2 L \| 5 B \| lf \|') ('status [' + (Status-Text $app) + ']')
+    Cmd $app 'IDM_EOL_CR'
+    Ck 'T22.7 line ending cr: 5 B' (Status-Has $app ' \[2 L 5 B\] \| 2 L \| 5 B \| cr \|') ('status [' + (Status-Text $app) + ']')
+    Cmd $app 'IDM_EOL_CRLF'
+    Ck 'T22.8 back to crlf: 6 B' (Status-Has $app ' \[2 L 6 B\] \| 2 L \| 6 B \| crlf \|') ('status [' + (Status-Text $app) + ']')
+
+    Reset-Doc $app ('a' + [char]::ConvertFromUtf32(0x1F600) + 'b')               # a, a surrogate pair (one emoji), b
+    Ck 'T22.9 an emoji is 4 bytes in utf-8: 6 B in all' (Status-Has $app '^1:1 \| 1 L \| 6 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    Ck 'T22.10 select all of "a", the emoji, "b": 1 L, 6 B (the pair is 4 bytes, not 2 x 3)' ((Status-Text $app) -match ' \[1 L 6 B\] \|') ('status [' + (Status-Text $app) + ']')
+    Cmd $app 'IDM_ENC_UTF8BOM'
+    Ck 'T22.11 utf-8 with bom: the file is 3 bytes more (9 B), the selection is not (the mark belongs to the file): 6 B' (Status-Has $app ' \[1 L 6 B\] \| 1 L \| 9 B \| crlf \| utf8 bom$') ('status [' + (Status-Text $app) + ']')
+    Cmd $app 'IDM_ENC_UTF16LE'
+    Ck 'T22.12 utf-16 le: the file is the mark (2) + 4 units * 2 = 10 B, the selection 4 units = 8 B' (Status-Has $app ' \[1 L 8 B\] \| 1 L \| 10 B \| crlf \| utf16 le$') ('status [' + (Status-Text $app) + ']')
+    Cmd $app 'IDM_ENC_UTF16BE'
+    Ck 'T22.13 utf-16 be: 10 B and 8 B' (Status-Has $app ' \[1 L 8 B\] \| 1 L \| 10 B \| crlf \| utf16 be$') ('status [' + (Status-Text $app) + ']')
+    Cmd $app 'IDM_ENC_UTF8'
+    Ck 'T22.14 back to utf-8: 6 B and 6 B' (Status-Has $app ' \[1 L 6 B\] \| 1 L \| 6 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
+
+    Reset-Doc $app 'e'                                                           # an edit that keeps the length but not the size ("e" -> "e acute": 1 -> 2 bytes)
+    CkEq 'T22.15 "e": 1 B' '1:1 | 1 L | 1 B | crlf | utf8' (Status-Text $app)
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    [void][U]::SndStr($ed, $EM_REPLACESEL, 1, [string][char]0xE9)
+    Ck 'T22.16 replaced by an accented e (same length, 2 bytes in utf-8): the size follows' ((Status-Text $app) -match '\| 1 L \| 2 B \| crlf') ('status [' + (Status-Text $app) + ']')
+    Ed-Dirty $app 'xyz'
+    Ck 'T22.17 typing 3 more characters: 5 B' ((Status-Text $app) -match '\| 1 L \| 5 B \| crlf') ('status [' + (Status-Text $app) + ']')
+
+    Reset-Doc $app ''                                                            # the lines: the number of the last line
+    CkEq 'T22.18 an empty document is 0 B in 1 L' '1:1 | 1 L | 0 B | crlf | utf8' (Status-Text $app)
+    Reset-Doc $app ("a`r`nb`r`nc`r`nd`r`ne")
+    Ck 'T22.19 five lines of text: 5 L, 13 B (5 letters + 4 breaks of 2 bytes)' (Status-Has $app '\| 5 L \| 13 B \| crlf') ('status [' + (Status-Text $app) + ']')
+    Reset-Doc $app ("a`r`n")
+    Ck 'T22.20 a text that ends with a line break has an empty last line: 2 L (the caret can sit on it)' (Status-Has $app '\| 2 L \| 3 B \| crlf') ('status [' + (Status-Text $app) + ']')
+    Ed-Dirty $app ("x`r`n")                                                      # typing a line break (EN_CHANGE): one more line
+    Ck 'T22.21 inserting "x" and a break at the start: 3 L' (Status-Has $app '\| 3 L \| 6 B \| crlf') ('status [' + (Status-Text $app) + ']')
+
+    # the lines of a selection: every line break in it ends one line, the text after the last break is one more, unless the selection ends right at the start of a line
+    Reset-Doc $app ("a`r`nb`r`nc`r`n")                                           # a CR LF b CR LF c CR LF = chars 0..8
+    [void](Snd $ed $EM_SETSEL 0 6)                                               # "a", break, "b", break: ends at the start of line 3
+    Ck 'T22.22 two whole lines (the selection ends at the start of the third): 2 L, not 3; 6 B' (Status-Has $app ' \[2 L 6 B\] \|') ('status [' + (Status-Text $app) + ']')
+    [void](Snd $ed $EM_SETSEL 0 7)                                               # ... one more character: "c" is in it
+    Ck 'T22.23 one character further, "c" is [3 L 7 B]' (Status-Has $app ' \[3 L 7 B\] \|') ('status [' + (Status-Text $app) + ']')
+    [void](Snd $ed $EM_SETSEL 1 3)                                               # nothing but the first line break
+    Ck 'T22.24 just a line break: 1 L, 2 B' (Status-Has $app ' \[1 L 2 B\] \|') ('status [' + (Status-Text $app) + ']')
+    [void](Snd $ed $EM_SETSEL 1 7)                                               # from the end of line 1 into line 3: break, "b", break, "c"
+    Ck 'T22.25 from the end of one line into the third: 3 L, 6 B' (Status-Has $app ' \[3 L 6 B\] \|') ('status [' + (Status-Text $app) + ']')
+    Cmd $app 'IDM_EOL_LF'
+    [void](Snd $ed $EM_SETSEL 0 7)
+    Ck 'T22.26 line ending lf: "a", break, "b", break, "c" is 5 B' (Status-Has $app ' \[3 L 5 B\] \| 4 L \| 6 B \| lf \|') ('status [' + (Status-Text $app) + ']')
+    Cmd $app 'IDM_EOL_CRLF'
+
+    $cjk = -join ([char]0x65E5, [char]0x672C, [char]0x8A9E)                      # three cjk characters: 3 bytes each in utf-8
+    Reset-Doc $app $cjk
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    Ck 'T22.27 three cjk characters: 9 B in utf-8' (Status-Has $app ' \[1 L 9 B\] \| 1 L \| 9 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
+    [void](Snd $ed $EM_SETSEL 1 2)
+    Ck 'T22.28 one of them: 3 B' (Status-Has $app ' \[1 L 3 B\] \| 1 L \| 9 B \|') ('status [' + (Status-Text $app) + ']')
+
+    Reset-Doc $app 'ab'                                                          # the same range after an edit that keeps its length: the numbers are not kept from before
+    [void](Snd $ed $EM_SETSEL 0 1)
+    Ck 'T22.29 "a" selected: 1 B' (Status-Has $app ' \[1 L 1 B\] \| 1 L \| 2 B \|') ('status [' + (Status-Text $app) + ']')
+    [void](Snd $ed $EM_SETSEL 0 1)
+    [void][U]::SndStr($ed, $EM_REPLACESEL, 1, [string][char]0xE9)                # "a" -> accented e, same length, 2 bytes
+    [void](Snd $ed $EM_SETSEL 0 1)
+    Ck 'T22.30 the same range after replacing "a" by an accented e: 2 B' (Status-Has $app ' \[1 L 2 B\] \| 1 L \| 3 B \|') ('status [' + (Status-Text $app) + ']')
+}
+
+# =========================================================================================================== T23
+# selected line breaks (edit.c "selected line breaks"). the stock control highlights characters only, so an empty line inside a selection - or the end of a
+# selected line - showed nothing. every selected HARD line break now gets a block (a space wide, a row high, the system selection colour) where the row's
+# text ends. T23.1-T23.12 read PrintWindow of the main window (the repaint path: WM_PRINT -> WM_PRINTCLIENT). the control paints a CHANGED selection straight
+# onto its window, not through WM_PAINT, so T23.13+ read the window itself: that needs the probe build (tools\probe.bat /DSHOTDC -> a message that dumps the
+# editor's own DC; a process on another desktop cannot read it) and is skipped otherwise:
+#   tools\probe.bat /DSHOTDC   then   tests\ui\ui_test.ps1 -Exe build\probe\notepad-mint.exe -Only T23
+function S16([long]$v) { $v = $v -band 0xFFFF; if ($v -ge 32768) { return [int]($v - 65536) } else { return [int]$v } }
+function Ed-Pos($app, [int]$i) { $p = [long](Snd (Get-Edit $app) 0xD6 $i 0); return @((S16 $p), (S16 ($p -shr 16))) }     # EM_POSFROMCHAR: client x, y of a character
+function Ed-Shot($app) {                                                         # PrintWindow of the main window + where the editor's client area starts in it
+    $mw = [U]::WRect([long]$app.Main); $ew = [U]::WRect((Get-Edit $app))
+    return @{ Bmp = [U]::Grab([long]$app.Main); Ox = ($ew[0] - $mw[0]); Oy = ($ew[1] - $mw[1]) }
+}
+function Is-Hl($c) { $h = [System.Drawing.SystemColors]::Highlight; return ([Math]::Abs($c.R - $h.R) + [Math]::Abs($c.G - $h.G) + [Math]::Abs($c.B - $h.B)) -le 12 }
+function Hl-At($shot, [int]$x, [int]$y) { return (Is-Hl ($shot.Bmp.GetPixel($shot.Ox + $x, $shot.Oy + $y))) }
+function Hl-Run($shot, [int]$x0, [int]$y) { $n = 0; while ((Hl-At $shot ($x0 + $n) $y) -and $n -lt 600) { $n++ }; return $n }   # highlight pixels in a row from x0 to the right
+function Ed-Direct($app, [int]$w, [int]$h, [int]$y0 = 0) {                       # the editor's own pixels, w x h from row y0 (SHOTDC probe message WM_APP + 90; about 20 us a pixel), $null when the exe has none
+    $f = Join-Path $env:TEMP 'mint_dc.ppm'
+    Remove-Item -LiteralPath $f -ErrorAction SilentlyContinue
+    [void](Snd (Get-Edit $app) (0x8000 + 90) $w ($h -bor ($y0 -shl 16)))
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    $b = [IO.File]::ReadAllBytes($f)
+    $nl = 0; $i = 0
+    while ($nl -lt 3 -and $i -lt 64) { if ($b[$i] -eq 10) { $nl++ }; $i++ }     # "P6\n<w> <h>\n255\n"
+    return @{ B = $b; Off = $i; W = $w; H = $h; Y0 = $y0 }
+}
+function Px-Hl($d, [int]$x, [int]$y) { $k = $d.Off + ($y * $d.W + $x) * 3; return (Is-Hl ([pscustomobject]@{ R = [int]$d.B[$k]; G = [int]$d.B[$k + 1]; B = [int]$d.B[$k + 2] })) }
+function Direct-Run($d, [int]$x0, [int]$y) { $n = 0; while ((Px-Hl $d ($x0 + $n) $y) -and ($x0 + $n) -lt ($d.W - 1)) { $n++ }; return $n }
+function Px-HlAny($d, [int]$x0, [int]$x1, [int]$y) { for ($x = $x0; $x -le $x1; $x++) { if (Px-Hl $d $x $y) { return $true } }; return $false }   # a selected glyph's own pixels are not the selection colour (the stem of an "l" can sit on any one probed pixel): look at a whole run
+function Test-T23 {
+    $app = Start-App
+    $ed = Get-Edit $app
+    $t = "alpha`r`n`r`nbeta"                                                     # rows: "alpha" / "" / "beta"
+    Reset-Doc $app $t
+    $st = Line-Starts $t                                                         # 0, 7, 9
+    $cell = (Ed-Pos $app 1)[0] - (Ed-Pos $app 0)[0]                              # one character cell (the editor font is monospace)
+    $p0 = Ed-Pos $app 5; $p1 = Ed-Pos $app $st[1]; $p2 = Ed-Pos $app ($st[2] + 3)
+    $pitch = $p1[1] - $p0[1]
+    $half = [int]($pitch / 2)
+    $x0 = $p0[0] + 3                                                             # just past the end of "alpha" ...
+    $xe = $p2[0] + $cell + 3                                                     # ... and just past the end of "beta"
+    Info ('editor font: cell ' + $cell + ' px, row pitch ' + $pitch + ' px')
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    $s = Ed-Shot $app
+    Ck 'T23.1 everything selected: a block follows the text of the first line ("alpha" ends at the line break)' (Hl-At $s $x0 ($p0[1] + $half)) ('no selection colour at ' + $x0 + ',' + ($p0[1] + $half))
+    Ck 'T23.2 ... the empty line in the middle is highlighted (before: nothing to see)' (Hl-At $s ($p1[0] + 3) ($p1[1] + $half)) ('no selection colour at ' + ($p1[0] + 3) + ',' + ($p1[1] + $half))
+    Ck 'T23.3 ... the last line has no line break after it: nothing past the end of "beta"' (-not (Hl-At $s $xe ($p1[1] + $pitch + $half))) ('selection colour at ' + $xe + ',' + ($p1[1] + $pitch + $half))
+    Ck ('T23.4 the block on the empty line is one character cell (' + $cell + ' px) wide') ((Hl-Run $s $p1[0] ($p1[1] + $half)) -eq $cell) ('run of ' + (Hl-Run $s $p1[0] ($p1[1] + $half)) + ' px')
+    [void](Snd $ed $EM_SETSEL 0 $st[1])                                          # ends at the START of the empty line: the first break is selected, the empty line's is not
+    $s = Ed-Shot $app
+    Ck 'T23.5 a selection that ends where the next line starts: the first line shows its block ...' (Hl-At $s $x0 ($p0[1] + $half)) 'no block after "alpha"'
+    Ck 'T23.6 ... the line it ends in does not (its own break is not selected)' (-not (Hl-At $s ($p1[0] + 3) ($p1[1] + $half))) 'a block on the empty line'
+    [void](Snd $ed $EM_SETSEL 1 3)                                               # inside one line: no break selected
+    $s = Ed-Shot $app
+    Ck 'T23.7 a selection inside one line has no block' (-not (Hl-At $s $x0 ($p0[1] + $half))) 'a block after "alpha"'
+    [void](Snd $ed $EM_SETSEL $st[1] $st[2])                                     # exactly the break of the empty line
+    $s = Ed-Shot $app
+    Ck 'T23.8 only the empty line''s break selected: its block shows, the line before it shows none' ((Hl-At $s ($p1[0] + 3) ($p1[1] + $half)) -and -not (Hl-At $s $x0 ($p0[1] + $half))) 'blocks wrong'
+    Ck 'T23.9 ... and the block is exactly one row high: the colour covers the first and the last pixel row of the line, not the row above or below' ((Hl-At $s ($p1[0] + 3) $p1[1]) -and (Hl-At $s ($p1[0] + 3) ($p1[1] + $pitch - 1)) -and -not (Hl-At $s ($p1[0] + 3) ($p1[1] - 1)) -and -not (Hl-At $s ($p1[0] + 3) ($p1[1] + $pitch))) ('rows ' + ($p1[1] - 1) + ',' + $p1[1] + ',' + ($p1[1] + $pitch - 1) + ',' + ($p1[1] + $pitch) + ': ' + (Hl-At $s ($p1[0] + 3) ($p1[1] - 1)) + ' ' + (Hl-At $s ($p1[0] + 3) $p1[1]) + ' ' + (Hl-At $s ($p1[0] + 3) ($p1[1] + $pitch - 1)) + ' ' + (Hl-At $s ($p1[0] + 3) ($p1[1] + $pitch)))
+    [void](Snd $ed $EM_SETSEL 2 2)
+    $s = Ed-Shot $app
+    Ck 'T23.10 no selection: no block anywhere' ((-not (Hl-At $s $x0 ($p0[1] + $half))) -and (-not (Hl-At $s ($p1[0] + 3) ($p1[1] + $half)))) 'a block with an empty selection'
+
+    [void](Snd $ed $EM_SETSEL 0 -1)                                              # zoom: the block follows the font
+    for ($i = 0; $i -lt 3; $i++) { Cmd $app 'IDM_ZOOM_IN'; Start-Sleep -Milliseconds 150 }
+    [void](WaitFor { ((Ed-Pos $app 1)[0] - (Ed-Pos $app 0)[0]) -gt $cell } 3000)
+    $cell2 = (Ed-Pos $app 1)[0] - (Ed-Pos $app 0)[0]; $q1 = Ed-Pos $app $st[1]
+    $s = Ed-Shot $app
+    Ck ('T23.11 zoomed in (cell ' + $cell + ' -> ' + $cell2 + ' px): the block on the empty line is one new cell wide') (($cell2 -gt $cell) -and ((Hl-Run $s $q1[0] ($q1[1] + 8)) -eq $cell2)) ('cell ' + $cell2 + ', run ' + (Hl-Run $s $q1[0] ($q1[1] + 8)))
+    Cmd $app 'IDM_ZOOM_RESET'
+
+    Cmd $app 'IDM_FMT_WRAP'                                                      # word wrap on: a soft wrap is not a line break
+    Start-Sleep -Milliseconds 500
+    $ed = Get-Edit $app
+    $para = ('word ' * 60).TrimEnd()                                             # 299 characters: several rows at any sane window width
+    Reset-Doc $app ($para + "`r`nz")
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    $rows = [int](Snd $ed 0xBA 0 0)                                              # EM_GETLINECOUNT
+    $len0 = [int](Snd $ed 0xC1 0 0)                                              # EM_LINELENGTH: the first row
+    $a = Ed-Pos $app ($len0 - 1)
+    $cell = (Ed-Pos $app 1)[0] - (Ed-Pos $app 0)[0]
+    $s = Ed-Shot $app
+    Ck ('T23.12 word wrap on, a long line over ' + ($rows - 1) + ' rows: no block where a row only wraps (the highlight stops at the text, one extra pixel at most)') (($rows -ge 3) -and ((Hl-Run $s 8 ($a[1] + 8)) -le ($len0 * $cell + 2))) ('rows ' + $rows + ', first row ' + $len0 + ' chars, highlight run ' + (Hl-Run $s 8 ($a[1] + 8)) + ' px, text ' + ($len0 * $cell) + ' px')
+    $brk = Ed-Pos $app $para.Length                                              # the paragraph's real line break
+    Ck 'T23.13 ... but the real line break at the end of the paragraph has its block' (Hl-At $s ($brk[0] + 3) ($brk[1] + $half)) ('no selection colour at ' + ($brk[0] + 3) + ',' + ($brk[1] + $half))
+    Cmd $app 'IDM_FMT_WRAP'                                                      # (back to the default for the direct paint checks)
+    Start-Sleep -Milliseconds 500
+
+    # ---- what the control left on the window itself
+    $ed = Get-Edit $app
+    Reset-Doc $app $t
+    $d = Ed-Direct $app 60 70
+    if (-not $d) { Skip 'T23.14-T23.23 the control''s direct painting' 'this exe has no WM_APP + 90 (build the probe: tools\probe.bat /DSHOTDC, run with -Exe build\probe\notepad-mint.exe)'; return }
+    $cell = (Ed-Pos $app 1)[0] - (Ed-Pos $app 0)[0]
+    $p0 = Ed-Pos $app 5; $p1 = Ed-Pos $app $st[1]
+    $x0 = $p0[0] + 3; $y0 = $p0[1] + $half; $y1 = $p1[1] + $half; $y2 = $y1 + $pitch
+    $xe = (Ed-Pos $app ($st[2] + 3))[0] + $cell + 3
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    $d = Ed-Direct $app 100 70
+    Ck 'T23.14 on the window itself (EM_SETSEL: the control paints it straight onto the window): blocks after "alpha" and on the empty line, none past "beta"' ((Px-Hl $d $x0 $y0) -and (Px-Hl $d ($p1[0] + 3) $y1) -and -not (Px-Hl $d $xe $y2)) ('alpha ' + (Px-Hl $d $x0 $y0) + ', empty ' + (Px-Hl $d ($p1[0] + 3) $y1) + ', beta ' + (Px-Hl $d $xe $y2))
+    Ck ('T23.15 ... the block on the empty line is ' + $cell + ' px wide') ((Direct-Run $d $p1[0] $y1) -eq $cell) ('run ' + (Direct-Run $d $p1[0] $y1))
+    [void](Snd $ed $EM_SETSEL 2 2)
+    $d = Ed-Direct $app 100 70
+    Ck 'T23.16 the selection collapses: the blocks are gone (not left behind on the window)' ((-not (Px-Hl $d $x0 $y0)) -and (-not (Px-Hl $d ($p1[0] + 3) $y1))) 'a block is still on the window'
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    [void](Snd $ed $EM_SETSEL 3 ($st[1] + 0))                                    # shrinks: the empty line's break is no longer selected
+    $d = Ed-Direct $app 100 70
+    Ck 'T23.17 the selection shrinks: the block on the line it no longer reaches is gone, the one on "alpha" stays' ((Px-Hl $d $x0 $y0) -and (-not (Px-Hl $d ($p1[0] + 3) $y1))) ('alpha ' + (Px-Hl $d $x0 $y0) + ', empty ' + (Px-Hl $d ($p1[0] + 3) $y1))
+    [void](Snd $ed $EM_SETSEL 0 $st[2])                                          # grows again
+    $d = Ed-Direct $app 100 70
+    Ck 'T23.18 ... and comes back when it grows again' ((Px-Hl $d $x0 $y0) -and (Px-Hl $d ($p1[0] + 3) $y1)) 'blocks missing'
+    [void](Snd $ed $EM_SETSEL 0 $st[1])                                          # ends at the start of the empty line: the break after "alpha" is the last thing selected
+    $d = Ed-Direct $app 100 70
+    $had = Px-Hl $d $x0 $y0
+    [void](Snd $ed $EM_SETSEL 0 5)                                               # now it stops right after "alpha": only the line break leaves the selection (a change without any width for the control)
+    $d = Ed-Direct $app 100 70
+    Ck 'T23.19 when only the line break leaves the selection, its block goes with it (the control repaints nothing visible for that change: our own cleanup)' ($had -and (-not (Px-Hl $d $x0 $y0))) ('block before ' + $had + ', after ' + (Px-Hl $d $x0 $y0))
+    [void](Snd $ed $EM_SETSEL 0 0)                                               # a mouse drag: down on "alpha", out to the last line, back
+    [void](Snd $ed 0x201 1 (([long]($p0[1] + 4) -shl 16) -bor [long]($p0[0] - 20)))
+    [void](Snd $ed 0x200 1 (([long]($p2[1] + 4) -shl 16) -bor [long]($p2[0] + 4)))
+    $d = Ed-Direct $app 100 70
+    Ck 'T23.20 dragging the selection down over the lines: blocks on the first two lines' ((Px-Hl $d $x0 $y0) -and (Px-Hl $d ($p1[0] + 3) $y1)) 'blocks missing while dragging'
+    [void](Snd $ed 0x200 1 (([long]($p0[1] + 4) -shl 16) -bor [long]($p0[0] - 10)))
+    $d = Ed-Direct $app 100 70
+    Ck 'T23.21 ... and dragging back up takes them away again' ((-not (Px-Hl $d $x0 $y0)) -and (-not (Px-Hl $d ($p1[0] + 3) $y1))) 'a block is left behind after dragging back'
+    [void](Snd $ed 0x202 0 (([long]($p0[1] + 4) -shl 16) -bor [long]($p0[0] - 10)))
+
+    $sb = New-Object Text.StringBuilder                                           # scrolling: every third line empty, 90 lines
+    for ($i = 1; $i -le 90; $i++) { if ($i % 3 -eq 0) { [void]$sb.Append("`r`n") } else { [void]$sb.Append('line ' + $i + "`r`n") } }
+    Reset-Doc $app $sb.ToString()
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    [void](Snd $ed 0xB6 0 7)                                                     # EM_LINESCROLL: seven rows down
+    $first = [int](Snd $ed 0xCE 0 0)                                             # EM_GETFIRSTVISIBLELINE
+    $d = Ed-Direct $app 100 400
+    $ok = $true; $why = ''
+    for ($r = $first; $r -lt $first + 12; $r++) {                                # an empty line is row r when (r + 1) % 3 == 0: its block must be there
+        $ci = [int](Snd $ed 0xBB $r 0)                                           # EM_LINEINDEX
+        $pp = Ed-Pos $app $ci
+        if ((($r + 1) % 3) -eq 0) { if (-not (Px-Hl $d ($pp[0] + 3) ($pp[1] + $half))) { $ok = $false; $why += ' row ' + $r + ' empty line has no block;' } }
+        elseif (-not (Px-HlAny $d $pp[0] ($pp[0] + $cell - 1) ($pp[1] + $half))) { $ok = $false; $why += ' row ' + $r + ' text has no highlight;' }       # (any pixel of the first cell: the first letter's ink may sit on a single probed one)
+    }
+    Ck ('T23.22 scrolled ' + $first + ' rows down with everything selected: every visible empty line has its block') $ok $why
+    [void](Snd $ed $EM_SETSEL 40 40)
+    $d = Ed-Direct $app 100 400
+    $any = $false
+    for ($r = $first; $r -lt $first + 12; $r++) { $pp = Ed-Pos $app ([int](Snd $ed 0xBB $r 0)); if (Px-Hl $d ($pp[0] + 3) ($pp[1] + $half)) { $any = $true } }
+    Ck 'T23.23 the selection collapses: the blocks of the scrolled view are all gone' (-not $any) 'a block is left on the window'
+}
+
+# =========================================================================================================== T24
+# files and folders dropped on the window go into the text as paths, at the caret (replacing a selection), one per line, plain. the drop is a WM_DROPFILES
+# with an HDROP built here (the system hands that handle to the app's process), what the shell posts after a real drop. shift held while dropping keeps the old
+# behaviour (open the files): that reads the real key state, which messages cannot set, so it is not tested here
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class Dp {
+    [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint f, UIntPtr n);
+    [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr h);
+    [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr h);
+    public static long Make(string[] paths) {                                    // an HDROP (DROPFILES + a double nul terminated list of wide strings)
+        StringBuilder sb = new StringBuilder();
+        foreach (string q in paths) { sb.Append(q); sb.Append('\0'); }
+        sb.Append('\0');
+        byte[] data = Encoding.Unicode.GetBytes(sb.ToString());
+        IntPtr h = GlobalAlloc(0x2042, new UIntPtr((uint)(20 + data.Length)));    // GHND
+        IntPtr p = GlobalLock(h);
+        Marshal.WriteInt32(p, 0, 20);                                             // pFiles
+        Marshal.WriteInt32(p, 16, 1);                                             // fWide
+        Marshal.Copy(data, 0, new IntPtr(p.ToInt64() + 20), data.Length);
+        GlobalUnlock(h);
+        return h.ToInt64();
+    }
+}
+'@
+function Drop-Paths($app, [string[]]$paths) { [void][U]::Post([long]$app.Main, 0x233, [long][Dp]::Make($paths), 0) }     # WM_DROPFILES
+function Test-T24 {
+    $app = Start-App
+    $ed = Get-Edit $app
+    $title0 = Title $app
+    $exe = 'C:\Windows\notepad.exe'
+    Reset-Doc $app 'ab'
+    [void](Snd $ed $EM_SETSEL 1 1)
+    Drop-Paths $app @($exe)
+    CkEdText 'T24.1 a file dropped on the window: its full path goes into the text at the caret (between "a" and "b")' $app ('a' + $exe + 'b')
+    $e = 1 + $exe.Length
+    CkSel 'T24.2 the caret ends up right after the inserted path' $app $e $e
+    Ck 'T24.3 nothing was opened: the window title is as it was, plus the change mark of the edit' (WaitFor { (Title $app) -match '^\*' } 3000) ('title [' + (Title $app) + '] (was [' + $title0 + '])')
+    [void](Snd $ed $EM_UNDO 0 0)
+    CkEdText 'T24.4 one undo takes the whole drop back' $app 'ab'
+
+    Reset-Doc $app 'axyzb'
+    [void](Snd $ed $EM_SETSEL 1 4)
+    Drop-Paths $app @('C:\Windows')
+    CkEdText 'T24.5 a folder works too, the selection is replaced, no backslash added: a, C:\Windows, b' $app 'aC:\Windowsb'
+
+    Reset-Doc $app ''
+    Drop-Paths $app @('C:\one\a.txt', 'C:\two words\b.txt', 'D:\three')
+    CkEdText 'T24.6 several items: one path per line, plain (no quotes, spaces kept), no line break after the last' $app ("C:\one\a.txt`r`nC:\two words\b.txt`r`nD:\three")
+
+    Reset-Doc $app 'x'
+    $jp = Chars @(0x30C6, 0x30B9, 0x30C8); $jf = Chars @(0x30D5, 0x30A1, 0x30A4, 0x30EB)
+    Reset-Doc $app ''
+    Drop-Paths $app @(('C:\' + $jp + '\' + $jf + '.txt'))
+    CkEdText 'T24.7 a path with non-ascii characters (katakana) comes through intact' $app ('C:\' + $jp + '\' + $jf + '.txt')
+
+    $long = 'C:\' + ('a' * 1500) + '\file.txt'
+    Reset-Doc $app ''
+    Drop-Paths $app @($long)
+    CkEdText ('T24.8 a path of ' + $long.Length + ' characters (longer than the old 1024 limit) is inserted whole') $app $long
+
+    Reset-Doc $app 'keep'
+    Drop-Paths $app @()
+    Start-Sleep -Milliseconds 300
+    CkEdText 'T24.9 an empty drop changes nothing' $app 'keep'
+
+    $sb = New-Object Text.StringBuilder                                           # the inserted text is scrolled into view
+    for ($i = 1; $i -le 150; $i++) { [void]$sb.Append('line ' + $i + "`r`n") }
+    Reset-Doc $app $sb.ToString()
+    [void](Snd $ed $EM_SETSEL 100000 100000)                                      # (the end; a message does not scroll)
+    $f0 = [int](Snd $ed 0xCE 0 0)
+    Drop-Paths $app @('C:\a', 'C:\b')
+    Ck 'T24.10 dropped at the end of a long document: the caret is scrolled into view (the view moved down)' (WaitFor { [int](Snd $ed 0xCE 0 0) -gt $f0 } 3000) ('first visible row stayed ' + $f0)
+    $t = Ed-Text $app
+    Ck 'T24.11 ... and the text ends with the two paths' ($t.EndsWith("C:\a`r`nC:\b")) ('tail [' + (Show $t.Substring([Math]::Max(0, $t.Length - 30))) + ']')
+}
+
+# =========================================================================================================== T25
+# partly visible rows (edit.c "partly visible rows"). the stock control draws whole rows only and rounds its formatting rectangle down to whole rows; below the
+# last whole row is a band (the bottom padding + what is left of the height) in which the app draws the next row(s), cut off at the editor's bottom edge.
+# the check is a comparison with the control itself: scroll one row, and the row that was cut off in the band is a whole row, drawn by the control: the band's
+# pixels must be those of the top of that row, exactly (PrintWindow of the main window both times: the repaint path, WM_PRINT -> WM_PRINTCLIENT).
+# T25.40+ read the window itself after the control scrolled / changed / was resized (the control paints straight onto its window): that needs the SHOTDC probe build
+# (tools\probe.bat /DSHOTDC, run with -Exe build\probe\notepad-mint.exe) and is skipped otherwise.
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+public static class Bx {
+    // w x h pixels of a (from ax, ay) against those of b (from bx, by): { different pixels, first x, first y (in the region), biggest channel difference }
+    public static int[] Diff(Bitmap a, int ax, int ay, Bitmap b, int bx, int by, int w, int h) {
+        BitmapData da = a.LockBits(new Rectangle(0, 0, a.Width, a.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        BitmapData db = b.LockBits(new Rectangle(0, 0, b.Width, b.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        int n = 0, fx = -1, fy = -1, mx = 0;
+        try {
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++) {
+                    int pa = Marshal.ReadInt32(da.Scan0, (ay + y) * da.Stride + (ax + x) * 4) & 0xFFFFFF;
+                    int pb = Marshal.ReadInt32(db.Scan0, (by + y) * db.Stride + (bx + x) * 4) & 0xFFFFFF;
+                    if (pa == pb) continue;
+                    n++;
+                    if (fx < 0) { fx = x; fy = y; }
+                    int d = Math.Max(Math.Abs(((pa >> 16) & 255) - ((pb >> 16) & 255)), Math.Max(Math.Abs(((pa >> 8) & 255) - ((pb >> 8) & 255)), Math.Abs((pa & 255) - (pb & 255))));
+                    if (d > mx) mx = d;
+                }
+        } finally { a.UnlockBits(da); b.UnlockBits(db); }
+        return new int[] { n, fx, fy, mx };
+    }
+    // pixels of the region of a that are not exactly colour c (0xRRGGBB): { count, first x, first y }
+    public static int[] NotColor(Bitmap a, int ax, int ay, int w, int h, int c) {
+        BitmapData da = a.LockBits(new Rectangle(0, 0, a.Width, a.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        int n = 0, fx = -1, fy = -1;
+        try {
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++) {
+                    int pa = Marshal.ReadInt32(da.Scan0, (ay + y) * da.Stride + (ax + x) * 4) & 0xFFFFFF;
+                    if (pa == c) continue;
+                    n++;
+                    if (fx < 0) { fx = x; fy = y; }
+                }
+        } finally { a.UnlockBits(da); }
+        return new int[] { n, fx, fy };
+    }
+    // the same for a binary ppm (what the SHOTDC probe writes: pw pixels wide, the pixels start at byte off, its first row is row py0 of the editor) against a bitmap:
+    // the region (x0, y0, w, h) of the editor, which is at (bx + x0, by + y0) of the bitmap
+    public static int[] DiffPpm(byte[] p, int off, int pw, int py0, Bitmap b, int bx, int by, int x0, int y0, int w, int h) {
+        BitmapData db = b.LockBits(new Rectangle(0, 0, b.Width, b.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        int n = 0, fx = -1, fy = -1, mx = 0;
+        try {
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++) {
+                    int k = off + ((y0 + y - py0) * pw + x0 + x) * 3;
+                    int pa = (p[k] << 16) | (p[k + 1] << 8) | p[k + 2];
+                    int pb = Marshal.ReadInt32(db.Scan0, (by + y0 + y) * db.Stride + (bx + x0 + x) * 4) & 0xFFFFFF;
+                    if (pa == pb) continue;
+                    n++;
+                    if (fx < 0) { fx = x; fy = y; }
+                    int d = Math.Max(Math.Abs(((pa >> 16) & 255) - ((pb >> 16) & 255)), Math.Max(Math.Abs(((pa >> 8) & 255) - ((pb >> 8) & 255)), Math.Abs((pa & 255) - (pb & 255))));
+                    if (d > mx) mx = d;
+                }
+        } finally { b.UnlockBits(db); }
+        return new int[] { n, fx, fy, mx };
+    }
+}
+'@
+function Band-Geo($app) {                                                        # where the whole rows end and the band begins (editor client coordinates), from what the control says about its rows
+    $ed = Get-Edit $app
+    $cr = [U]::CRect($ed)
+    $wrE = [U]::WRect($ed); $tr = Trim-Px $app
+    if (($wrE[2] - $wrE[0]) -eq $cr[2]) { $cr[2] -= $tr }                       # no vertical bar: the window's overhang is client area, out of sight (SBAR_TRIM)
+    if (($wrE[3] - $wrE[1]) -eq $cr[3]) { $cr[3] -= $tr }                       # ... and no horizontal bar
+    $first = [int](Snd $ed 0xCE 0 0)                                            # EM_GETFIRSTVISIBLELINE
+    $p0 = Ed-Pos $app ([int](Snd $ed 0xBB $first 0))                             # EM_LINEINDEX, EM_POSFROMCHAR
+    $p1 = Ed-Pos $app ([int](Snd $ed 0xBB ($first + 1) 0))
+    $pitch = $p1[1] - $p0[1]
+    $pad = $p0[1]                                                                # the top padding: where the first row starts (EDIT_PAD_TOP)
+    $bot = [int][Math]::Round($IDM.EDIT_PAD * ([U]::Dpi([long]$app.Main)) / 96, [MidpointRounding]::AwayFromZero)   # the bottom padding (EDIT_PAD): not the same as the top one
+    $rows = [int][Math]::Floor(($cr[3] - $pad - $bot) / $pitch)                  # the control keeps whole rows only
+    $top = $pad + $rows * $pitch
+    return @{ Ed = $ed; W = $cr[2]; H = $cr[3]; First = $first; Pad = $pad; Bot = $bot; Pitch = $pitch; Rows = $rows; Top = $top; BandH = ($cr[3] - $top) }
+}
+function Band-Cmp($app, [int]$j = 0, [bool]$noCaret = $false, [int]$tol = 0, [int]$tries = 1) {   # band row j against the same row drawn whole by the control (after scrolling j + 1 rows); $tol: the biggest difference of a colour channel that still counts as the same
+    $g = Band-Geo $app                                                           # $noCaret: the control is told it lost the focus (no caret: after the scroll the caret may be in a whole row, where it shows, in the band it never does; the selection stays visible)
+    $ya = $g.Top + $j * $g.Pitch                                                 # $tries: the control's OWN row is the flaky side with shaped / fallback-font text (the control draws a row without most of its glyphs now and then, also in the build without the band, measured):
+    $h = [Math]::Min($g.Pitch, $g.H - $ya)                                       # it is captured again, up to $tries times, until it is the same as the band's (an equal pair can not be a false pass)
+    if ($h -lt 1) { return $null }
+    if ($noCaret) { [void](Snd $g.Ed 0x8 0 0) }                                  # WM_KILLFOCUS
+    $a = Ed-Shot $app
+    $bgc = $a.Bmp.GetPixel($a.Ox + $g.W - 2, $a.Oy + $ya + 1)                   # the right padding: the background
+    $bg = ([int]$bgc.R -shl 16) -bor ([int]$bgc.G -shl 8) -bor [int]$bgc.B
+    $ink = [Bx]::NotColor($a.Bmp, $a.Ox, $a.Oy + $ya, $g.W, $h, $bg)
+    $d = $null
+    for ($k = 0; $k -lt $tries; $k++) {
+        [void](Snd $g.Ed 0xB6 0 ($j + 1))                                        # EM_LINESCROLL
+        $b = Ed-Shot $app
+        [void](Snd $g.Ed 0xB6 0 (-($j + 1)))
+        $d = [Bx]::Diff($a.Bmp, $a.Ox, $a.Oy + $ya, $b.Bmp, $b.Ox, $b.Oy + $g.Top - $g.Pitch, $g.W, $h)
+        $b.Bmp.Dispose()
+        if ($d[0] -eq 0 -or $d[3] -le $tol) { break }
+    }
+    if ($noCaret) { [void](Snd $g.Ed 0x7 0 0) }                                  # WM_SETFOCUS
+    $why = ('band row ' + $j + ' (' + $h + ' px of ' + $g.Pitch + ', ' + $g.Rows + ' whole rows, pad top ' + $g.Pad + ' bottom ' + $g.Bot + ') differs from the control''s own row in ' + $d[0] + ' px, first at x ' + $d[1] + ' y ' + $d[2] + ', biggest channel difference ' + $d[3] + '; ink px ' + $ink[0] + ' (' + ($k + 1) + ' tries)')
+    $a.Bmp.Dispose()
+    return @{ Same = (($d[0] -eq 0) -or ($d[3] -le $tol)); Ink = $ink[0]; Why = $why; G = $g }
+}
+function Band-Ck([string]$n, $app, [int]$j = 0, [bool]$blank = $false, [bool]$noCaret = $false, [int]$tol = 0, [int]$tries = 1) {   # a band row equals the whole row; $blank = the row is expected to have no ink at all
+    $r = Band-Cmp $app $j $noCaret $tol $tries
+    if (-not $r) { Fail $n 'there is no such band row (the band is too low)'; return }
+    $ok = $r.Same -and ($blank -or $r.Ink -gt 0)
+    Ck $n $ok $r.Why
+}
+function Band-Px($shot, [int]$x, [int]$y) {                                      # a pixel of a PrintWindow shot as 0xRRGGBB
+    $c = $shot.Bmp.GetPixel($x, $y)
+    return (([int]$c.R -shl 16) -bor ([int]$c.G -shl 8) -bor [int]$c.B)
+}
+function Band-Bg($app, [string]$n, [bool]$rtl = $false) {                        # the whole band is the plain background
+    $g = Band-Geo $app
+    $a = Ed-Shot $app
+    $ox = $a.Ox
+    if ($rtl) { $ew = [U]::WRect($g.Ed); $ox += ($ew[2] - $ew[0]) - $g.W }       # (the scroll bar is on the left: the client area starts after it)
+    $bg = Band-Px $a ($ox + $g.W - 2) ($a.Oy + $g.Top + 1)
+    $x = [Bx]::NotColor($a.Bmp, $ox, $a.Oy + $g.Top, $g.W, $g.BandH, $bg)
+    $a.Bmp.Dispose()
+    Ck $n ($x[0] -eq 0) ('the band (' + $g.BandH + ' px high) has ' + $x[0] + ' px that are not the background, first at x ' + $x[1] + ' y ' + $x[2])
+}
+function Band-Doc([int]$n, [string]$fill = '') {                                 # n numbered lines (distinct rows), each with the same filler
+    $sb = New-Object Text.StringBuilder
+    for ($i = 1; $i -le $n; $i++) { [void]$sb.Append('row ' + $i + ' the quick brown fox jumps over the lazy dog ' + ('x' * ($i % 7)) + $fill + "`r`n") }
+    return $sb.ToString()
+}
+function Band-Size($app, [int]$bandH) {                                          # resize the window until the band is $bandH px high (the editor's height follows the window's one for one; a band is the bottom padding plus less than a row)
+    $g = Band-Geo $app
+    $w = [U]::WRect([long]$app.Main)
+    $delta = $g.Pad + $g.Pitch * $g.Rows + $bandH - $g.H
+    if ($delta -ne 0) {
+        [void][Nd]::Size([long]$app.Main, ($w[2] - $w[0]), ($w[3] - $w[1] + $delta))
+        [void](WaitFor { (Band-Geo $app).BandH -eq $bandH } 3000)
+    }
+    return (Band-Geo $app)
+}
+function Test-T25 {
+    $app = Start-App
+    $ed = Get-Edit $app
+    $t = Band-Doc 120
+    $st = Line-Starts $t
+    Reset-Doc $app $t
+    $g = Band-Geo $app
+    $i = $g.First + $g.Rows                                                      # the line (= row) in the band
+    Info ('editor client ' + $g.W + ' x ' + $g.H + ', row pitch ' + $g.Pitch + ' px, ' + $g.Rows + ' whole rows, band ' + $g.BandH + ' px high (padding top ' + $g.Pad + ', bottom ' + $g.Bot + ')')
+    Ck 'T25.1 a document longer than the view leaves a band below the whole rows (at least the bottom padding)' ($g.BandH -ge $g.Bot -and $g.BandH -gt 0) ('band ' + $g.BandH + ' px')
+    Band-Ck 'T25.2 plain text: the band shows the top of the next row, pixel for pixel what the control draws when that row is whole' $app 0
+    [void](Snd $ed 0xB6 0 5)                                                     # scrolled: another row in the band
+    Band-Ck 'T25.3 ... after scrolling five rows too (the text under the band moves with it)' $app 0
+    [void](Snd $ed 0xB6 0 -5)
+
+    Reset-Doc $app (Band-Doc 120 ("`t" + 'tab' + "`t" + 'stops' + "`t" + '!'))
+    Band-Ck 'T25.4 tabs: the default tab stops, the same as the control''s' $app 0
+    foreach ($ts in 4, 2) {                                                      # format > tab size: the band's own rows follow the control's tab stops
+        Cmd $app ('IDM_TAB_' + $ts); Start-Sleep -Milliseconds 500
+        Band-Ck ('T25.4' + $(if ($ts -eq 4) { 'b' } else { 'c' }) + ' tab size ' + $ts + ': the same as the control''s') $app 0
+    }
+    Cmd $app 'IDM_TAB_8'; Start-Sleep -Milliseconds 500
+
+    $jp = Chars @(0x65E5, 0x672C, 0x8A9E, 0x306E, 0x30C6, 0x30B9, 0x30C8, 0x3067, 0x3059, 0xFF21, 0xFF22)       # kanji, hiragana, katakana, full width latin
+    Reset-Doc $app (Band-Doc 120 ($jp + ' ' + $jp))
+    Band-Ck 'T25.5 japanese text (wide characters, another font for them): the same as the control''s' $app 0 $false $false 0 4
+
+    Reset-Doc $app $t
+    [void](Snd $ed $EM_SETSEL ($st[$i] + 4) ($st[$i] + 12))
+    Band-Ck 'T25.6 a selection inside the band row: the highlight is the control''s own (colours, width)' $app 0 $false $true
+    [void](Snd $ed $EM_SETSEL ($st[$i - 2] + 6) ($st[$i + 1] + 5))
+    Band-Ck 'T25.7 a selection that runs through the band row (its line break is selected: a block after its text)' $app 0
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    Band-Ck 'T25.8 everything selected' $app 0
+    [void](Snd $ed $EM_SETSEL 0 0)
+
+    $lines = $t -split "`r`n"
+    $lines[$i] = ''                                                              # an empty line in the band
+    $tEmpty = $lines -join "`r`n"
+    $st2 = Line-Starts $tEmpty
+    Reset-Doc $app $tEmpty
+    [void](Snd $ed $EM_SETSEL $st2[$i - 1] ($st2[$i + 1] + 3))
+    Band-Ck 'T25.9 an empty line in the band, selected: its line break is a block, the same as the control draws' $app 0 $true
+
+    Reset-Doc $app (Band-Doc 120 (' ' + ('0123456789' * 30)))                    # long lines, scrolled sideways
+    [void](Snd $ed 0xB6 40 0)                                                    # EM_LINESCROLL: 40 columns to the right
+    Band-Ck 'T25.10 scrolled sideways: the band row is cut off at the same place and starts at the same column' $app 0
+    [void](Snd $ed $EM_SETSEL 3000 3400)
+    Band-Ck 'T25.11 ... with a selection' $app 0
+    [void](Snd $ed 0xB6 -100000 0)
+
+    Reset-Doc $app (Band-Doc 6)                                                  # nothing below the last whole row
+    Band-Bg $app 'T25.12 a document shorter than the view: the band is plain background'
+
+    $g = Band-Size $app ($g.Pitch + 6)                                           # a taller band: one whole row and 6 px of the next
+    Info ('window resized: client ' + $g.W + ' x ' + $g.H + ', band ' + $g.BandH + ' px high')
+    Reset-Doc $app $t
+    Band-Ck 'T25.13 a band over a row high: its first row' $app 0
+    Band-Ck 'T25.14 ... and the 6 px of the second row' $app 1
+    [void](Snd $ed $EM_SETSEL ($st[$i - 2] + 6) ($st[$i + 2] + 5))
+    Band-Ck 'T25.15 a selection through both band rows: the first (with its block) ...' $app 0
+    Band-Ck 'T25.16 ... and the second' $app 1
+    [void](Snd $ed $EM_SETSEL 0 0)
+
+    $g = Band-Size $app ($g.Pitch - 2)
+    $tEnd = $t.TrimEnd([char]13, [char]10)                                       # the last line has no line break after it
+    Reset-Doc $app $tEnd
+    $total = [int](Snd $ed 0xBA 0 0)                                             # EM_GETLINECOUNT
+    [void](Snd $ed 0xB6 0 ($total - $g.Rows - 1))                                # scrolled so that the last line is the band's first row
+    Info ('end of the document: first visible row ' + [int](Snd $ed 0xCE 0 0) + ' of ' + $total + ', ' + $g.Rows + ' whole rows')
+    Band-Ck 'T25.17 the last line of the document in the band' $app 0
+    [void](Snd $ed $EM_SETSEL 0 -1)
+    Band-Ck 'T25.18 ... all selected: no block after the last line (it has no line break)' $app 0 $false $true
+    [void](Snd $ed 0xB6 0 -100000)
+
+    Cmd $app 'IDM_THEME_LIGHT'
+    Start-Sleep -Milliseconds 400
+    Reset-Doc $app $t
+    [void](Snd $ed $EM_SETSEL ($st[$i] + 2) ($st[$i + 1] + 3))
+    Band-Ck 'T25.19 the light theme (black on white, the same highlight)' $app 0
+    Cmd $app 'IDM_THEME_DARK'
+    Start-Sleep -Milliseconds 400
+
+    for ($z = 0; $z -lt 4; $z++) { Cmd $app 'IDM_ZOOM_IN'; Start-Sleep -Milliseconds 150 }
+    Start-Sleep -Milliseconds 300
+    Reset-Doc $app $t
+    $g = Band-Geo $app
+    Info ('zoomed in: row pitch ' + $g.Pitch + ' px, ' + $g.Rows + ' whole rows, band ' + $g.BandH + ' px')
+    Band-Ck 'T25.20 zoomed in (a bigger font: the band row follows it)' $app 0
+    Cmd $app 'IDM_ZOOM_RESET'
+    Start-Sleep -Milliseconds 300
+
+    Cmd $app 'IDM_FMT_WRAP'                                                      # word wrap on: the control is re-created
+    Start-Sleep -Milliseconds 500
+    $ed = Get-Edit $app
+    $para = ('wrapping words go on and on ' * 14).TrimEnd()
+    $sb = New-Object Text.StringBuilder
+    for ($k = 1; $k -le 60; $k++) { [void]$sb.Append($k.ToString() + ' ' + $para + "`r`n") }
+    Reset-Doc $app $sb.ToString()
+    Band-Ck 'T25.21 word wrap on (rows of wrapped lines): the band shows the next row of the paragraph' $app 0
+    [void](Snd $ed $EM_SETSEL 20 700)
+    Band-Ck 'T25.22 ... with a selection over several rows (a soft wrap has no line break block)' $app 0
+    Cmd $app 'IDM_FMT_WRAP'
+    Start-Sleep -Milliseconds 500
+    $ed = Get-Edit $app
+
+    Reset-Doc $app $t
+    Cmd $app 'IDM_RTL'                                                           # a right to left editor keeps its blank band
+    Start-Sleep -Milliseconds 400
+    Band-Bg $app 'T25.23 right to left: the band stays plain background (its rows are not drawn there)' $true
+    Cmd $app 'IDM_RTL'
+    Start-Sleep -Milliseconds 400
+    Band-Ck 'T25.24 ... and left to right again: the band is back' $app 0
+
+    $ar = Chars @(0x0627, 0x0644, 0x0639, 0x0631, 0x0628, 0x064A, 0x0629)         # arabic: shaped and reordered by the language pack, the same call draws it in the band
+    $td = Band-Doc 120 (' ' + $ar + ' ' + $ar); $sd = Line-Starts $td
+    Reset-Doc $app $td
+    Band-Ck 'T25.25 a row with arabic in it, nothing selected: the same as the control''s' $app 0 $false $false 0 8
+    $he = Chars @(0x05E9, 0x05DC, 0x05D5, 0x05DD)
+    $td2 = Band-Doc 120 (' abc ' + $he + ' def'); Reset-Doc $app $td2
+    Band-Ck 'T25.26 hebrew between latin words (two directions in one row)' $app 0 $false $false 0 8
+    Reset-Doc $app $td
+    $p = $td.IndexOf($ar[0], $sd[$i])
+    [void](Snd $ed $EM_SETSEL ($p + 1) ($p + 4))
+    Band-Bg $app 'T25.27 ... with part of the arabic selected the row stays blank (the highlight in reordered text is not a rectangle to measure)'
+    [void](Snd $ed $EM_SETSEL 0 0)
+    $pf = Chars @(0xFB50, 0xFE80, 0xFEFB)                                          # arabic presentation forms: plain GDI draws them differently
+    Reset-Doc $app (Band-Doc 120 (' ' + $pf))
+    Band-Bg $app 'T25.28 a row with presentation forms stays blank'
+    $th = Chars @(0x0E2A, 0x0E27, 0x0E31, 0x0E2A, 0x0E14, 0x0E35)                 # thai: shaped, but left to right
+    $td = Band-Doc 120 (' ' + $th + ' ' + $th); $sd = Line-Starts $td
+    Reset-Doc $app $td
+    Band-Ck 'T25.29 thai: the same as the control''s' $app 0 $false $false 0 8
+    $p = $td.IndexOf($th[0], $sd[$i])
+    [void](Snd $ed $EM_SETSEL ($p + 1) ($p + 4))
+    Band-Ck 'T25.30 ... with part of it selected (the control draws the text of a shaped row inside the highlight another way: up to one level of one colour channel off)' $app 0 $false $true 1 8
+    $dv = Chars @(0x0928, 0x092E, 0x0938, 0x094D, 0x0924, 0x0947)                 # devanagari
+    $td = Band-Doc 120 (' ' + $dv + ' ' + $dv); $sd = Line-Starts $td
+    Reset-Doc $app $td
+    Band-Ck 'T25.31 devanagari: the same as the control''s' $app 0 $false $false 0 8
+
+    $acc = Chars @(0x00E9, 0x00FC, 0x00F1, 0x00DF, 0x03B1, 0x03B2, 0x0416, 0x0434)                              # e acute, u umlaut, n tilde, sharp s, alpha, beta, zhe, de
+    Reset-Doc $app (Band-Doc 120 (' ' + $acc))
+    Band-Ck 'T25.32 accented latin, greek and cyrillic: the same as the control''s' $app 0 $false $false 0 4
+    $cmb = 'e' + (Chars @(0x0301)) + 'a' + (Chars @(0x0308)) + 'o' + (Chars @(0x0302, 0x0323))                    # letters with combining accents
+    Reset-Doc $app (Band-Doc 120 (' ' + $cmb))
+    Band-Ck 'T25.33 combining accents' $app 0 $false $false 0 4
+    $emo = Chars @(0xD83D, 0xDE00, 0x0020, 0xD83C, 0xDF89)                                                        # two emoji (surrogate pairs)
+    Reset-Doc $app (Band-Doc 120 (' ' + $emo))
+    Band-Ck 'T25.34 emoji (surrogate pairs)' $app 0 $false $false 0 8
+    $odd = Chars @(0xFF71, 0xFF72, 0xFF73, 0x0001, 0x2026, 0x2014, 0x00A0, 0x3000, 0x2603)                       # half width katakana, a control character (a box), ellipsis, dash, no-break space, ideographic space, snowman
+    Reset-Doc $app (Band-Doc 120 (' ' + $odd))
+    Band-Ck 'T25.35 half width katakana, a control character, punctuation, spaces of other widths, a symbol' $app 0 $false $false 0 4
+
+    # ---- the window's own pixels (the control paints straight onto its window, and scrolling moves only the rows)
+    Reset-Doc $app $t
+    $ed = Get-Edit $app
+    $d = Ed-Direct $app 8 8
+    if (-not $d) { Skip 'T25.40-T25.46 the window itself after scrolls, edits and resizes' 'this exe has no WM_APP + 90 (build the probe: tools\probe.bat /DSHOTDC, run with -Exe build\probe\notepad-mint.exe)'; return }
+    $script:bandDirect = { param($name, $app)                                    # the band on the window against the band of a repaint (PrintWindow) of the same state
+        $g = Band-Geo $app
+        $dd = Ed-Direct $app $g.W $g.BandH $g.Top
+        $s = Ed-Shot $app
+        $r = [Bx]::DiffPpm($dd.B, $dd.Off, $dd.W, $dd.Y0, $s.Bmp, $s.Ox, $s.Oy, 0, $g.Top, $g.W, $g.BandH)
+        $s.Bmp.Dispose()
+        Ck $name ($r[0] -eq 0) ('the band on the window differs from a repaint in ' + $r[0] + ' px, first at x ' + $r[1] + ' y ' + $r[2] + ' (in the band), biggest channel difference ' + $r[3])
+    }
+    [void](Snd $ed $EM_SETSEL ($st[$i] + 3) ($st[$i] + 9))
+    & $script:bandDirect 'T25.40 the window as painted: the band is what a repaint gives' $app
+    [void](Snd $ed 0xB6 0 3)                                                     # EM_LINESCROLL: the control moves the rows, the band's text changes
+    & $script:bandDirect 'T25.41 after EM_LINESCROLL (three rows down) the band on the window shows the new row' $app
+    Pst $ed 0x115 1 0                                                            # WM_VSCROLL SB_LINEDOWN
+    Start-Sleep -Milliseconds 200
+    & $script:bandDirect 'T25.42 after a scroll bar message (one row down)' $app
+    [void](Snd $ed 0x20A ((([long](-120)) -band 0xFFFF) -shl 16) 0)               # WM_MOUSEWHEEL, one notch down (no keys)
+    Start-Sleep -Milliseconds 200
+    & $script:bandDirect 'T25.43 after a mouse wheel notch' $app
+    [void](Snd $ed $EM_SETSEL 0 0)
+    [void][U]::SndStr($ed, $EM_REPLACESEL, 1, "new first line`r`n")             # an extra line at the top: every row below moves down one
+    & $script:bandDirect 'T25.44 after a line was inserted above (every row moved)' $app
+    [void](Snd $ed $EM_SETSEL ($st[$i] + 1) ($st[$i + 1] + 4))
+    & $script:bandDirect 'T25.45 after the selection was changed into the band rows' $app
+    [void](Snd $ed $EM_SETSEL 100000 100000)                                     # (the caret out of view: nothing of it on the window)
+    $w0 = [U]::WRect([long]$app.Main)
+    $ok = $true; $why = ''
+    foreach ($dh in @(-37, 21, 53, -9, 14)) {                                    # resize steps: the window shrinks and grows
+        $wc = [U]::WRect([long]$app.Main)
+        [void][Nd]::Size([long]$app.Main, ($w0[2] - $w0[0]), ($wc[3] - $wc[1] + $dh))
+        Start-Sleep -Milliseconds 300
+        $g = Band-Geo $app
+        $y0 = $g.Top - 2 * $g.Pitch                                              # the last two whole rows and the band
+        $dd = Ed-Direct $app $g.W ($g.H - $y0) $y0
+        $s = Ed-Shot $app
+        $r = [Bx]::DiffPpm($dd.B, $dd.Off, $dd.W, $dd.Y0, $s.Bmp, $s.Ox, $s.Oy, 0, $y0, $g.W, $g.H - $y0)
+        $s.Bmp.Dispose()
+        if ($r[0] -ne 0) { $ok = $false; $why += ' height ' + $g.H + ': ' + $r[0] + ' px differ (first x ' + $r[1] + ' y ' + $r[2] + ' from row ' + $y0 + ');' }
+    }
+    Ck 'T25.46 after resizing the window five times the last rows and the band on the window are what a repaint gives (nothing stale is left in or around the band)' $ok $why
+}
+
+# =========================================================================================================== T26
+# ctrl+k = edit > clear line: the caret's logical line loses its text, keeps its line break, one undo step. like ctrl+w / alt+z (T21) the accelerator
+# needs real keyboard state: the table entry, the menu label and the help line are checked in the sources / the help window, the command runs here
+function Test-T26 {
+    $main = [IO.File]::ReadAllText((Join-Path $Src 'main.c'))
+    $menu = [IO.File]::ReadAllText((Join-Path $Src 'menu.c'))
+    Ck 'T26.1 the accelerator table maps ctrl+k to clear line' ($main -match 'FVIRTKEY\s*\|\s*FCONTROL\s*,\s*''K''\s*,\s*IDM_EDIT_CLEARLINE\s*\}') 'no { FVIRTKEY | FCONTROL, ''K'', IDM_EDIT_CLEARLINE } entry in src\main.c'
+    Ck 'T26.2 edit > clear line shows "ctrl+k" as its shortcut' ($menu -match 'IT\(L"cl&ear line",\s*L"ctrl\+k",\s*IDM_EDIT_CLEARLINE\)') 'the clear line item in src\menu.c has no ctrl+k label'
+    $app = Start-App
+    Cmd $app 'IDM_HELP_TOPICS'
+    $h = Wait-Win $app 'mp_help' 'help topics'
+    $t = ''
+    foreach ($k in [U]::Kids($h)) { if ([U]::Cls($k) -eq 'Edit') { $t = [U]::GetText($k) } }
+    Ck 'T26.3 the help topics list ctrl+k (clear the current line)' ($t -match 'ctrl\+k\s+clear the current line') ('help text [' + (Show $t) + ']')
+    Pst $h $WM_CLOSE 0 0
+    [void](Gone $h)
+
+    $ed = Get-Edit $app
+    Reset-Doc $app "alpha`r`nbeta`r`ngamma"
+    [void](Snd $ed $EM_SETSEL 9 9)                                               # inside "beta" (line 2 starts at 7)
+    Cmd $app 'IDM_EDIT_CLEARLINE'
+    CkEdText 'T26.4 a middle line: its text is gone, the line (and the breaks around it) stay' $app "alpha`r`n`r`ngamma"
+    CkSel 'T26.5 ... and the caret sits at the start of that line' $app 7 7
+    Ck 'T26.6 ... the document is modified' ([bool](WaitFor { Ed-Modified $app } 2000)) 'EM_GETMODIFY is 0'
+    [void](Snd $ed $EM_UNDO 0 0)
+    CkEdText 'T26.7 one undo brings the whole line back' $app "alpha`r`nbeta`r`ngamma"
+
+    Reset-Doc $app "one`r`ntwo"
+    [void](Snd $ed $EM_SETSEL 8 8)                                               # the end of the last line (no line break after it)
+    Cmd $app 'IDM_EDIT_CLEARLINE'
+    CkEdText 'T26.8 the last line (no line break after it): cleared, the break before it stays' $app "one`r`n"
+    CkSel 'T26.9 ... the caret is at the start of the now empty last line' $app 5 5
+    Reset-Doc $app "one`r`ntwo"
+    Cmd $app 'IDM_EDIT_CLEARLINE'                                                # the caret is at 0: the first line
+    CkEdText 'T26.10 the first line' $app "`r`ntwo"
+    CkSel 'T26.11 ... the caret stays at 0' $app 0 0
+
+    Reset-Doc $app "one`r`n`r`ntwo"
+    [void](Snd $ed $EM_SETSEL 5 5)                                               # on the empty line 2
+    Cmd $app 'IDM_EDIT_CLEARLINE'
+    Start-Sleep -Milliseconds 250
+    CkEdText 'T26.12 an empty line: nothing changes' $app "one`r`n`r`ntwo"
+    Ck 'T26.13 ... the document stays clean and the caret stays where it was' ((-not (Ed-Modified $app)) -and (Wait-Sel $ed 5 5)) ('modified ' + (Ed-Modified $app) + ', selection ' + $script:lastSel)
+
+    $emoji = [char]::ConvertFromUtf32(0x1F600)
+    $cjk = -join ([char]0x65E5, [char]0x672C, [char]0x8A9E)
+    Reset-Doc $app ($emoji + $cjk + "abc`t d`r`nx")
+    [void](Snd $ed $EM_SETSEL 3 3)
+    Cmd $app 'IDM_EDIT_CLEARLINE'
+    CkEdText 'T26.14 surrogate pairs, cjk, a tab: the whole line goes' $app "`r`nx"
+
+    Reset-Doc $app "aa`r`nbb`r`ncc"
+    [void](Snd $ed $EM_SETSEL 1 6)                                               # a selection from line 1 into line 2: the caret is at its end, in line 2
+    Cmd $app 'IDM_EDIT_CLEARLINE'
+    CkEdText 'T26.15 a selection over two lines: the line of the caret (what the status bar shows) is cleared, line 1 stays' $app "aa`r`n`r`ncc"
+    CkSel 'T26.16 ... and the selection is gone, the caret at the start of that line' $app 4 4
+
+    Cmd $app 'IDM_FMT_WRAP'                                                      # word wrap on: the control is re-created
+    Start-Sleep -Milliseconds 500
+    $ed = Get-Edit $app
+    $para = ('wrapping words go on and on ' * 14).TrimEnd()                      # one logical line, several rows
+    Reset-Doc $app ($para + "`r`nnext")
+    [void](Snd $ed $EM_SETSEL 300 300)
+    Ck 'T26.17 word wrap on: the caret is in a later row of a wrapped paragraph' ((Snd $ed $EM_LINEFROMCHAR 300 0) -ge 2) ('the caret is in row ' + (Snd $ed $EM_LINEFROMCHAR 300 0))
+    Cmd $app 'IDM_EDIT_CLEARLINE'
+    CkEdText 'T26.18 ... the whole paragraph is cleared (a wrapped row is not a line), the next line stays' $app "`r`nnext"
+    CkSel 'T26.19 ... the caret is at the start of the paragraph' $app 0 0
+    Cmd $app 'IDM_FMT_WRAP'                                                      # back to the default (off)
+    Start-Sleep -Milliseconds 500
+}
+
+# =========================================================================================================== T28
+# the theme button, the right-most of the two buttons at the right end of the menu bar (menu.c "theme button"): no frame, no fill, no sunken state. its icon is the theme in use (a moon
+# in the dark theme, a sun in the light one), so a click just swaps the icons. the icon is BAR_BTN_OPACITY percent opaque (20) at rest and fully opaque, with the
+# accent behind it, while hovered. a hover can only be looked at in the probe build (tools\probe.bat /DMENU_NO_TRACK: the bar asks the system for a mouse-leave message
+# and the system, finding the real pointer elsewhere, sends it at once, which ends a synthetic hover before anything can look at it): skipped otherwise
+function Bar-Geo($app) {                                                         # the bar and its two buttons: the theme button is the last BAR_BTN_W px of the bar, the word wrap button the BAR_BTN_W px before it (dpi scaled); Off = how far the button we look at is from the right edge (0 = the theme button; T29 sets Bw: the wrap button); Ox / Oy = where the bar starts in a PrintWindow shot of the main window
+    $bar = Chrome-Kid $app 'mp_menubar'
+    $dpi = [U]::Dpi([long]$app.Main)
+    $r = [U]::WRect($bar); $w = [U]::WRect([long]$app.Main)
+    return @{ Bar = $bar; W = ($r[2] - $r[0]); H = ($r[3] - $r[1]); Bw = [int][Math]::Round($IDM.BAR_BTN_W * $dpi / 96, [MidpointRounding]::AwayFromZero); Ox = ($r[0] - $w[0]); Oy = ($r[1] - $w[1]); Off = 0 }
+}
+function Btn-Look1($app, $g, $bg) {                                              # one shot of the button as PrintWindow shows it: the pixels that differ from $bg, the one that differs most (and its colour), whether the rim of the button is plain $bg
+    $bmp = [U]::Grab([long]$app.Main)
+    try {
+        $x0 = $g.W - $g.Bw - $g.Off
+        $mask = New-Object 'bool[]' ($g.Bw * $g.H)
+        $best = 0; $bc = @(0, 0, 0); $rim = $true; $n = 0
+        for ($y = 0; $y -lt $g.H - 1; $y++) {                                    # (the bar's last row is a 1 px margin under the button: always bar colour)
+            for ($x = 0; $x -lt $g.Bw; $x++) {
+                $c = $bmp.GetPixel($g.Ox + $x0 + $x, $g.Oy + $y)
+                $d = [Math]::Abs([int]$c.R - $bg[0]) + [Math]::Abs([int]$c.G - $bg[1]) + [Math]::Abs([int]$c.B - $bg[2])
+                if ($d -gt 12) { $mask[$y * $g.Bw + $x] = $true; $n++ }
+                if ($d -gt $best) { $best = $d; $bc = @([int]$c.R, [int]$c.G, [int]$c.B) }
+                if (($x -lt 3 -or $x -ge $g.Bw - 3 -or $y -lt 3 -or $y -ge $g.H - 4) -and $d -gt 3) { $rim = $false }
+            }
+        }
+        return @{ Mask = $mask; Count = $n; Best = $bc; Rim = $rim; Bw = $g.Bw; H = $g.H }
+    } finally { $bmp.Dispose() }
+}
+function Btn-Look($app, $g, $bg) {                                               # the same, but a window that has only just started can still show an unpainted (all black) button in its first shots: look again, for up to 3 s, until the rim is plain bar colour. a real frame or fill stays wrong and fails after the 3 s
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    do { $l = Btn-Look1 $app $g $bg; if ($l.Rim) { break }; Start-Sleep -Milliseconds 150 } while ($sw.ElapsedMilliseconds -lt 3000)
+    return $l
+}
+function Look-Asym($look) {                                                      # the pixels of the icon whose mirror image (in the icon's own bounding box) is not part of it: ~0 for the sun, many for the moon
+    $minx = 9999; $maxx = -1
+    for ($y = 0; $y -lt $look.H; $y++) { for ($x = 0; $x -lt $look.Bw; $x++) { if ($look.Mask[$y * $look.Bw + $x]) { if ($x -lt $minx) { $minx = $x }; if ($x -gt $maxx) { $maxx = $x } } } }
+    $miss = 0
+    for ($y = 0; $y -lt $look.H; $y++) { for ($x = $minx; $x -le $maxx; $x++) { if ($look.Mask[$y * $look.Bw + $x] -ne $look.Mask[$y * $look.Bw + ($minx + $maxx - $x)]) { $miss++ } } }
+    return $miss
+}
+function Mix-Rgb($bg, $fg, [int]$pct) { , @(0, 1, 2 | ForEach-Object { [int][Math]::Round($bg[$_] + ($fg[$_] - $bg[$_]) * $pct / 100) }) }
+function Near-Rgb($a, $b, [int]$tol) { [Math]::Abs($a[0] - $b[0]) -le $tol -and [Math]::Abs($a[1] - $b[1]) -le $tol -and [Math]::Abs($a[2] - $b[2]) -le $tol }
+function Bar-Click($g, [int]$x) { $y = [int]($g.H / 2); Mouse $g.Bar 0x201 $x $y 1; Mouse $g.Bar 0x202 $x $y 0 }   # WM_LBUTTONDOWN + WM_LBUTTONUP at bar client x
+function Test-T28 {
+    $pal = Read-Palette
+    if (-not $pal) { Skip 'T28 theme button' 'could not parse the g_themes palette table in src\ui.c'; return }
+    $op = $IDM.BAR_BTN_OPACITY
+    $app = Start-App                                                             # dark: the moon
+    $g = Bar-Geo $app
+    $edit0 = Get-Edit $app                                                       # (a click on the theme button must not toggle word wrap: that re-creates the editor)
+    Ck 'T28.1 the bar has room for the menus and the button (a 900 px window)' ($g.W -gt 3 * $g.Bw) ('bar ' + $g.W + ' px wide, button ' + $g.Bw)
+    $rest = $pal.dark.face
+    $look = Btn-Look $app $g $rest
+    Ck 'T28.2 dark theme: an icon is there, and nothing else: the rim of the button is plain bar colour (no frame, no fill, no sunken state)' (($look.Count -gt 20) -and ($look.Count -lt 200) -and $look.Rim) ('differing pixels ' + $look.Count + ', rim plain ' + $look.Rim)
+    $want = Mix-Rgb $rest $pal.dark.text $op
+    Ck ('T28.3 ... drawn at ' + $op + '% opacity: its strongest pixel is that share of the text colour over the bar colour') (Near-Rgb $look.Best $want 4) ('strongest pixel rgb(' + ($look.Best -join ',') + '), wanted about rgb(' + ($want -join ',') + ')')
+    $asymMoon = Look-Asym $look
+    Ck 'T28.4 ... and it is the moon (a crescent is not mirror symmetric)' ($asymMoon -gt 12) ('mirror mismatches ' + $asymMoon)
+
+    Bar-Click $g ($g.W - $g.Off - [int]($g.Bw / 2))                                       # the middle of the button
+    CkEq 'T28.5 a click on the button switches to the light theme (settings.ini: theme=light)' 'light' (Ini-Val $app 'view' 'theme' 'light')
+    Ck 'T28.5b ... it is the theme button, not the word wrap one (word wrap would have re-created the editor: it is still the same window)' ((Get-Edit $app) -eq $edit0) 'the editor was re-created: the click toggled word wrap'
+    Start-Sleep -Milliseconds 400
+    $rest = $pal.light.face
+    $look = Btn-Look $app $g $rest
+    Ck 'T28.6 light theme: the same one button, nothing around the icon' (($look.Count -gt 20) -and ($look.Count -lt 250) -and $look.Rim) ('differing pixels ' + $look.Count + ', rim plain ' + $look.Rim)
+    $want = Mix-Rgb $rest $pal.light.text $op
+    Ck ('T28.7 ... also at ' + $op + '% opacity') (Near-Rgb $look.Best $want 4) ('strongest pixel rgb(' + ($look.Best -join ',') + '), wanted about rgb(' + ($want -join ',') + ')')
+    $asymBulb = Look-Asym $look
+    Ck 'T28.8 ... and the icon is now the sun (mirror symmetric: the moon was not)' (($asymBulb -le 4) -and ($asymBulb -lt $asymMoon)) ('mirror mismatches: sun ' + $asymBulb + ', moon was ' + $asymMoon)
+
+    Bar-Click $g ($g.W - 2 * $g.Bw - 6)                                              # just left of the two buttons: free bar, nothing there
+    Start-Sleep -Milliseconds 500
+    CkEq 'T28.9 a click just left of the two buttons (free bar) does nothing: still the light theme' 'light' (Ini-Val $app 'view' 'theme' 'light' 300)
+        Start-Sleep -Milliseconds 500
+    Bar-Click $g ($g.W - $g.Off - 3)                                                      # the very right edge: still the button
+    CkEq 'T28.10 the button reaches the right edge of the bar: a click 3 px from it switches back to dark' 'dark' (Ini-Val $app 'view' 'theme' 'dark')
+    Start-Sleep -Milliseconds 400
+    $look = Btn-Look $app $g $pal.dark.face
+    Ck 'T28.11 and the icon is the moon again' ((Look-Asym $look) -gt 12) ('mirror mismatches ' + (Look-Asym $look))
+
+    $mark = [long](Snd $g.Bar (0x8000 + 91) 0 0)                                 # WM_APP + 91: only the probe build answers
+    if ($mark -ne 0x4D494E54) { Skip 'T28.12-T28.18 the hover' 'this exe has no WM_APP + 91 (build the probe: tools\probe.bat /DSHOTDC /DMENU_NO_TRACK, run with -Exe build\probe\notepad-mint.exe)'; return }
+    $y = [int]($g.H / 2)
+    foreach ($th in @('dark', 'light')) {
+        if ($th -eq 'light') { Bar-Click $g ($g.W - $g.Off - [int]($g.Bw / 2)); [void](Ini-Val $app 'view' 'theme' 'light'); Start-Sleep -Milliseconds 400; Mouse $g.Bar 0x200 100 $y 0 }
+        $p = $pal.$th
+        Mouse $g.Bar 0x200 ($g.W - $g.Off - [int]($g.Bw / 2)) $y 0                        # the pointer moves onto the button
+        Start-Sleep -Milliseconds 300
+        $look = Btn-Look $app $g $p.accent
+        $why = 'differing pixels ' + $look.Count + ', rim plain ' + $look.Rim + ', strongest rgb(' + ($look.Best -join ',') + ')'
+        Ck ('T28.12 ' + $th + ': hovered, the button is filled with the accent (the same as a hovered menu) ...') ($look.Rim -and $look.Count -gt 20 -and $look.Count -lt 250) $why
+        Ck ('T28.13 ' + $th + ': ... and the icon is at full strength in the on-accent colour, not faded') (Near-Rgb $look.Best $p.onAccent 2) $why
+        Mouse $g.Bar 0x200 ($g.W - 2 * $g.Bw - 40) $y 0                              # away from it (free bar)
+        Start-Sleep -Milliseconds 300
+        $look = Btn-Look $app $g $p.face
+        $want = Mix-Rgb $p.face $p.text $op
+        Ck ('T28.14 ' + $th + ': the pointer left: the accent is gone and the icon is back to ' + $op + '%') ($look.Rim -and (Near-Rgb $look.Best $want 4)) ('rim plain ' + $look.Rim + ', strongest rgb(' + ($look.Best -join ',') + '), wanted about rgb(' + ($want -join ',') + ')')
+    }
+    Mouse $g.Bar 0x200 ($g.W - $g.Off - [int]($g.Bw / 2)) $y 0                            # hover, then click: the new icon comes up already hovered (light -> dark here)
+    Bar-Click $g ($g.W - $g.Off - [int]($g.Bw / 2))
+    [void](Ini-Val $app 'view' 'theme' 'dark')
+    Start-Sleep -Milliseconds 400
+    $look = Btn-Look $app $g $pal.dark.accent
+    Ck 'T28.15 clicking while hovered: the other icon comes up at full strength on the accent (dark: the moon in the on-accent colour)' ($look.Rim -and (Near-Rgb $look.Best $pal.dark.onAccent 2) -and ((Look-Asym $look) -gt 12)) ('rim plain ' + $look.Rim + ', strongest rgb(' + ($look.Best -join ',') + '), mirror mismatches ' + (Look-Asym $look))
+    Mouse $g.Bar 0x200 100 $y 0
+}
+
+# =========================================================================================================== T29
+# the word wrap button: the left one of the menu bar's two buttons (the theme button is flush right, right of it). one click = alt+z (word wrap on / off); its icon is
+# BAR_BTN_OPACITY percent opaque while wrap is off and BAR_BTN_OPACITY_ON while it is on. and the resize: the edit re-wraps once per size, a drag of a big
+# wrapped document does not block for it every step (the last size gets its wrap after a pause)
+function Test-T29 {
+    $pal = Read-Palette
+    $app = Start-App
+    $g = Bar-Geo $app
+    $g.Off = $g.Bw                                                                  # the wrap button is the one left of the theme button
+    $edit0 = Get-Edit $app
+    $look0 = Btn-Look $app $g $pal.dark.face
+    Ck 'T29.1 word wrap off: an icon at the very right, nothing around it' (($look0.Count -gt 15) -and $look0.Rim) ('differing pixels ' + $look0.Count + ', rim plain ' + $look0.Rim)
+    $want = Mix-Rgb $pal.dark.face $pal.dark.text $IDM.BAR_BTN_OPACITY
+    Ck 'T29.2 ... drawn at the resting opacity' (Near-Rgb $look0.Best $want 4) ('strongest pixel rgb(' + ($look0.Best -join ',') + '), wanted about rgb(' + ($want -join ',') + ')')
+    if ([U]::Dpi([long]$app.Main) -eq 96) {                                      # (the rows of the icon are worked out here for 96 dpi)
+        $row0 = -1
+        for ($y = 0; $y -lt $look0.H -and $row0 -lt 0; $y++) { for ($x = 0; $x -lt $look0.Bw; $x++) { if ($look0.Mask[$y * $look0.Bw + $x]) { $row0 = $y; break } } }
+        $wantRow = [int][Math]::Floor(($g.H - 1 - $IDM.BAR_BTN_ICON) / 2) + $IDM.BAR_WRAP_ICON_DY + 1
+        Ck 'T29.2b ... and it sits BAR_WRAP_ICON_DY px below the middle of its button (first icon row = the box centred in the button + the offset + 1: the first line is the second row of the box)' ($row0 -eq $wantRow) ('first icon row ' + $row0 + ' px below the top of the bar, wanted ' + $wantRow)
+    }
+    Bar-Click $g ($g.W - $g.Off - [int]($g.Bw / 2))
+    Start-Sleep -Milliseconds 700
+    Ck 'T29.3 a click switches word wrap on (the editor was re-created: another window)' ((Get-Edit $app) -ne $edit0) 'the editor is the same window'
+    $look = Btn-Look $app $g $pal.dark.face
+    $want = Mix-Rgb $pal.dark.face $pal.dark.text $IDM.BAR_BTN_OPACITY_ON
+    Ck 'T29.4 ... and the icon is brighter now (word wrap on)' (Near-Rgb $look.Best $want 4) ('strongest pixel rgb(' + ($look.Best -join ',') + '), wanted about rgb(' + ($want -join ',') + ')')
+    Bar-Click $g ($g.W - $g.Off - [int]($g.Bw / 2))
+    Start-Sleep -Milliseconds 700
+    $look = Btn-Look $app $g $pal.dark.face
+    $want = Mix-Rgb $pal.dark.face $pal.dark.text $IDM.BAR_BTN_OPACITY
+    Ck 'T29.5 a second click switches it off again: the resting opacity' (Near-Rgb $look.Best $want 4) ('strongest pixel rgb(' + ($look.Best -join ',') + '), wanted about rgb(' + ($want -join ',') + ')')
+    Ck 'T29.6 the wrap button is not the theme button: the theme stays dark' ((Ini-Val $app 'view' 'theme' 'dark' 300) -ne 'light') 'theme changed'
+
+    Cmd $app 'IDM_FMT_WRAP'                                                      # word wrap on through the command: the button follows
+    Start-Sleep -Milliseconds 700
+    $look = Btn-Look $app $g $pal.dark.face
+    Ck 'T29.7 word wrap switched on by alt+z / the menu: the button shows it too' (Near-Rgb $look.Best (Mix-Rgb $pal.dark.face $pal.dark.text $IDM.BAR_BTN_OPACITY_ON) 4) ('strongest pixel rgb(' + ($look.Best -join ',') + ')')
+
+    # resize: a wrapped document is laid out for the size the window ends at
+    $ed = Get-Edit $app
+    $piece = 'the quick brown fox jumps over the lazy dog 0123456789 '
+    Reset-Doc $app ((1..1500 | ForEach-Object { 'line ' + $_ + ' ' + $piece + $piece }) -join "`r`n")
+    $w0 = [U]::WRect([long]$app.Main)
+    $ww = $w0[2] - $w0[0]; $hh = $w0[3] - $w0[1]
+    $rows0 = [int](Snd $ed 0xBA 0 0)                                             # EM_GETLINECOUNT: rows at this width
+    foreach ($i in 1..12) { [void][Nd]::Size([long]$app.Main, ($ww - 40 * $i), $hh) }          # a quick drag narrower
+    $rowsFast = [int](Snd $ed 0xBA 0 0)
+    $ok = [bool](WaitFor { [int](Snd $ed 0xBA 0 0) -gt $rows0 } 4000)
+    Ck 'T29.8 a quick drag narrower: afterwards the text has more rows (it was wrapped for the final width)' $ok ('rows ' + $rows0 + ' before, ' + $rowsFast + ' right after, ' + (Snd $ed 0xBA 0 0) + ' later')
+    Start-Sleep -Milliseconds 400
+    $rowsA = [int](Snd $ed 0xBA 0 0)
+    [void][Nd]::Size([long]$app.Main, $ww, $hh)
+    $ok = [bool](WaitFor { [int](Snd $ed 0xBA 0 0) -eq $rows0 } 4000)
+    Ck 'T29.9 back to the first width: the very same number of rows as at the start' $ok ('rows ' + $rows0 + ' at the start, ' + (Snd $ed 0xBA 0 0) + ' now (narrow: ' + $rowsA + ')')
+}
+
+# =========================================================================================================== T30
+# the tooltips of the two bar buttons (menu.c "tooltips"): once the pointer has rested BAR_TIP_DELAY ms on a button, a small popup (class mp_tip) shows right under the bar with its right
+# edge on the button's: what the button does + its key combo (read from the menu item that runs the same command). it looks like a menu popup (the face2 fill, the text colour), never takes
+# the mouse, follows the pointer from one button to the other, and goes when the pointer leaves, on a click (and then stays away until the pointer has left and returned), and after BAR_TIP_SHOW ms.
+# like the hover of T28 it needs the probe build (tools\probe.bat /DSHOTDC /DMENU_NO_TRACK): the bar asks the system for a mouse-leave message and the system sends it at once for a synthetic
+# hover on a private desktop, which would end every hover before the delay is over: skipped on a normal exe
+function Tip-Win($app) { [long][U]::FindTop($app.Pid, 'mp_tip', '') }           # the tip window (0 = none up)
+function Tip-Look($tip, $bg) {                                                   # PrintWindow shot of a tip: the pixel inside the bevel (the popup fill) and the pixel that differs most from $bg (the text: its colour)
+    $bmp = [U]::Grab([long]$tip)
+    try {
+        $in = $bmp.GetPixel(3, 3)
+        $best = 0; $bc = @(0, 0, 0)
+        for ($y = 3; $y -lt $bmp.Height - 3; $y++) {
+            for ($x = 3; $x -lt $bmp.Width - 3; $x++) {
+                $c = $bmp.GetPixel($x, $y)
+                $d = [Math]::Abs([int]$c.R - $bg[0]) + [Math]::Abs([int]$c.G - $bg[1]) + [Math]::Abs([int]$c.B - $bg[2])
+                if ($d -gt $best) { $best = $d; $bc = @([int]$c.R, [int]$c.G, [int]$c.B) }
+            }
+        }
+        return @{ In = @([int]$in.R, [int]$in.G, [int]$in.B); Best = $bc }
+    } finally { $bmp.Dispose() }
+}
+function Test-T30 {
+    $pal = Read-Palette
+    if (-not $pal) { Skip 'T30 button tooltips' 'could not parse the g_themes palette table in src\ui.c'; return }
+    $app = Start-App                                                             # dark
+    $g = Bar-Geo $app
+    if ([long](Snd $g.Bar (0x8000 + 91) 0 0) -ne 0x4D494E54) { Skip 'T30 button tooltips' 'this exe has no WM_APP + 91 (build the probe: tools\probe.bat /DSHOTDC /DMENU_NO_TRACK, run with -Exe build\probe\notepad-mint.exe)'; return }
+    $delay = $IDM.BAR_TIP_DELAY; $show = $IDM.BAR_TIP_SHOW
+    $y = [int]($g.H / 2)
+    $xWrap = $g.W - $g.Bw - [int]($g.Bw / 2)                                     # the middle of the word wrap button (left) ...
+    $xTheme = $g.W - [int]($g.Bw / 2)                                            # ... and of the theme button (flush right)
+    $away = $g.W - 2 * $g.Bw - 40                                                # free bar, left of both buttons
+    $bar = [U]::WRect($g.Bar)                                                    # the bar in screen coordinates
+
+    Mouse $g.Bar 0x200 20 $y 0                                                   # a menu title: no tip for it
+    Start-Sleep -Milliseconds ($delay + 400)
+    Ck 'T30.1 a menu title gets no tip' ((Tip-Win $app) -eq 0) 'a tip showed over a menu title'
+    Mouse $g.Bar 0x200 $xWrap $y 0                                               # the pointer arrives on the word wrap button
+    Start-Sleep -Milliseconds ([int]($delay / 4))
+    Ck 'T30.2 a quarter of the delay later there is no tip yet' ((Tip-Win $app) -eq 0) 'a tip was up almost at once'
+    $tip = WaitFor { Tip-Win $app } ($delay + 2000)
+    Ck 'T30.3 ... and after the delay the tip shows' ([bool]$tip) 'no mp_tip window'
+    if (-not $tip) { return }
+    CkEq 'T30.4 word wrap button: what it does and its key combo (the one the menu shows)' 'toggle word wrap (alt+z)' ([U]::Text([long]$tip))
+    $t = [U]::WRect([long]$tip)
+    Ck 'T30.5 ... right under the bar' (($t[1] -ge $bar[3]) -and ($t[1] -le $bar[3] + 6)) ('tip top ' + $t[1] + ', bar bottom ' + $bar[3])
+    Ck 'T30.6 ... with its right edge on the right edge of the button' ([Math]::Abs($t[2] - ($bar[2] - $g.Bw)) -le 1) ('tip right ' + $t[2] + ', button right ' + ($bar[2] - $g.Bw))
+    CkEq 'T30.7 ... and it never takes the mouse (WM_NCHITTEST says HTTRANSPARENT)' -1 (Snd $tip 0x84 0 0)
+    $look = Tip-Look $tip $pal.dark.face2
+    Ck 'T30.8 dark theme: the tip is filled like a popup menu (face2) ...' (Near-Rgb $look.In $pal.dark.face2 2) ('inside rgb(' + ($look.In -join ',') + '), wanted rgb(' + ($pal.dark.face2 -join ',') + ')')
+    Ck 'T30.9 ... and its text is in the text colour' (Near-Rgb $look.Best $pal.dark.text 40) ('strongest pixel rgb(' + ($look.Best -join ',') + '), wanted about rgb(' + ($pal.dark.text -join ',') + ')')
+    Cmd $app 'IDM_THEME_TOGGLE'                                                  # the theme changes while the tip is up
+    Start-Sleep -Milliseconds 400
+    $look = Tip-Look $tip $pal.light.face2
+    Ck 'T30.10 after a theme switch the tip shows the new palette (light: face2 and the text colour)' ((Near-Rgb $look.In $pal.light.face2 2) -and (Near-Rgb $look.Best $pal.light.text 40)) ('inside rgb(' + ($look.In -join ',') + '), strongest rgb(' + ($look.Best -join ',') + ')')
+
+    Mouse $g.Bar 0x200 $xTheme $y 0                                              # on to the theme button: its tip at once (one was up)
+    $tip2 = WaitFor { $h = Tip-Win $app; if ($h -and ([U]::Text($h) -like 'toggle dark*')) { $h } } 1500
+    Ck 'T30.11 moving to the other button while a tip is up shows that button''s tip at once' ([bool]$tip2) ('the tip text is now [' + (Show ([U]::Text((Tip-Win $app)))) + ']')
+    if (-not $tip2) { return }
+    CkEq 'T30.12 theme button: what it does and its key combo' 'toggle dark / light theme (alt+x)' ([U]::Text([long]$tip2))
+    $t = [U]::WRect([long]$tip2)
+    Ck 'T30.13 ... with its right edge on the right edge of the bar (the theme button is flush right)' ([Math]::Abs($t[2] - $bar[2]) -le 1) ('tip right ' + $t[2] + ', bar right ' + $bar[2])
+    Ck 'T30.14 ... and the first tip is gone (one tip at a time)' (-not [U]::Visible([long]$tip)) 'the first tip window is still visible'
+
+    Mouse $g.Bar 0x200 $away $y 0                                                # the pointer leaves the buttons
+    Ck 'T30.15 the pointer left: the tip is gone' (Gone ([long]$tip2) 1000) 'still visible 1 s after the pointer left'
+    Mouse $g.Bar 0x200 $xWrap $y 0
+    $tip3 = WaitFor { Tip-Win $app } ($delay + 2000)
+    Bar-Click $g $xWrap                                                          # a click: word wrap switches (the button's own job), and the tip goes at once
+    Ck 'T30.16 a click on the button ends its tip at once' (([bool]$tip3) -and (Gone ([long]$tip3) 600)) 'there was no tip to click, or it is still there'
+    Start-Sleep -Milliseconds ($delay + 500)
+    Ck 'T30.17 ... and it stays away while the pointer stays on the button' ((Tip-Win $app) -eq 0) 'the tip came back without the pointer leaving the button'
+    Mouse $g.Bar 0x200 $away $y 0
+    Mouse $g.Bar 0x200 $xWrap $y 0                                               # the pointer leaves and returns: the tip comes back
+    $tip4 = WaitFor { Tip-Win $app } ($delay + 2000)
+    Ck 'T30.18 once the pointer has left and returned the tip shows again' ([bool]$tip4) 'no tip after the pointer returned'
+    if ($tip4) { Ck ('T30.19 the tip goes by itself after ' + $show + ' ms') (Gone ([long]$tip4) ($show + 2500)) 'still visible long after BAR_TIP_SHOW' }
+    Mouse $g.Bar 0x200 $away $y 0
+}
+
+# =========================================================================================================== T31
+# file > recent: the last 9 files opened or saved, newest first, in settings.ini ([recent] 1 .. 9); a file that is opened again moves to the top; the menu items open them
+function Recent-List($ini) { $i = Read-Ini $ini; $l = @(); if ($i.ContainsKey('recent')) { foreach ($k in 1..12) { if ($i['recent'].ContainsKey([string]$k)) { $l += $i['recent'][[string]$k] } } }; return $l }
+function Test-T31 {
+    $ad = Join-Path $work 'recent_appdata'
+    $ini = Join-Path $ad 'notepad mint\settings.ini'
+    $f = @(); foreach ($n in 1..11) { $p = Join-Path $work ('rec' + $n + '.txt'); [IO.File]::WriteAllText($p, 'file ' + $n); $f += $p }
+    foreach ($n in 1..11) {
+        $a = Start-App $f[$n - 1] $ad
+        [void](Wait-Title $a ('rec' + $n + '.txt - notepad mint') 8000)
+        Stop-App $a
+    }
+    $l = Recent-List $ini
+    Ck 'T31.1 eleven files opened one after the other: nine are remembered' ($l.Count -eq 9) ('list ' + ($l -join ' | '))
+    $want = @(11, 10, 9, 8, 7, 6, 5, 4, 3 | ForEach-Object { $f[$_ - 1] })
+    Ck 'T31.2 ... newest first, the two oldest are gone' ((($l -join '|') -ieq ($want -join '|'))) ('list ' + ($l -join ' | '))
+    $a = Start-App $f[5] $ad                                                     # rec6 again: it moves to the top, nothing is listed twice
+    [void](Wait-Title $a 'rec6.txt - notepad mint' 8000)
+    $l = Recent-List $ini
+    $want = @(6, 11, 10, 9, 8, 7, 5, 4, 3 | ForEach-Object { $f[$_ - 1] })
+    Ck 'T31.3 a file opened again moves to the top, no duplicate' ((($l -join '|') -ieq ($want -join '|'))) ('list ' + ($l -join ' | '))
+    Pst $a.Main $WM_COMMAND ($IDM.IDM_RECENT_BASE + 2) 0                          # the third item: rec10
+    $ok = Wait-Title $a 'rec10.txt - notepad mint' 8000
+    Ck 'T31.4 the third item of file > recent opens that file (rec10)' $ok ('title [' + (Title $a) + ']')
+    $l = Recent-List $ini
+    Ck 'T31.5 ... and it moves to the top of the list' ($l.Count -eq 9 -and $l[0] -ieq $f[9] -and $l[1] -ieq $f[5]) ('list ' + ($l -join ' | '))
+}
+
+# =========================================================================================================== T32
+# format > tab size: 2, 4 or 8 columns (8 until chosen otherwise), saved in settings.ini ([editor] tab), used by the control, by the rows edit.c draws itself and by printing
+function Test-T32 {
+    $app = Start-App
+    $ed = Get-Edit $app
+    $pad = [int][Math]::Round($IDM.EDIT_PAD * ([U]::Dpi([long]$app.Main)) / 96, [MidpointRounding]::AwayFromZero)
+    Reset-Doc $app ("`tx")
+    function TabW { param($a) $e = Get-Edit $a; return ([int](([long](Snd $e 0xD6 1 0)) -band 0xFFFF)) - $pad }       # EM_POSFROMCHAR of the "x": how far the tab reaches
+    $w8 = TabW $app
+    Ck 'T32.1 the default tab size is 8 columns (a tab reaches a positive multiple of 8 average characters)' ($w8 -gt 0 -and $w8 % 8 -eq 0) ('tab reaches ' + $w8 + ' px')
+    Cmd $app 'IDM_TAB_4'
+    $ok = WaitFor { (TabW $app) -ne $w8 } 3000
+    $w4 = TabW $app
+    Ck 'T32.2 tab size 4: a tab is half as wide' ($ok -and $w4 * 2 -eq $w8) ('8: ' + $w8 + ' px, 4: ' + $w4 + ' px')
+    Cmd $app 'IDM_TAB_2'
+    $ok = WaitFor { (TabW $app) -ne $w4 } 3000
+    $w2 = TabW $app
+    Ck 'T32.3 tab size 2: a quarter as wide as 8' ($ok -and $w2 * 4 -eq $w8) ('8: ' + $w8 + ' px, 2: ' + $w2 + ' px')
+    Ck 'T32.4 the choice is saved (settings.ini [editor] tab=2)' (Ini-Val $app 'editor' 'tab' '2') ('tab=' + $script:iniV)
+    $ad = $app.AppData
+    Stop-App $app
+    $b = Start-App '' $ad
+    Reset-Doc $b ("`tx")
+    $e = Get-Edit $b
+    Ck 'T32.5 a new window starts with the saved tab size' ((TabW $b) -eq $w2) ('tab reaches ' + (TabW $b) + ' px, wanted ' + $w2)
+    Cmd $b 'IDM_TAB_8'
+    $ok = WaitFor { (TabW $b) -eq $w8 } 3000
+    Ck 'T32.6 back to 8 columns' $ok ('tab reaches ' + (TabW $b) + ' px, wanted ' + $w8)
 }
 
 # ====================================================================================================== run them all
@@ -1635,7 +2772,7 @@ if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine

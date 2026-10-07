@@ -1,6 +1,6 @@
 @echo off
 rem build.bat - builds "notepad mint" (32-bit x86) with the msvc toolchain: no crt, no libs, no windows.h.
-rem   build.bat          release build  -> build\notepad mint.exe
+rem   build.bat          release build  -> build\notepad-mint.exe
 rem   build.bat dbg      debug build (symbols + map + build\dbg.log tracing)
 rem one 32-bit exe runs on 32-bit windows, 64-bit windows and windows on arm.
 setlocal
@@ -17,7 +17,7 @@ call "%VCVARS%" >nul
 :haveenv
 
 if not exist build mkdir build
-del /q build\*.obj build\*.res "build\notepad mint.exe" 2>nul
+del /q build\*.obj build\*.res build\notepad-mint.exe 2>nul
 
 set "CFLAGS=/nologo /c /std:c17 /GS- /Zl /Gy /Gw /W3 /utf-8 /Fobuild\\"
 set "LFLAGS=/NOLOGO /MACHINE:X86 /SUBSYSTEM:WINDOWS,6.01 /ENTRY:start /NODEFAULTLIB /INCREMENTAL:NO /MANIFEST:NO /SAFESEH:NO /LARGEADDRESSAWARE /OPT:REF /OPT:ICF /MAP:build\notepad_mint.map"
@@ -45,7 +45,7 @@ set "RES=build\notepad_mint.res"
 :nores
 
 echo [build] link
-link %LFLAGS% "/OUT:build\notepad mint.exe" build\*.obj %RES% kernel32.lib user32.lib gdi32.lib || exit /b 1
+link %LFLAGS% /OUT:build\notepad-mint.exe build\*.obj %RES% kernel32.lib user32.lib gdi32.lib || exit /b 1
 
-for %%f in ("build\notepad mint.exe") do echo [build] ok: %%~ff  %%~zf bytes
+for %%f in (build\notepad-mint.exe) do echo [build] ok: %%~ff  %%~zf bytes
 exit /b 0

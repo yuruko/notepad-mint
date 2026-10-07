@@ -7,22 +7,27 @@
 Prefs    g_pf;
 HWND     g_hwnd, g_status;
 DocState g_doc;
+DWORD    g_textRev;
 
 static HWND   g_bar;
 static HACCEL g_accel;
 static WCHAR  g_iniDir[PATH_CAP], g_ini[PATH_CAP];
 static WCHAR  g_title[PATH_CAP + 64];
 
+#define MIN_WIN_W 320                                  /* smallest size of the ENTIRE window (frame included), px at 96 dpi: the width yields to the status panels if they need more (was 340, 320, 120 before that) */
+#define MIN_WIN_H 140                                   /* (was 200, 120 before that) */
+
 /* ======================================================== settings ======= */
 static void PrefsDefaults(void)
 {
     memset(&g_pf, 0, sizeof g_pf);
     wcopy(g_pf.font, L"Consolas", 32);
-    g_pf.pt = 13;
-    g_pf.cur = 13;
+    g_pf.pt = 12;
+    g_pf.cur = 12;
     g_pf.fg = C_EDIT_FG;
     g_pf.bg = C_EDIT_BG;
     g_pf.statusbar = 1;
+    g_pf.tab = 8;
     g_pf.wrapAround = 1;
     g_pf.marginL = 750; g_pf.marginT = 1000; g_pf.marginR = 750; g_pf.marginB = 1000;
 }
@@ -66,6 +71,70 @@ static void IniPutInt(const WCHAR *sec, const WCHAR *key, int v)
     IniPutStr(sec, key, b);
 }
 
+/* the ini is utf-16 (font names and paths can be anything): make sure it exists as such before anything is written to it */
+static void IniEnsure(void)
+{
+    static const BYTE bom[2] = { 0xFF, 0xFE };
+    HANDLE f;
+    DWORD wr;
+    CreateDirectoryW(g_iniDir, NULL);
+    f = CreateFileW(g_ini, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f != INVALID_HANDLE_VALUE) { WriteFile(f, bom, 2, &wr, NULL); CloseHandle(f); }
+}
+
+/* file > recent: the last RECENT_MAX files opened or saved, newest first, kept in settings.ini ([recent] 1 .. 9). every window reads the list again
+ * before it changes it and when it is activated, so windows opened side by side share one list */
+static WCHAR g_recent[RECENT_MAX][PATH_CAP];
+static int   g_nRecent;
+
+static void RecentLoad(void)
+{
+    WCHAR key[8], p[PATH_CAP];
+    int i;
+    g_nRecent = 0;
+    for (i = 1; i <= RECENT_MAX; i++) {
+        wsprintfW(key, L"%d", i);
+        GetPrivateProfileStringW(L"recent", key, L"", p, PATH_CAP, g_ini);
+        if (p[0]) wcopy(g_recent[g_nRecent++], p, PATH_CAP);
+    }
+    MenuSetRecent((const WCHAR (*)[PATH_CAP])g_recent, g_nRecent);
+}
+
+static void RecentStore(void)
+{
+    WCHAR key[8];
+    int i;
+    IniEnsure();
+    for (i = 1; i <= RECENT_MAX; i++) {
+        wsprintfW(key, L"%d", i);
+        IniPutStr(L"recent", key, i <= g_nRecent ? g_recent[i - 1] : NULL);
+    }
+    MenuSetRecent((const WCHAR (*)[PATH_CAP])g_recent, g_nRecent);
+}
+
+static void RecentAdd(const WCHAR *path)
+{
+    int i, k;
+    if (!path || !path[0]) return;
+    RecentLoad();
+    for (i = 0; i < g_nRecent; i++) if (wcmpi(g_recent[i], path) == 0) break;
+    if (i == g_nRecent) { if (g_nRecent < RECENT_MAX) g_nRecent++; i = g_nRecent - 1; }       /* new: it pushes the oldest out; known: it moves up */
+    for (k = i; k > 0; k--) wcopy(g_recent[k], g_recent[k - 1], PATH_CAP);
+    wcopy(g_recent[0], path, PATH_CAP);
+    RecentStore();
+}
+
+static void RecentRemove(const WCHAR *path)                  /* a file that can't be opened any more */
+{
+    int i;
+    RecentLoad();
+    for (i = 0; i < g_nRecent; i++) if (wcmpi(g_recent[i], path) == 0) break;
+    if (i == g_nRecent) return;
+    for (; i + 1 < g_nRecent; i++) wcopy(g_recent[i], g_recent[i + 1], PATH_CAP);
+    g_nRecent--;
+    RecentStore();
+}
+
 static int Clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 /* the editor colours come with the theme: g_pf.fg / bg are derived, never saved */
@@ -89,6 +158,8 @@ static void PrefsLoad(void)
     g_pf.italic  = IniGet(L"editor", L"italic", 0) != 0;
     g_pf.wrap    = IniGet(L"editor", L"wrap", 0) != 0;
     g_pf.statusbar = IniGet(L"view", L"statusbar", 1) != 0;
+    g_pf.tab     = IniGet(L"editor", L"tab", 8);
+    if (g_pf.tab != 2 && g_pf.tab != 4) g_pf.tab = 8;                    /* only 2, 4 and 8 */
     GetPrivateProfileStringW(L"view", L"theme", L"dark", f, 32, g_ini);
     ThemeUse(wcmpi(f, L"light") == 0 ? THEME_LIGHT : THEME_DARK);       /* before any window exists: classes take g_brFace */
     g_pf.winx    = IniGet(L"window", L"x", 0);
@@ -119,14 +190,8 @@ static void CapturePlacement(void)
 
 void AppSavePrefs(void)
 {
-    static const BYTE bom[2] = { 0xFF, 0xFE };
-    HANDLE f;
-    DWORD wr;
-
     CapturePlacement();
-    CreateDirectoryW(g_iniDir, NULL);
-    f = CreateFileW(g_ini, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);   /* utf-16 ini: font names can be anything */
-    if (f != INVALID_HANDLE_VALUE) { WriteFile(f, bom, 2, &wr, NULL); CloseHandle(f); }
+    IniEnsure();                                  /* utf-16 ini: font names can be anything */
 
     IniPutStr(L"editor", L"font", g_pf.font);
     IniPutInt(L"editor", L"size", g_pf.pt);
@@ -135,6 +200,7 @@ void AppSavePrefs(void)
     IniPutStr(L"editor", L"text", NULL);          /* old custom colours: the theme decides now */
     IniPutStr(L"editor", L"background", NULL);
     IniPutInt(L"editor", L"wrap", g_pf.wrap);
+    IniPutInt(L"editor", L"tab", g_pf.tab);
     IniPutInt(L"view", L"statusbar", g_pf.statusbar);
     IniPutStr(L"view", L"theme", g_pf.theme == THEME_LIGHT ? L"light" : L"dark");
     IniPutInt(L"window", L"x", g_pf.winx);
@@ -260,7 +326,7 @@ void AppUpdateTitle(void)
     t[0] = 0;
     if (AppIsDirty()) wcopy(t, L"*", COUNTOF(t));
     wcat(t, AppDocName(), COUNTOF(t));
-    wcat(t, L" - " APP_NAME, COUNTOF(t));
+    wcat(t, TITLE_TAIL, COUNTOF(t));
     if (wcmp(t, g_title) != 0) {
         wcopy(g_title, t, COUNTOF(g_title));
         SetWindowTextW(g_hwnd, t);                      /* (taskbar / alt-tab; the strip repaints from WM_SETTEXT) */
@@ -270,11 +336,30 @@ void AppUpdateTitle(void)
 void AppUpdateStatus(void)
 {
     WCHAR b[64];
-    int line, col;
+    int line, col, sel;
+    DWORD selBytes;
     if (!g_status || !g_pf.statusbar) return;
     EditCaretPos(&line, &col);
-    wsprintfW(b, L"%d:%d", line, col);
+    if (EditSelStats(g_doc.enc, g_doc.eol, &sel, &selBytes)) wsprintfW(b, L"%d:%d [%d L %u B]", line, col, sel, selBytes);   /* "162:54 [5 L 54 B]": the lines it covers and the bytes a save would write for it */
+    else wsprintfW(b, L"%d:%d", line, col);
     StatusSet(g_status, SB_POS, b);
+    {                                                   /* the number of lines ("5 L") and the size a save would write ("124 B"), the lines first: recounted only when the text, the encoding or the line ending changed (a big file is not scanned on every caret move) */
+        static struct { DWORD rev, bytes; int lines, len, enc, eol, ok; } c;
+        int len = GetWindowTextLengthW(g_edit);
+        if (!c.ok || c.rev != g_textRev || c.len != len || c.enc != g_doc.enc || c.eol != g_doc.eol) {
+            void *h = NULL;
+            int n = 0;
+            const WCHAR *p = EditLockText(&h, &n);
+            c.bytes = DocEncodedSize(p ? p : L"", p ? n : 0, g_doc.enc, g_doc.eol);
+            c.lines = p ? 1 + (int)mp_count_lf(p, (size_t)n) : 1;      /* the number of the last line (a trailing break makes an empty last line) */
+            EditUnlockText(h);
+            c.rev = g_textRev; c.len = len; c.enc = g_doc.enc; c.eol = g_doc.eol; c.ok = 1;
+        }
+        wsprintfW(b, L"%d L", c.lines);
+        StatusSet(g_status, SB_LINES, b);
+        wsprintfW(b, L"%u B", c.bytes);
+        StatusSet(g_status, SB_BYTES, b);
+    }
     StatusSet(g_status, SB_EOL, g_eolShort[g_doc.eol]);
     EncShort(g_doc.enc, b, COUNTOF(b));
     StatusSet(g_status, SB_ENC, b);
@@ -300,24 +385,27 @@ static void EditArea(RECT *r)                       /* the area the edit fills (
     r->right = cr.right;
     r->bottom = cr.bottom - sh;
     if (r->bottom < r->top + 4) r->bottom = r->top + 4;
+    r->right += S(SBAR_TRIM);                         /* the overhang that makes the scrollbars thinner (sbar.c, EditPad2): the parent clips it away */
+    r->bottom += S(SBAR_TRIM);
 }
 
 static void Layout(void)
 {
     RECT cr, f;
+    HDWP dp;
     int sh = g_pf.statusbar ? StatusHeight() : 0;
     GetClientRect(g_hwnd, &cr);
     EditArea(&f);
-    if (g_bar) MoveWindow(g_bar, 0, FrameHeight(), cr.right, MenuBarHeight(), TRUE);
-    if (g_edit) MoveWindow(g_edit, f.left, f.top, f.right - f.left, f.bottom - f.top, TRUE);
-    if (g_status) {
-        if (sh) {
-            MoveWindow(g_status, 0, cr.bottom - sh, cr.right, sh, TRUE);
-            ShowWindow(g_status, SW_SHOW);
-        } else {
-            ShowWindow(g_status, SW_HIDE);
-        }
+    dp = BeginDeferWindowPos(3);                    /* the three children move in one go (one pass over the update regions, nothing repainted in between): a resize drags a lot of pixels around */
+    if (dp && g_bar) dp = DeferWindowPos(dp, g_bar, NULL, 0, FrameHeight(), cr.right, MenuBarHeight(), SWP_NOZORDER | SWP_NOACTIVATE);
+    if (dp && g_edit) dp = DeferWindowPos(dp, g_edit, HWND_BOTTOM, f.left, f.top, f.right - f.left, f.bottom - f.top, SWP_NOACTIVATE);   /* (at the bottom: the overhang goes under the status bar) */
+    if (dp && g_status && sh) dp = DeferWindowPos(dp, g_status, NULL, 0, cr.bottom - sh, cr.right, sh, SWP_NOZORDER | SWP_NOACTIVATE);
+    if (!dp || !EndDeferWindowPos(dp)) {            /* (no memory for the batch: the old way, one window at a time) */
+        if (g_bar) MoveWindow(g_bar, 0, FrameHeight(), cr.right, MenuBarHeight(), TRUE);
+        if (g_edit) { SetWindowPos(g_edit, HWND_BOTTOM, f.left, f.top, f.right - f.left, f.bottom - f.top, SWP_NOACTIVATE); InvalidateRect(g_edit, NULL, TRUE); }
+        if (g_status && sh) MoveWindow(g_status, 0, cr.bottom - sh, cr.right, sh, TRUE);
     }
+    if (g_status) ShowWindow(g_status, sh ? SW_SHOW : SW_HIDE);
     InvalidateRect(g_hwnd, NULL, FALSE);            /* the frame lines move with the edit */
 }
 
@@ -365,6 +453,7 @@ static BOOL OpenDoc(const WCHAR *path, int force)
     CleanMark();
     AppUpdateTitle();
     AppUpdateStatus();
+    RecentAdd(g_doc.path);
     return TRUE;
 }
 
@@ -398,6 +487,7 @@ static BOOL WriteDoc(const WCHAR *path, int enc, int eol)
     CleanMark();                                     /* what is on disk is the new clean state */
     AppUpdateTitle();
     AppUpdateStatus();
+    RecentAdd(g_doc.path);
     return TRUE;
 }
 
@@ -508,6 +598,7 @@ static void ToggleWrap(void)
     g_pf.wrap = !g_pf.wrap;
     EditCreate(g_hwnd);                             /* a native edit can't switch wrapping live: rebuild it */
     Layout();
+    if (g_bar) InvalidateRect(g_bar, NULL, FALSE);  /* the word wrap button of the menu bar shows the state */
     AppUpdateTitle();                               /* reloading the text raised the modified flag for a moment */
     AppUpdateStatus();
 }
@@ -597,9 +688,19 @@ static void Cmd(int id)
         SendMessageW(g_edit, EM_SETSEL, 0, (LPARAM)-1);
         break; }
     case IDM_EDIT_TIMEDATE: InsertTimeDate(); break;
+    case IDM_EDIT_CLEARLINE: {
+        HWND f = GetFocus();
+        if (f && f != g_edit && f != g_hwnd) return;         /* ctrl+k inside a text box of the find dialog: not the editor's line to clear */
+        EditClearLine();
+        break; }
 
     case IDM_FMT_WRAP:      ToggleWrap(); break;
     case IDM_FMT_FONT:      if (FontDlg(g_hwnd)) AppApplyPrefs(); break;
+    case IDM_TAB_2: case IDM_TAB_4: case IDM_TAB_8:
+        g_pf.tab = id == IDM_TAB_2 ? 2 : id == IDM_TAB_4 ? 4 : 8;
+        EditApplyTabs();
+        AppSavePrefs();
+        break;
     case IDM_EOL_CRLF:      SetEol(EOL_CRLF); break;
     case IDM_EOL_LF:        SetEol(EOL_LF); break;
     case IDM_EOL_CR:        SetEol(EOL_CR); break;
@@ -625,6 +726,7 @@ static void Cmd(int id)
     case IDM_ZOOM_RESET:    EditZoomReset(); break;
     case IDM_THEME_DARK:    ApplyTheme(THEME_DARK); break;
     case IDM_THEME_LIGHT:   ApplyTheme(THEME_LIGHT); break;
+    case IDM_THEME_TOGGLE:  ApplyTheme(g_pf.theme == THEME_DARK ? THEME_LIGHT : THEME_DARK); break;
 
     case IDM_HELP_TOPICS:   HelpDlg(g_hwnd); break;
     case IDM_HELP_ABOUT:    AboutDlg(g_hwnd); break;
@@ -635,7 +737,14 @@ static void Cmd(int id)
         return;
 
     default:
-        if (id >= IDM_UCC_BASE && id < IDM_UCC_BASE + 17) {
+        if (id >= IDM_RECENT_BASE && id < IDM_RECENT_BASE + RECENT_MAX) {          /* file > recent */
+            WCHAR p[PATH_CAP];
+            RecentLoad();
+            if (id - IDM_RECENT_BASE < g_nRecent) {
+                wcopy(p, g_recent[id - IDM_RECENT_BASE], PATH_CAP);
+                if (Confirm() && !OpenDoc(p, -1)) RecentRemove(p);                  /* (a file that is gone leaves the list) */
+            }
+        } else if (id >= IDM_UCC_BASE && id < IDM_UCC_BASE + 17) {
             WCHAR s[2];
             s[0] = g_ucc[id - IDM_UCC_BASE]; s[1] = 0;
             EditInsert(s);
@@ -682,6 +791,10 @@ static unsigned MenuState(int id)
     case IDM_FMT_WRAP:      return g_pf.wrap ? MS_CHECK : 0;
     case IDM_VIEW_STATUS:   return g_pf.statusbar ? MS_CHECK : 0;
     case IDM_RTL:           return EditIsRtl() ? MS_CHECK : 0;
+    case IDM_RECENT_NONE:   return MS_GRAY;
+    case IDM_TAB_2:         return g_pf.tab == 2 ? on : 0;
+    case IDM_TAB_4:         return g_pf.tab == 4 ? on : 0;
+    case IDM_TAB_8:         return g_pf.tab == 8 ? on : 0;
     case IDM_EOL_CRLF:      return g_doc.eol == EOL_CRLF ? on : 0;
     case IDM_EOL_LF:        return g_doc.eol == EOL_LF ? on : 0;
     case IDM_EOL_CR:        return g_doc.eol == EOL_CR ? on : 0;
@@ -707,20 +820,40 @@ static unsigned MenuState(int id)
 typedef UINT (WINAPI *DragQueryFn)(HANDLE, UINT, LPWSTR, UINT);
 typedef void (WINAPI *DragFinishFn)(HANDLE);
 
+/* files and / or folders dropped on the window: the full path of each goes into the text at the caret (replacing the selection, one undo step,
+ * like a paste), one path per line, plain (no quotes) and no line break after the last one. nothing is opened any more; shift held while
+ * dropping keeps the old behaviour: the files (not the folders) are opened, the first here and the rest in windows of their own */
 static void OnDropFiles(HANDLE drop)
 {
     HMODULE sh = LoadLibraryW(L"shell32.dll");
     DragQueryFn q = sh ? (DragQueryFn)GetProcAddress(sh, "DragQueryFileW") : NULL;
     DragFinishFn fin = sh ? (DragFinishFn)GetProcAddress(sh, "DragFinish") : NULL;
     UINT n, i;
-    int first = 1;
     if (!q || !fin) return;
     n = q(drop, 0xFFFFFFFF, NULL, 0);
-    for (i = 0; i < n; i++) {
-        WCHAR p[PATH_CAP];
-        if (!q(drop, i, p, PATH_CAP) || IsDir(p)) continue;
-        if (first) { first = 0; AppOpenPath(p); }          /* the first file opens here, the rest get their own windows */
-        else NewWindow(p);
+    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+        int first = 1;
+        for (i = 0; i < n; i++) {
+            WCHAR p[PATH_CAP];
+            if (!q(drop, i, p, PATH_CAP) || IsDir(p)) continue;
+            if (first) { first = 0; AppOpenPath(p); }
+            else NewWindow(p);
+        }
+    } else if (n) {
+        size_t cap = 1;                                    /* the paths can be long (up to 32k): measure them, never truncate */
+        WCHAR *text, *d;
+        for (i = 0; i < n; i++) cap += (size_t)q(drop, i, NULL, 0) + 2;
+        text = (WCHAR *)mem_alloc(cap * sizeof(WCHAR));
+        if (text) {
+            d = text;
+            for (i = 0; i < n; i++) {
+                if (i) { *d++ = '\r'; *d++ = '\n'; }
+                d += q(drop, i, d, q(drop, i, NULL, 0) + 1);
+            }
+            *d = 0;
+            EditInsert(text);
+            mem_free(text);
+        }
     }
     fin(drop);
 }
@@ -769,10 +902,13 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_GETMINMAXINFO: {
         RECT r;
-        r.left = 0; r.top = 0; r.right = StatusMinWidth(); r.bottom = S(200);   /* client size the status panels need */
+        MINMAXINFO *mm = (MINMAXINFO *)l;
+        r.left = 0; r.top = 0; r.right = StatusMinWidth(); r.bottom = 0;        /* client width the status panels need */
+        if (r.right < MenuBarMinWidth()) r.right = MenuBarMinWidth();           /* ... or the menu bar: its menus and the two buttons at the right end */
         UiAdjustRect(&r, WS_OVERLAPPEDWINDOW, 0);
-        ((MINMAXINFO *)l)->ptMinTrackSize.x = r.right - r.left;
-        ((MINMAXINFO *)l)->ptMinTrackSize.y = r.bottom - r.top;
+        mm->ptMinTrackSize.x = r.right - r.left;                                  /* ... as a window width (nothing is ever cut off) */
+        if (mm->ptMinTrackSize.x < S(MIN_WIN_W)) mm->ptMinTrackSize.x = S(MIN_WIN_W);
+        mm->ptMinTrackSize.y = S(MIN_WIN_H);                                      /* the window's own height: title strip, menu bar, editor and status bar included */
         return 0; }
     case WM_SETFOCUS:
         FocusEdit();
@@ -781,6 +917,7 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         DBG(L"activate", LOWORD(w), l);
         DarkFrame(h, LOWORD(w) != WA_INACTIVE);
         FrameActive(h, LOWORD(w) != WA_INACTIVE);
+        if (LOWORD(w) != WA_INACTIVE) RecentLoad();           /* (another window may have changed the list) */
         break;
     case WM_NCACTIVATE:
         if (FrameEnabled()) return DefWindowProcW(h, m, w, (LPARAM)-1);   /* custom strip: no default caption repaint */
@@ -812,6 +949,15 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_CANCELMODE:
         MenuCancel();
         break;
+    case WM_ERASEBKGND: {                                  /* the children cover the whole client area but the title strip, and FramePaint puts the strip there in one buffered blit: no flat face colour under it first (the class brush would paint that) */
+        HDC dc = (HDC)w;
+        RECT rc;
+        int saved = SaveDC(dc);
+        GetClientRect(h, &rc);
+        ExcludeClipRect(dc, 0, 0, rc.right, FrameHeight());
+        FillRect(dc, &rc, g_brFace);
+        RestoreDC(dc, saved);
+        return 1; }
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC dc = BeginPaint(h, &ps);
@@ -829,6 +975,7 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if ((HWND)l == g_edit) {                               /* notifications from the edit control */
             switch (HIWORD(w)) {
             case EN_CHANGE:
+                g_textRev++;
                 AppUpdateTitle();
                 AppUpdateStatus();
                 EditScrollSoon();                              /* scrollbars only when the text needs them */
@@ -887,10 +1034,15 @@ static ACCEL g_acc[] = {
     { FVIRTKEY | FCONTROL,           'S',            IDM_FILE_SAVE },
     { FVIRTKEY | FCONTROL | FSHIFT,  'S',            IDM_FILE_SAVEAS },
     { FVIRTKEY | FCONTROL,           'P',            IDM_FILE_PRINT },
+    { FVIRTKEY | FCONTROL,           'W',            IDM_FILE_EXIT },          /* close the window = file > exit (asks about unsaved changes first) */
+    { FVIRTKEY | FALT,               'X',            IDM_THEME_TOGGLE },       /* dark <-> light (was ctrl+t; like alt+z below it has no menu bar mnemonic: no bar title has an x) */
+    { FVIRTKEY | FCONTROL,           'U',            IDM_VIEW_STATUS },        /* show / hide the status bar */
+    { FVIRTKEY | FALT,               'Z',            IDM_FMT_WRAP },           /* word wrap on / off (alt+z has no menu bar mnemonic; AltGr reports ctrl+alt, so it never matches here) */
     { FVIRTKEY | FCONTROL,           'A',            IDM_EDIT_SELALL },        /* the stock multiline edit has no ctrl+a of its own */
     { FVIRTKEY | FCONTROL,           'F',            IDM_EDIT_FIND },
     { FVIRTKEY | FCONTROL,           'H',            IDM_EDIT_REPLACE },
     { FVIRTKEY | FCONTROL,           'G',            IDM_EDIT_GOTO },
+    { FVIRTKEY | FCONTROL,           'K',            IDM_EDIT_CLEARLINE },     /* empty the caret's line */
     { FVIRTKEY,                      VK_F3,          IDM_EDIT_FINDNEXT },
     { FVIRTKEY | FSHIFT,             VK_F3,          IDM_EDIT_FINDPREV },
     { FVIRTKEY,                      VK_F5,          IDM_EDIT_TIMEDATE },
@@ -977,6 +1129,7 @@ int mp_main(void)
     UiInit(hi);
     IniLocate();
     PrefsLoad();
+    RecentLoad();
     g_doc.enc = ENC_UTF8;
     g_doc.eol = EOL_CRLF;
     NewDocName();                                            /* before the window exists: its first title already uses it */
