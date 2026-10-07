@@ -5,7 +5,7 @@ a free, dark replacement for `notepad.exe`: plain text only. no ai, no sign-in, 
 - `notepad-mint-<version>-setup.exe`: installer (start menu shortcut, optional desktop shortcut, uninstaller)
 - `notepad-mint-<version>.exe`: standalone exe, nothing to install
 
-one 32-bit exe (about 200 kb) for 32-bit windows, 64-bit windows and windows on arm.
+one 32-bit exe (about 140 kb) for 32-bit windows, 64-bit windows and windows on arm.
 
 **what is in it**
 
