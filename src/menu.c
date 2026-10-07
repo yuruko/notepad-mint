@@ -12,8 +12,8 @@
 #define SUB(l, d)   { l, NULL, 0, d }
 
 /* file > recent: the items are rebuilt by MenuSetRecent whenever the list changes. a label is "&1  " + the path (shortened in the middle when long: the
- * drive, "..." and the end), with every & doubled so that a path never makes a mnemonic */
-static MenuItem g_recItem[RECENT_MAX] = { { L"(none)", NULL, IDM_RECENT_NONE, NULL } };
+ * drive, "..." and the end), with every & doubled so that a path never makes a mnemonic. a list with files ends with a separator and "clear list" */
+static MenuItem g_recItem[RECENT_MAX + 2] = { { L"(none)", NULL, IDM_RECENT_NONE, NULL } };
 static WCHAR    g_recLbl[RECENT_MAX][64];
 MenuDef g_mdRecent = { g_recItem, 1 };
 
@@ -39,7 +39,9 @@ void MenuSetRecent(const WCHAR (*paths)[PATH_CAP], int n)
         o[j] = 0;
         g_recItem[i].label = o; g_recItem[i].accel = NULL; g_recItem[i].id = IDM_RECENT_BASE + i; g_recItem[i].sub = NULL;
     }
-    g_mdRecent.n = n;
+    g_recItem[n].label = NULL; g_recItem[n].accel = NULL; g_recItem[n].id = 0; g_recItem[n].sub = NULL;                  /* the separator */
+    g_recItem[n + 1].label = L"&clear list"; g_recItem[n + 1].accel = NULL; g_recItem[n + 1].id = IDM_RECENT_CLEAR; g_recItem[n + 1].sub = NULL;
+    g_mdRecent.n = n + 2;
 }
 
 static const MenuItem miFile[] = {

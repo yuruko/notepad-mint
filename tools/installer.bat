@@ -1,6 +1,6 @@
 @echo off
 rem installer.bat - the release files: the NSIS installer and the standalone exe, next to each other in build\.
-rem   tools\installer.bat [version]      version defaults to 1.0.0 (keep it in step with FILEVERSION in src\notepad_mint.rc)
+rem   tools\installer.bat [version]      version defaults to 1.0.1 (keep it in step with FILEVERSION in src\notepad_mint.rc)
 rem needs build\notepad-mint.exe (run build.bat first; the release workflow does) and makensis: on the path, in program files, or in
 rem build\nsis-<n>\ (the portable zip from nsis.sourceforge.io, unpacked there).
 rem output:  build\notepad-mint-<version>.exe          the standalone exe (a copy of build\notepad-mint.exe)
@@ -10,7 +10,7 @@ setlocal
 cd /d "%~dp0.."
 set "ROOT=%CD%"
 set "VER=%1"
-if "%VER%"=="" set "VER=1.0.0"
+if "%VER%"=="" set "VER=1.0.1"
 
 if not exist "%ROOT%\build\notepad-mint.exe" echo installer: build\notepad-mint.exe is missing: run build.bat first & exit /b 1
 

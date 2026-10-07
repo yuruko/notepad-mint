@@ -2207,10 +2207,10 @@ function Test-T25 {
     [void](Snd $ed 0xB6 0 -5)
 
     Reset-Doc $app (Band-Doc 120 ("`t" + 'tab' + "`t" + 'stops' + "`t" + '!'))
-    Band-Ck 'T25.4 tabs: the default tab stops, the same as the control''s' $app 0
+    Band-Ck 'T25.4 tabs: the default tab stops, the same as the control''s' $app 0 $false $false 0 4      # (4 tries: the control's own row is the flaky side, see Band-Cmp)
     foreach ($ts in 8, 2) {                                                      # format > tab size: the band's own rows follow the control's tab stops
         Cmd $app ('IDM_TAB_' + $ts); Start-Sleep -Milliseconds 500
-        Band-Ck ('T25.4' + $(if ($ts -eq 8) { 'b' } else { 'c' }) + ' tab size ' + $ts + ': the same as the control''s') $app 0
+        Band-Ck ('T25.4' + $(if ($ts -eq 8) { 'b' } else { 'c' }) + ' tab size ' + $ts + ': the same as the control''s') $app 0 $false $false 0 4
     }
     Cmd $app 'IDM_TAB_4'; Start-Sleep -Milliseconds 500
 
@@ -2735,6 +2735,17 @@ function Test-T31 {
     Ck 'T31.4 the third item of file > recent opens that file (rec10)' $ok ('title [' + (Title $a) + ']')
     $l = Recent-List $ini
     Ck 'T31.5 ... and it moves to the top of the list' ($l.Count -eq 9 -and $l[0] -ieq $f[9] -and $l[1] -ieq $f[5]) ('list ' + ($l -join ' | '))
+    Pst $a.Main $WM_COMMAND $IDM.IDM_RECENT_CLEAR 0                               # file > recent > clear list (the last item, after a separator)
+    $ok = WaitFor { (Recent-List $ini).Count -eq 0 } 3000
+    Ck 'T31.6 "clear list" empties the list in settings.ini' $ok ('list ' + ((Recent-List $ini) -join ' | '))
+    Stop-App $a
+    $b = Start-App '' $ad
+    Ck 'T31.7 ... a new window starts with an empty list (and the document is not touched)' ((Recent-List $ini).Count -eq 0) ('list ' + ((Recent-List $ini) -join ' | '))
+    Stop-App $b
+    $b = Start-App $f[0] $ad
+    [void](Wait-Title $b 'rec1.txt - notepad mint' 8000)
+    $l = @(Recent-List $ini)                                                     # (@: one entry would come back as a plain string)
+    Ck 'T31.8 the list fills again after it was cleared' ($l.Count -eq 1 -and $l[0] -ieq $f[0]) ('list ' + ($l -join ' | '))
 }
 
 # =========================================================================================================== T32

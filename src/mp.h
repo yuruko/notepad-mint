@@ -52,7 +52,7 @@ enum {
     IDM_RTL = 340, IDM_UCC_BASE = 350,                /* IDM_UCC_BASE + n inserts unicode control char n (0..16) */
     IDM_VIEW_STATUS = 401, IDM_ZOOM_IN, IDM_ZOOM_OUT, IDM_ZOOM_RESET, IDM_THEME_DARK, IDM_THEME_LIGHT, IDM_THEME_TOGGLE,
     IDM_HELP_TOPICS = 501, IDM_HELP_ABOUT,
-    IDM_RECENT_BASE = 700, IDM_RECENT_NONE = 710,     /* file > recent: IDM_RECENT_BASE + n opens the n-th remembered file (0..RECENT_MAX - 1); NONE is the grayed placeholder of an empty list */
+    IDM_RECENT_BASE = 700, IDM_RECENT_NONE = 710, IDM_RECENT_CLEAR = 711,     /* file > recent: IDM_RECENT_BASE + n opens the n-th remembered file (0..RECENT_MAX - 1); NONE is the grayed placeholder of an empty list; CLEAR (the last item, after a separator) empties the list */
     IDM_SYS_RESTORE = 601, IDM_SYS_MOVE, IDM_SYS_SIZE, IDM_SYS_MIN, IDM_SYS_MAX, IDM_SYS_CLOSE   /* title bar menu */
 };
 

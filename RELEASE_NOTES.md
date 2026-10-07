@@ -11,8 +11,8 @@ one 32-bit exe (about 140 kb) for 32-bit windows, 64-bit windows and windows on 
 
 - dark (default) and light theme, mint accent; alt+x or the sun / moon button switches
 - word wrap (alt+z or the button), tab size 2 / 4 / 8, zoom 10-96 pt
-- file > recent: the last 9 files opened or saved
-- compact status bar (line:column, lines, bytes, line ending, encoding; selection size), click the last two to change them
+- file > recent: the last 9 files opened or saved, with a "clear list" item at the bottom
+- compact status bar (line:column, lines, bytes, line ending, encoding; selection size), every panel only as wide as its text, click the last two to change them
 - utf-8 / utf-16 / legacy code pages, windows / unix / classic mac line endings, right-to-left, unicode control characters
 - drop files on the window to insert their paths, selected line breaks are visible, text scrolls to the very edge, thin classic scrollbars
 - find / replace, go to, font, page setup, print: everything notepad has

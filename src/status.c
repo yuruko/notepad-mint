@@ -1,7 +1,7 @@
 /* status.c - classic status bar: line:column[ [N L N B]] | number of lines | size in bytes | line ending | encoding. no size grip: the window is resized by its frame.
  * the line-ending / encoding panels are clickable (they pop a menu). drawn in the chrome font (g_fontMenu, the same
- * font as the menu bar). a panel is never narrower than its text: the line ending panel is as wide as the widest of its three
- * texts (so it does not jump around), the encoding panel is exactly as wide as the text it shows right now.
+ * font as the menu bar). a panel is never narrower than its text: the lines, bytes, line ending and encoding panels are exactly as wide as
+ * the text they show right now (only the position keeps a floor, so it does not jump around while typing).
  * StatusMinWidth() is what the main window's minimum size and AppUpdateStatus keep the window wide enough for, so nothing is
  * ever cut off or ellipsized. */
 #include "mp.h"
@@ -23,16 +23,15 @@ static void Measure(void)
     HDC dc = GetDC(NULL);
     HGDIOBJ of = SelectObject(dc, g_fontMenu);
     TEXTMETRICW tm;
-    int i, w, m;
+    int i;
 
     GetTextMetricsW(dc, &tm);
     g_sbH = tm.tmHeight + S(8);
     g_floor[SB_POS] = TextWidth(dc, L"99999999:99999");              /* line:column of a very big file */
     g_floor[SB_LINES] = 0;                                         /* fully dynamic like the encoding: it grows and shrinks with the text, nothing is reserved */
     g_floor[SB_BYTES] = 0;
-    for (m = 0, i = 0; i < EOL_COUNT; i++) { w = TextWidth(dc, g_eolShort[i]); if (w > m) m = w; }
-    g_floor[SB_EOL] = m;
-    g_floor[SB_ENC] = 0;                                           /* fully dynamic (maintainer's request): the width is the text's width, whatever it is */
+    g_floor[SB_EOL] = 0;                                           /* fully dynamic too: "lf" gets a panel of its own width, not the width of "crlf" */
+    g_floor[SB_ENC] = 0;                                          /* fully dynamic (maintainer's request): the width is the text's width, whatever it is */
     for (i = 0; i < SB_COUNT; i++) g_need[i] = TextWidth(dc, g_txt[i]);
     SelectObject(dc, of);
     ReleaseDC(NULL, dc);

@@ -742,6 +742,8 @@ static void Cmd(int id)
         FrameSysCommand(g_hwnd, id);
         return;
 
+    case IDM_RECENT_CLEAR:  g_nRecent = 0; RecentStore(); break;           /* file > recent > clear list (the other windows read the empty list when they are activated) */
+
     default:
         if (id >= IDM_RECENT_BASE && id < IDM_RECENT_BASE + RECENT_MAX) {          /* file > recent */
             WCHAR p[PATH_CAP];

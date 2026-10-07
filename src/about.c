@@ -220,7 +220,7 @@ static const WCHAR g_help[] =
     L"  any text file opens: utf-8, utf-16 (with or without a bom) and the\r\n"
     L"  legacy code pages (format > encoding > reopen with encoding...).\r\n"
     L"  give a file's name on the command line, or use file > open.\r\n"
-    L"  file > recent lists the last 9 files you opened or saved.\r\n"
+    L"  file > recent lists the last 9 files you opened or saved; clear list (its last item) empties it.\r\n"
     L"  drag files or folders onto the window to insert their paths at the\r\n"
     L"  caret, one per line (hold shift while dropping to open the files).\r\n"
     L"\r\n"
