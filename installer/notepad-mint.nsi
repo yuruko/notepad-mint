@@ -8,7 +8,7 @@ Unicode true
 SetCompressor /SOLID lzma
 
 !ifndef VERSION
-  !define VERSION "1.0.0"
+  !define VERSION "1.0.1"
 !endif
 !ifndef EXE_PATH
   !error "EXE_PATH is not set (the built notepad-mint.exe)"
@@ -23,8 +23,7 @@ SetCompressor /SOLID lzma
 
 Name "${APP_NAME} ${VERSION}"
 OutFile "${OUT_PATH}"
-InstallDir "$PROGRAMFILES32\${APP_NAME}"
-InstallDirRegKey HKLM "Software\${APP_NAME}" "InstallDir"
+InstallDir "$PROGRAMFILES32\notepad-mint"
 RequestExecutionLevel admin
 BrandingText "${APP_NAME} ${VERSION}"
 
@@ -54,6 +53,15 @@ VIAddVersionKey "LegalCopyright" "free software. no ai, no sign-in, no telemetry
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
+
+; 1.0.0 installed into "program files (x86)\notepad mint" (with a space): take that copy away first (its own uninstaller, silently), so an update
+; leaves one copy, in "notepad-mint"
+Function .onInit
+  IfFileExists "$PROGRAMFILES32\notepad mint\uninstall.exe" 0 +3
+    ExecWait '"$PROGRAMFILES32\notepad mint\uninstall.exe" /S _?=$PROGRAMFILES32\notepad mint'
+    Delete "$PROGRAMFILES32\notepad mint\uninstall.exe"
+  RMDir "$PROGRAMFILES32\notepad mint"
+FunctionEnd
 
 Section "${APP_NAME}" SecApp
   SectionIn RO

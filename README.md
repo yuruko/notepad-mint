@@ -10,7 +10,7 @@ a free, dark replacement for `notepad.exe`: plain text only. no ai, no sign-in, 
 
 from the [latest release](https://github.com/yuruko/notepad-mint/releases/latest):
 
-- `notepad-mint-<version>-setup.exe`: the installer (start menu shortcut, optional desktop shortcut, uninstaller in *installed apps*; your settings are left alone when you uninstall)
+- `notepad-mint-<version>-setup.exe`: the installer (installs to `program files (x86)\notepad-mint`; an older `notepad mint` folder from 1.0.0 is removed; start menu shortcut, optional desktop shortcut, uninstaller in *installed apps*; your settings are left alone when you uninstall)
 - `notepad-mint-<version>.exe`: the standalone exe, nothing to install: put it anywhere and run it
 
 one 32-bit exe (about 200 kb) runs on 32-bit windows, 64-bit windows and windows on arm. settings are in `%appdata%\notepad mint\settings.ini`.
