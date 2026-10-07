@@ -9,9 +9,10 @@ one 32-bit exe (about 140 kb) for 32-bit windows, 64-bit windows and windows on 
 
 **what is in it**
 
+- default font size is now 11 pt, 9 pt is a size too (the font dialog drops the 72 and 96 pt presets, the biggest size is 70 pt)
 - help topics (f1) rewritten: a key table and short paragraphs that wrap by themselves, the text fills the window, esc closes it; the about box shows the real version
 - dark (default) and light theme, mint accent; alt+x or the sun / moon button switches
-- word wrap (alt+z or the button), tab size 2 / 4 / 8, zoom 10-96 pt
+- word wrap (alt+z or the button), tab size 2 / 4 / 8, zoom 9-70 pt
 - file > recent: the last 9 files opened or saved, with a "clear list" item at the bottom
 - compact status bar (line:column, lines, bytes, line ending, encoding; selection size), every panel only as wide as its text, click the last two to change them
 - utf-8 / utf-16 / legacy code pages, windows / unix / classic mac line endings, right-to-left, unicode control characters

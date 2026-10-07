@@ -22,7 +22,7 @@ static void PrefsDefaults(void)
 {
     memset(&g_pf, 0, sizeof g_pf);
     wcopy(g_pf.font, L"Consolas", 32);
-    g_pf.pt = 12;
+    g_pf.pt = 11;
     g_pf.cur = 12;
     g_pf.fg = C_EDIT_FG;
     g_pf.bg = C_EDIT_BG;

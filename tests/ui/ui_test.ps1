@@ -1147,19 +1147,19 @@ function Test-T9 {                                                              
     CkEq 'T9.7 reopened: the size box shows 18' '18' (Get-Field $dlg $IDT.ID_SIZE)
     Set-Field $dlg $IDT.ID_SIZE '5'
     Press $dlg $IDOK
-    CkEq 'T9.8 size 5 clamps up to 10 (FONT_MIN) on ok' ([string]$IDM.FONT_MIN) (Ini-Val $app 'editor' 'size' ([string]$IDM.FONT_MIN))
+    CkEq 'T9.8 size 5 clamps up to 9 (FONT_MIN) on ok' ([string]$IDM.FONT_MIN) (Ini-Val $app 'editor' 'size' ([string]$IDM.FONT_MIN))
     $dlg = Open-Font $app
     Set-Field $dlg $IDT.ID_SIZE '500'
     Press $dlg $IDOK
-    CkEq 'T9.9 size 500 clamps down to 96 (FONT_MAX) on ok' ([string]$IDM.FONT_MAX) (Ini-Val $app 'editor' 'size' ([string]$IDM.FONT_MAX))
+    CkEq 'T9.9 size 500 clamps down to 70 (FONT_MAX) on ok' ([string]$IDM.FONT_MAX) (Ini-Val $app 'editor' 'size' ([string]$IDM.FONT_MAX))
     $lh96 = 0; [void](WaitFor { $script:lh = Line-Height $app; $script:lh -gt $lh18 } 2000); $lh96 = $script:lh
-    Ck 'T9.10 ... and the editor line height grew again at 96 pt' ($lh96 -gt $lh18) ('line height ' + $lh18 + ' px at 18 pt, ' + $lh96 + ' px at 96 pt')
+    Ck 'T9.10 ... and the editor line height grew again at 70 pt' ($lh96 -gt $lh18) ('line height ' + $lh18 + ' px at 18 pt, ' + $lh96 + ' px at 70 pt')
 
     $dlg = Open-Font $app
     Set-Field $dlg $IDT.ID_SIZE '30'
     Press $dlg $IDCANCEL
     Ck 'T9.11 cancel closes the dialog' (Gone $dlg) 'the dialog is still visible'
-    CkEq 'T9.12 ... and leaves the saved size unchanged (96)' ([string]$IDM.FONT_MAX) (Ini-Val $app 'editor' 'size' '30' 700)
+    CkEq 'T9.12 ... and leaves the saved size unchanged (70)' ([string]$IDM.FONT_MAX) (Ini-Val $app 'editor' 'size' '30' 700)
 
     $dlg = Open-Font $app                                                        # a preset button, then face / bold / italic
     $p = 6
@@ -1184,10 +1184,10 @@ function Test-T9 {                                                              
 
     $dlg = Open-Font $app
     Press $dlg $IDT.ID_RESET
-    Ck 'T9.20 "reset": the size box shows 12' ([bool](WaitFor { (Get-Field $dlg $IDT.ID_SIZE) -eq '12' } 1500)) ('size box [' + (Get-Field $dlg $IDT.ID_SIZE) + ']')
+    Ck 'T9.20 "reset": the size box shows 11' ([bool](WaitFor { (Get-Field $dlg $IDT.ID_SIZE) -eq '11' } 1500)) ('size box [' + (Get-Field $dlg $IDT.ID_SIZE) + ']')
     CkChk 'T9.21 ... bold is off again' $dlg $IDT.ID_BOLD 0
     Press $dlg $IDOK
-    CkEq 'T9.22 ok after reset: size=12' '12' (Ini-Val $app 'editor' 'size' '12')
+    CkEq 'T9.22 ok after reset: size=11' '11' (Ini-Val $app 'editor' 'size' '11')
     CkEq 'T9.23 ... font=Consolas' 'Consolas' (Ini-Val $app 'editor' 'font' 'Consolas')
     CkEq 'T9.24 ... bold=0' '0' (Ini-Val $app 'editor' 'bold' '0')
     CkEq 'T9.25 ... italic=0' '0' (Ini-Val $app 'editor' 'italic' '0')
@@ -2284,7 +2284,7 @@ function Test-T25 {
     Start-Sleep -Milliseconds 400
     Reset-Doc $app $t
     [void](Snd $ed $EM_SETSEL ($st[$i] + 2) ($st[$i + 1] + 3))
-    Band-Ck 'T25.19 the light theme (black on white, the same highlight)' $app 0
+    Band-Ck 'T25.19 the light theme (black on white, the same highlight)' $app 0 $false $false 40
     Cmd $app 'IDM_THEME_DARK'
     Start-Sleep -Milliseconds 400
 

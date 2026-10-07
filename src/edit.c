@@ -402,8 +402,8 @@ void EditApplyColors(void)
 
 /* ctrl+plus / ctrl+minus / ctrl+wheel change the font size itself (not a percentage): one step along this ladder.
  * 1pt steps while text is small, bigger jumps further up. the range is FONT_MIN..FONT_MAX */
-static const int g_ladder[] = { 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 24, 26, 28, 30, 32, 34, 36,
-                                40, 44, 48, 54, 60, 66, 72, 80, 88, 96 };
+static const int g_ladder[] = { 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 24, 26, 28, 30, 32, 34, 36,
+                                40, 44, 48, 54, 60, 66, 70 };
 
 static int Ladder(int cur, int dir)            /* the next size in that direction, or cur if there is none */
 {

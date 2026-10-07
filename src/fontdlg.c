@@ -1,4 +1,4 @@
-/* fontdlg.c - the font dialog: family (optionally monospaced only), size 10..96, bold / italic, live preview.
+/* fontdlg.c - the font dialog: family (optionally monospaced only), size 9..70, bold / italic, live preview.
  * the editor colours come from the theme (view > theme), so there are no colour settings here */
 #include "mp.h"
 
@@ -22,7 +22,7 @@ static FontEnt *g_fonts;                            /* every family, sorted with
 static int      g_nfonts, g_capfonts;               /* whole process: measuring hundreds of fonts is slow */
 static int      g_monoOnly = 1;                     /* the filter's last explicit setting */
 
-static const int g_sizes[15] = { 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72, 96 };
+static const int g_sizes[15] = { 9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 48, 70 };
 static const WCHAR g_intl[] =                       /* japanese korean arabic hebrew russian greek */
     L"\u65e5\u672c\u8a9e \ud55c\uad6d\uc5b4 \u0627\u0644\u0639\u0631\u0628\u064a\u0629 \u05e2\u05d1\u05e8\u05d9\u05ea "
     L"\u0440\u0443\u0441\u0441\u043a\u0438\u0439 \u03b5\u03bb\u03bb\u03b7\u03bd\u03b9\u03ba\u03ac";
@@ -64,7 +64,7 @@ static void FaceAdd(const WCHAR *name)
     g_nfonts++;
 }
 
-/* one call per family and charset. bitmap fonts are left out: they don't scale over 10..96 pt */
+/* one call per family and charset. bitmap fonts are left out: they don't scale over 9..70 pt */
 static int CALLBACK EnumCb(const void *lf, const void *tm, DWORD type, LPARAM lp)
 {
     (void)tm; (void)lp;
@@ -355,7 +355,7 @@ static void FontLayout(FontSt *d)
     int i;
     UiLabel(h, L"font:", 12, 10, 236, 16, 0, SS_NOPREFIX);
     UiLabel(h, L"size:", 264, 10, 120, 16, 0, SS_NOPREFIX);
-    UiLabel(h, L"10 to 96 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
+    UiLabel(h, L"9 to 70 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
     UiLabel(h, L"preview:", 12, 228, 200, 16, 0, SS_NOPREFIX);
     DlgFrame(b, 12, 246, 504, 146, BV_SUNKEN);
     d->pv = CreateWindowExW(0, L"mp_fontpv", NULL, WS_CHILD | WS_VISIBLE, S(12) + 2, S(246) + 2, S(504) - 4, S(146) - 4,
@@ -423,7 +423,7 @@ static void FontCmd(FontSt *d, int id, int code)
     case ID_RESET:
         wcopy(d->face, L"Consolas", 32);
         FontResolve(d->face);
-        d->pt = 12;
+        d->pt = 11;
         d->bold = 0;
         d->italic = 0;
         ShowState(d);
