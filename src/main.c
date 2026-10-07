@@ -14,8 +14,8 @@ static HACCEL g_accel;
 static WCHAR  g_iniDir[PATH_CAP], g_ini[PATH_CAP];
 static WCHAR  g_title[PATH_CAP + 64];
 
-#define MIN_WIN_W 320                                  /* smallest size of the ENTIRE window (frame included), px at 96 dpi: the width yields to the status panels if they need more (was 340, 320, 120 before that) */
-#define MIN_WIN_H 140                                   /* (was 200, 120 before that) */
+#define MIN_WIN_W 320                                  /* smallest size of the ENTIRE window (frame included), px at 96 dpi: the width yields to the status panels if they need more */
+#define MIN_WIN_H 140
 
 /* ======================================================== settings ======= */
 static void PrefsDefaults(void)
@@ -27,7 +27,7 @@ static void PrefsDefaults(void)
     g_pf.fg = C_EDIT_FG;
     g_pf.bg = C_EDIT_BG;
     g_pf.statusbar = 1;
-    g_pf.tab = 8;
+    g_pf.tab = 4;
     g_pf.wrapAround = 1;
     g_pf.marginL = 750; g_pf.marginT = 1000; g_pf.marginR = 750; g_pf.marginB = 1000;
 }
@@ -42,7 +42,7 @@ static void IniLocate(void)
         PathDir(exe, base, PATH_CAP - 64);
     }
     wcopy(g_iniDir, base, PATH_CAP);
-    PathJoin(g_iniDir, L"notepad mint", PATH_CAP);
+    PathJoin(g_iniDir, L"notepad-mint", PATH_CAP);
     wcopy(g_ini, g_iniDir, PATH_CAP);
     PathJoin(g_ini, L"settings.ini", PATH_CAP);
 }
@@ -158,8 +158,8 @@ static void PrefsLoad(void)
     g_pf.italic  = IniGet(L"editor", L"italic", 0) != 0;
     g_pf.wrap    = IniGet(L"editor", L"wrap", 0) != 0;
     g_pf.statusbar = IniGet(L"view", L"statusbar", 1) != 0;
-    g_pf.tab     = IniGet(L"editor", L"tab", 8);
-    if (g_pf.tab != 2 && g_pf.tab != 4) g_pf.tab = 8;                    /* only 2, 4 and 8 */
+    g_pf.tab     = IniGet(L"editor", L"tab", 4);
+    if (g_pf.tab != 2 && g_pf.tab != 8) g_pf.tab = 4;                    /* only 2, 4 and 8 */
     GetPrivateProfileStringW(L"view", L"theme", L"dark", f, 32, g_ini);
     ThemeUse(wcmpi(f, L"light") == 0 ? THEME_LIGHT : THEME_DARK);       /* before any window exists: classes take g_brFace */
     g_pf.winx    = IniGet(L"window", L"x", 0);
@@ -197,8 +197,6 @@ void AppSavePrefs(void)
     IniPutInt(L"editor", L"size", g_pf.pt);
     IniPutInt(L"editor", L"bold", g_pf.bold);
     IniPutInt(L"editor", L"italic", g_pf.italic);
-    IniPutStr(L"editor", L"text", NULL);          /* old custom colours: the theme decides now */
-    IniPutStr(L"editor", L"background", NULL);
     IniPutInt(L"editor", L"wrap", g_pf.wrap);
     IniPutInt(L"editor", L"tab", g_pf.tab);
     IniPutInt(L"view", L"statusbar", g_pf.statusbar);
@@ -333,6 +331,10 @@ void AppUpdateTitle(void)
     }
 }
 
+#define STATS_BIG   1000000                              /* characters: above this the line / byte counts are recounted when typing pauses, not on every key */
+#define STATS_TIMER 7
+static int g_statsNow;                                  /* the timer fired: recount now */
+
 void AppUpdateStatus(void)
 {
     WCHAR b[64];
@@ -346,7 +348,12 @@ void AppUpdateStatus(void)
     {                                                   /* the number of lines ("5 L") and the size a save would write ("124 B"), the lines first: recounted only when the text, the encoding or the line ending changed (a big file is not scanned on every caret move) */
         static struct { DWORD rev, bytes; int lines, len, enc, eol, ok; } c;
         int len = GetWindowTextLengthW(g_edit);
-        if (!c.ok || c.rev != g_textRev || c.len != len || c.enc != g_doc.enc || c.eol != g_doc.eol) {
+        int due = !c.ok || c.rev != g_textRev || c.len != len || c.enc != g_doc.enc || c.eol != g_doc.eol;
+        if (due && c.ok && len > STATS_BIG && !g_statsNow && c.enc == g_doc.enc && c.eol == g_doc.eol) {
+            SetTimer(g_hwnd, STATS_TIMER, 250, NULL);       /* a big text being typed in: the numbers follow when typing pauses (every recount is a pass over all of it) */
+            due = 0;
+        }
+        if (due) {
             void *h = NULL;
             int n = 0;
             const WCHAR *p = EditLockText(&h, &n);
@@ -460,26 +467,25 @@ static BOOL OpenDoc(const WCHAR *path, int force)
 /* write the document. returns TRUE when it reached the disk */
 static BOOL WriteDoc(const WCHAR *path, int enc, int eol)
 {
-    int len;
-    WCHAR *t = EditGetDocText(&len);
+    void *h = NULL;
+    int len = 0;
+    const WCHAR *t = EditLockText(&h, &len);                 /* the control's own text, not a copy (locked only while it is written: the question below runs messages) */
     BOOL lossy = FALSE;
     DWORD er;
 
-    if (!t) { FileError(ERR_NOMEM, path, TRUE); return FALSE; }
-    er = DocWrite(path, t, len, enc, eol, &lossy);
+    er = DocWrite(path, t ? t : L"", t ? len : 0, enc, eol, &lossy);
+    EditUnlockText(h);
     if (er == ERR_LOSSY) {
         if (MpAsk(g_hwnd, APP_NAME,
                   L"this file contains characters in unicode format which will be lost if you save this file "
                   L"in this encoding. to keep the unicode information, click cancel below and then pick one of "
                   L"the unicode options in the encoding menu.\n\ncontinue?",
-                  L"ok", L"cancel", NULL, 2) != 1) {
-            mem_free(t);
-            return FALSE;
-        }
+                  L"ok", L"cancel", NULL, 2) != 1) return FALSE;
         lossy = TRUE;
-        er = DocWrite(path, t, len, enc, eol, &lossy);
+        t = EditLockText(&h, &len);
+        er = DocWrite(path, t ? t : L"", t ? len : 0, enc, eol, &lossy);
+        EditUnlockText(h);
     }
-    mem_free(t);
     if (er) { FileError(er, path, TRUE); return FALSE; }
     wcopy(g_doc.path, path, PATH_CAP);
     g_doc.enc = enc;
@@ -821,8 +827,8 @@ typedef UINT (WINAPI *DragQueryFn)(HANDLE, UINT, LPWSTR, UINT);
 typedef void (WINAPI *DragFinishFn)(HANDLE);
 
 /* files and / or folders dropped on the window: the full path of each goes into the text at the caret (replacing the selection, one undo step,
- * like a paste), one path per line, plain (no quotes) and no line break after the last one. nothing is opened any more; shift held while
- * dropping keeps the old behaviour: the files (not the folders) are opened, the first here and the rest in windows of their own */
+ * like a paste), one path per line, plain (no quotes) and no line break after the last one. shift held while
+ * dropping opens the files instead (not the folders): the first here and the rest in windows of their own */
 static void OnDropFiles(HANDLE drop)
 {
     HMODULE sh = LoadLibraryW(L"shell32.dll");
@@ -971,6 +977,14 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
             return (LRESULT)EditBrush();
         }
         break;
+    case WM_TIMER:
+        if (w == STATS_TIMER) {
+            KillTimer(h, STATS_TIMER);
+            g_statsNow = 1;
+            AppUpdateStatus();
+            g_statsNow = 0;
+        }
+        return 0;
     case WM_COMMAND:
         if ((HWND)l == g_edit) {                               /* notifications from the edit control */
             switch (HIWORD(w)) {
@@ -1035,7 +1049,7 @@ static ACCEL g_acc[] = {
     { FVIRTKEY | FCONTROL | FSHIFT,  'S',            IDM_FILE_SAVEAS },
     { FVIRTKEY | FCONTROL,           'P',            IDM_FILE_PRINT },
     { FVIRTKEY | FCONTROL,           'W',            IDM_FILE_EXIT },          /* close the window = file > exit (asks about unsaved changes first) */
-    { FVIRTKEY | FALT,               'X',            IDM_THEME_TOGGLE },       /* dark <-> light (was ctrl+t; like alt+z below it has no menu bar mnemonic: no bar title has an x) */
+    { FVIRTKEY | FALT,               'X',            IDM_THEME_TOGGLE },       /* dark <-> light (like alt+z below it has no menu bar mnemonic: no bar title has an x) */
     { FVIRTKEY | FCONTROL,           'U',            IDM_VIEW_STATUS },        /* show / hide the status bar */
     { FVIRTKEY | FALT,               'Z',            IDM_FMT_WRAP },           /* word wrap on / off (alt+z has no menu bar mnemonic; AltGr reports ctrl+alt, so it never matches here) */
     { FVIRTKEY | FCONTROL,           'A',            IDM_EDIT_SELALL },        /* the stock multiline edit has no ctrl+a of its own */

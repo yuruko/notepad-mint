@@ -252,10 +252,17 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
     } else {
         UINT cp = CpOf(e);
         int src = (int)(n - off);
-        wn = src ? MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, NULL, 0) : 0;
-        if (src && !wn) { mem_free(buf); return ERR_BADCP; }         /* code page not installed */
-        w = (WCHAR *)mem_alloc(((size_t)wn + 1) * sizeof(WCHAR));
-        if (w && wn) MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, w, wn);
+        w = (WCHAR *)mem_alloc(((size_t)src + 1) * sizeof(WCHAR));  /* one conversion, no size query: no code page makes more characters than it has bytes */
+        wn = (w && src) ? MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, w, src) : 0;
+        if (w && src && !wn && GetLastError() == 122) {              /* (ERROR_INSUFFICIENT_BUFFER: one that does: ask for the size) */
+            wn = MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, NULL, 0);
+            mem_free(w);
+            if (!wn) { mem_free(buf); return ERR_BADCP; }
+            w = (WCHAR *)mem_alloc(((size_t)wn + 1) * sizeof(WCHAR));
+            if (w) wn = MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, w, wn);
+        }
+        if (w && src && !wn) { mem_free(w); mem_free(buf); return ERR_BADCP; }     /* code page not installed */
+        if (w && (size_t)wn < (size_t)src) { WCHAR *s = (WCHAR *)mem_realloc(w, ((size_t)wn + 1) * sizeof(WCHAR)); if (s) w = s; }   /* (multi-byte text: give the unused room back) */
     }
     mem_free(buf);
     if (!w) return ERR_NOMEM;
@@ -313,8 +320,9 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
 }
 
 /* ---------------------------------------------------------------- write -- */
-/* rewrite line breaks (any of CRLF / LF / CR) as the requested style. always allocates */
-static WCHAR *EolConvert(const WCHAR *t, int len, int eol, int *outLen)
+/* rewrite line breaks (any of CRLF / LF / CR) as the requested style. allocates (*owned = 1), except when nothing has to change (CRLF wanted and every
+ * break already is one: the editor's own text): then it hands back `t` itself and the caller must not free it */
+static WCHAR *EolConvert(const WCHAR *t, int len, int eol, int *outLen, int *owned)
 {
     size_t el = (eol == EOL_CRLF) ? 2 : 1, i, breaks = 0, consumed = 0, total;
     WCHAR *out, *d;
@@ -327,6 +335,8 @@ static WCHAR *EolConvert(const WCHAR *t, int len, int eol, int *outLen)
         }
     }
     total = (size_t)len - consumed + breaks * el;
+    if (t && eol == EOL_CRLF && consumed == breaks * 2) { *outLen = len; *owned = 0; return (WCHAR *)t; }
+    *owned = 1;
     out = (WCHAR *)mem_alloc((total + 1) * sizeof(WCHAR));
     if (!out) return NULL;
     d = out;
@@ -376,13 +386,13 @@ DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, 
     WCHAR *w;
     BYTE *out = NULL;
     size_t on = 0, done;
-    int wn = 0, k;
+    int wn = 0, k, own = 0;
     BOOL allow = lossy ? *lossy : FALSE, used = FALSE;
     HANDLE f;
     DWORD wr;
 
     if (lossy) *lossy = FALSE;
-    w = EolConvert(text, len, eol, &wn);
+    w = EolConvert(text, len < 0 ? 0 : len, eol, &wn, &own);
     if (!w) return ERR_NOMEM;
 
     if (enc == ENC_UTF16LE || enc == ENC_UTF16BE) {
@@ -394,14 +404,24 @@ DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, 
             for (k = 0; k < wn; k++)
                 o[1 + k] = (enc == ENC_UTF16LE) ? w[k] : (WCHAR)((w[k] << 8) | (w[k] >> 8));
         }
+    } else if (CpOf(enc) == CP_UTF8) {                        /* utf-8 loses nothing: one conversion, into the worst case of 3 bytes per unit */
+        size_t bom = (enc == ENC_UTF8BOM) ? 3 : 0;
+        int need = 0;
+        out = (BYTE *)mem_alloc(bom + (size_t)wn * 3 + 1);
+        if (out) {
+            if (bom) { out[0] = 0xEF; out[1] = 0xBB; out[2] = 0xBF; }
+            need = wn ? WideCharToMultiByte(CP_UTF8, 0, w, wn, (LPSTR)(out + bom), wn * 3, NULL, NULL) : 0;
+            if (wn && !need) { mem_free(out); if (own) mem_free(w); return ERR_BADCP; }
+            on = bom + (size_t)need;
+        }
     } else {
         UINT cp = CpOf(enc);
-        size_t bom = (enc == ENC_UTF8BOM) ? 3 : 0;
+        size_t bom = 0;
         BOOL probe = CpHasDefaultChar(cp);
         DWORD fl = probe ? WC_NO_BEST_FIT_CHARS : 0;      /* no best-fit guessing: anything not 1:1 becomes '?' + flags loss */
         int need = wn ? WideCharToMultiByte(cp, fl, w, wn, NULL, 0, NULL, NULL) : 0;
 
-        if (wn && !need) { mem_free(w); return ERR_BADCP; }
+        if (wn && !need) { if (own) mem_free(w); return ERR_BADCP; }
         on = bom + (size_t)need;
         out = (BYTE *)mem_alloc(on + 1);
         if (out) {
@@ -409,7 +429,7 @@ DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, 
             if (need) WideCharToMultiByte(cp, fl, w, wn, (LPSTR)(out + bom), need, NULL, probe ? &used : NULL);
         }
     }
-    mem_free(w);
+    if (own) mem_free(w);
     if (!out) return ERR_NOMEM;
     if (used) {
         if (lossy) *lossy = TRUE;

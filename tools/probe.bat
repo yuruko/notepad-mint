@@ -14,7 +14,7 @@ call "%VCVARS%" >nul
 if not exist build\probe mkdir build\probe
 del /q build\probe\*.obj build\probe\*.res build\probe\notepad-mint.exe 2>nul
 
-set "CFLAGS=/nologo /c /std:c17 /GS- /Zl /Gy /Gw /W3 /utf-8 /O2 /Fobuild\probe\\"
+set "CFLAGS=/nologo /c /std:c17 /GS- /Zl /Gy /Gw /W3 /utf-8 /O1 /Fobuild\probe\\"
 set "LFLAGS=/NOLOGO /MACHINE:X86 /SUBSYSTEM:WINDOWS,6.01 /ENTRY:start /NODEFAULTLIB /INCREMENTAL:NO /MANIFEST:NO /SAFESEH:NO /LARGEADDRESSAWARE /OPT:REF /OPT:ICF /DEBUG:NONE"
 
 ml /nologo /c /Fobuild\probe\rt.obj src\rt.asm || exit /b 1

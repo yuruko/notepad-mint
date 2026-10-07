@@ -1,0 +1,23 @@
+notepad mint
+============
+
+a plain text editor. no ai, no sign-in, no telemetry.
+
+	todo
+	- dark and light theme (alt+x)
+	- word wrap (alt+z)
+	- tab size 2, 4 or 8
+	- recent files: the last nine you opened or saved
+
+	#include <stdio.h>
+
+	int main(void)
+	{
+		puts("hello, mint");
+		return 0;
+	}
+
+unicode just works:  café  naïve  日本語のテキスト  Привет  αβγ  ✓
+
+the status bar shows line and column, the number of lines,
+the size in bytes, the line ending and the encoding.

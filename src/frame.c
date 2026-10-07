@@ -24,7 +24,7 @@ enum { FB_MIN, FB_MAX, FB_CLOSE, FB_COUNT };
 static int   g_capH, g_hot = -1, g_down = -1, g_active = 1, g_track;
 static HICON g_icon;
 
-static int BtnW(void) { return S(38); }                 /* (was 46) */
+static int BtnW(void) { return S(38); }
 static int Edge(void) { return UiMetric(SM_CYFRAME) + UiMetric(SM_CXPADDEDBORDER); }     /* the system's sizing border */
 static int Crop(void) { return S(1); }                  /* padding taken off the BOTTOM of the strip: the icon and the title are laid out as if it were this much higher (they do not move), its last rows are just not there */
 
@@ -37,7 +37,7 @@ static void Metrics(void)
     SelectObject(dc, of);
     ReleaseDC(NULL, dc);
     g_capH = tm.tmHeight + S(10) - Crop();
-    if (g_capH < S(24) - Crop()) g_capH = S(24) - Crop();    /* (was 30, then 24: the strip is 7 px lower than it was) */
+    if (g_capH < S(24) - Crop()) g_capH = S(24) - Crop();
 }
 
 int FrameHeight(void)
@@ -98,7 +98,7 @@ static int HitBtn(int x, int y, int cw)
     return -1;
 }
 
-static int IconLeft(void) { return S(8); }               /* padding left of the icon (was 10); the title follows the icon */
+static int IconLeft(void) { return S(8); }               /* padding left of the icon; the title follows the icon */
 static int IconRight(void) { return IconLeft() + S(16) + S(6); }
 static int InIcon(int x, int y) { return x >= 0 && x < IconRight() && y >= 0 && y < FrameHeight(); }
 
@@ -114,7 +114,7 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
     COLORREF bg = C_FACE, fg = g_active ? C_TEXT : C_DIM;
     HPEN pen;
     HGDIOBJ op;
-    int cx = (r->left + r->right) / 2, cy = (r->top + r->bottom) / 2, g = S(4), d = S(2), pw = S(1);   /* glyph half size (was 5) */
+    int cx = (r->left + r->right) / 2, cy = (r->top + r->bottom) / 2, g = S(4), d = S(2), pw = S(1);   /* glyph half size */
 
     if (b == FB_CLOSE && (hot || down)) {                            /* the system's close red, in both themes */
         bg = down ? RGB(0xf1, 0x70, 0x7a) : RGB(0xe8, 0x11, 0x23);
@@ -158,12 +158,11 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
     DeleteObject(pen);
 }
 
-/* the strip's background: the face colour with a FLAT tint of the accent over it, STRIP_TINT % of the accent (the middle of the 14% -> 4% fade it
- * used to have: there is no gradient any more). the light theme has STRIP_TINT_LIGHT_PLUS points more (the dark accent needs more to show on the
+/* the strip's background: the face colour with a FLAT tint of the accent over it, STRIP_TINT % of the accent. the light theme has STRIP_TINT_LIGHT_PLUS points more (the dark accent needs more to show on the
  * light face), and an inactive window has STRIP_TINT_INACTIVE_MINUS points less (clamped at 0). the window buttons are transparent at rest, so
  * the strip reads as one piece */
-#define STRIP_TINT 9                                                 /* dark: (14 + 4) / 2 */
-#define STRIP_TINT_LIGHT_PLUS 12                                     /* light: (26 + 16) / 2 = 21 */
+#define STRIP_TINT 9
+#define STRIP_TINT_LIGHT_PLUS 12                                     /* light: 21 in all */
 #define STRIP_TINT_INACTIVE_MINUS 7
 static COLORREF Tint(COLORREF face, COLORREF acc, int a)         /* a = 0..255: how much of the accent */
 {

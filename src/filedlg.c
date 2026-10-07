@@ -1,6 +1,6 @@
 /* filedlg.c - open / save as and the encoding picker.
  * open / save as are the native comdlg32 dialogs (GetOpenFileNameW / GetSaveFileNameW), loaded on first use like the print
- * dialogs. they are windows' own and follow its light / dark mode, not the app theme (we can't theme them), so there is no custom one any more.
+ * dialogs. they are windows' own and follow its light / dark mode, not the app theme (we can't theme them).
  * the encoding picker at the bottom is ours (an owner-draw list in the app's own theme). */
 #include "mp.h"
 

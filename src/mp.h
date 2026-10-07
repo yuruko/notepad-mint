@@ -266,7 +266,7 @@ void  AppUpdateStatus(void);
 /* -------------------------------------------------------------- edit.c --- */
 #define EDIT_PAD 8                                    /* margin left and below the text (and right of it while word wrap is on), 96-dpi pixels (no frame around the editor): a margin, not a padding: text that is scrolled out of the control's rectangle still runs to the edge of the editor (the strips are painted by BandDraw in edit.c) */
 #define SBAR_TRIM 5                                  /* the editor's scrollbars are this many 96-dpi pixels thinner than the system's: its window overhangs the visible area at the right and at the bottom by this much (the native strip's outer part is clipped away by the parent), sbar.c covers the rest */
-#define EDIT_PAD_TOP 4                               /* padding above the first row (4 px less than EDIT_PAD: it was 8 like the other sides) */
+#define EDIT_PAD_TOP 4                               /* padding above the first row */
 #define EDIT_BAND_INSET 0                           /* the row that is only partly in view at the bottom runs down to this many 96-dpi pixels above the editor's bottom edge: 0 = to the edge, EDIT_PAD = the bottom padding stays blank */
 HWND   EditCreate(HWND parent);                 /* (re)creates g_edit for g_pf.wrap, carrying text/selection/rtl over */
 void   EditApplyFont(void);                     /* font from g_pf (face, g_pf.cur size, dpi) */
@@ -282,7 +282,6 @@ const WCHAR *EditLockText(void **h, int *n);    /* zero-copy view of the text (C
 void   EditUnlockText(void *h);
 void   EditCaretPos(int *line, int *col);       /* 1-based, logical lines (also with word wrap on) */
 BOOL   EditSelStats(int enc, int eol, int *lines, DWORD *bytes);   /* the selection: TRUE when there is one, then the lines it covers and the bytes a save would write for it in this encoding / line ending (no bom) */
-int    EditLineCount(void);
 BOOL   EditGotoLine(int line);
 void   EditClearLine(void);                     /* ctrl+k: empties the caret's logical line (the text only, its line break stays); one undo step */
 void   EditZoomStep(int dir);                   /* +1 / -1: next bigger / smaller size (10..96pt) */

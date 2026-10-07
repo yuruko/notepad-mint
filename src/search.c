@@ -17,7 +17,7 @@ static int Same(const WCHAR *t, const WCHAR *p, int m, int matchCase)
 static int At(const WCHAR *t, const WCHAR *pat, int m, WCHAR f, WCHAR fu, int matchCase)
 {
     WCHAR c = t[0];
-    if (c != f && c != fu && (matchCase || c < 128 || wlow(c) != f)) return 0;     /* first char prefilter */
+    if (c != f && c != fu && (matchCase || c < 128 || (f < 128 && c != 0x212A && c != 0x130) || wlow(c) != f)) return 0;     /* first char prefilter (no user32 call per char of a non-ascii text: the only non-ascii letters that lower to ascii are the kelvin sign and the dotted capital i) */
     return Same(t + 1, pat + 1, m - 1, matchCase);
 }
 

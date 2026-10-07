@@ -2,13 +2,13 @@
 ; build it with tools\installer.bat (it passes the paths and the version), or by hand:
 ;   makensis /DVERSION=1.0.0 /DEXE_PATH=D:\...\build\notepad-mint.exe /DOUT_PATH=D:\...\build\notepad-mint-1.0.0-setup.exe /DICON_PATH=D:\...\assets\notepad_mint.ico installer\notepad-mint.nsi
 ; what it does: copies the one exe into program files, adds a start menu shortcut (and an optional desktop one), writes the uninstaller and its entry in
-; "installed apps". the settings (%appdata%\notepad mint\settings.ini) are the user's own: the uninstaller leaves them alone.
+; "installed apps". the settings (%appdata%\notepad-mint\settings.ini) are the user's own: the uninstaller leaves them alone.
 
 Unicode true
 SetCompressor /SOLID lzma
 
 !ifndef VERSION
-  !define VERSION "1.0.1"
+  !define VERSION "1.0.0"
 !endif
 !ifndef EXE_PATH
   !error "EXE_PATH is not set (the built notepad-mint.exe)"
@@ -54,7 +54,7 @@ VIAddVersionKey "LegalCopyright" "free software. no ai, no sign-in, no telemetry
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
-; 1.0.0 installed into "program files (x86)\notepad mint" (with a space): take that copy away first (its own uninstaller, silently), so an update
+; an earlier installer used "program files (x86)\notepad mint" (with a space): take that copy away first (its own uninstaller, silently), so an update
 ; leaves one copy, in "notepad-mint"
 Function .onInit
   IfFileExists "$PROGRAMFILES32\notepad mint\uninstall.exe" 0 +3

@@ -21,12 +21,13 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\tests\ui\ui_test.ps1') -NoRun -Exe $Exe
 try {
     $ad = Join-Path $work 'pw_appdata'
-    $dir = Join-Path $ad 'notepad mint'
+    $dir = Join-Path $ad 'notepad-mint'
     [void](New-Item -ItemType Directory -Force -Path $dir)
-    $ini = "[view]`r`ntheme=" + $Theme + "`r`n[window]`r`nx=100`r`ny=60`r`nw=900`r`nh=620`r`n"
+    $ww = 900; $wh = 620
+    if ($Size -match '^(\d+)x(\d+)$') { $ww = [int]$Matches[1]; $wh = [int]$Matches[2] }                  # the whole window, its invisible 8 px sizing border included
+    $ini = "[view]`r`ntheme=" + $Theme + "`r`n[window]`r`nx=100`r`ny=60`r`nw=" + $ww + "`r`nh=" + $wh + "`r`n"
     [IO.File]::WriteAllBytes((Join-Path $dir 'settings.ini'), ([byte[]](0xFF, 0xFE)) + [Text.Encoding]::Unicode.GetBytes($ini))
     $app = Start-App $File $ad
-    if ($Size -match '^(\d+)x(\d+)$') { [void][U]::Post([long]$app.Main, 0x0, 0, 0) }
     Start-Sleep -Milliseconds 400
     if ($Text) { Ed-Set $app $Text; [void](Snd (Get-Edit $app) $EM_SETSEL 0 0) }     # (a raw WM_SETTEXT does not refresh the status bar: EM_SETSEL does)
     foreach ($c in ($Cmds -split ',' | Where-Object { $_ })) { Cmd $app $c.Trim(); Start-Sleep -Milliseconds 400 }

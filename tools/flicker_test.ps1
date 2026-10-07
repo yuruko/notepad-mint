@@ -152,7 +152,7 @@ $work = Join-Path $env:TEMP ('mint_flicker_' + [Guid]::NewGuid().ToString('N').S
 [void](New-Item -ItemType Directory -Force -Path $work)
 $exeCopy = Join-Path $work 'mint_flicker_test.exe'
 Copy-Item -LiteralPath $Exe -Destination $exeCopy -Force
-$ad = Join-Path $work 'appdata'; $dir = Join-Path $ad 'notepad mint'
+$ad = Join-Path $work 'appdata'; $dir = Join-Path $ad 'notepad-mint'
 [void](New-Item -ItemType Directory -Force -Path $dir)
 $wrapV = 0; if ($Wrap) { $wrapV = 1 }
 $ini = "[view]`r`ntheme=" + $Theme + "`r`n[editor]`r`nwrap=" + $wrapV + "`r`n"                       # (no [window] section: the first show is SW_SHOWDEFAULT = SW_SHOWNOACTIVATE from the startup info)

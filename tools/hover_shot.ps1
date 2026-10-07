@@ -14,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\tests\ui\ui_test.ps1') -NoRun -Exe $Exe
 try {
     $ad = Join-Path $work 'hv_appdata'
-    $dir = Join-Path $ad 'notepad mint'
+    $dir = Join-Path $ad 'notepad-mint'
     [void](New-Item -ItemType Directory -Force -Path $dir)
     $ini = "[view]`r`ntheme=" + $Theme + "`r`n[window]`r`nx=100`r`ny=60`r`nw=900`r`nh=620`r`n"
     [IO.File]::WriteAllBytes((Join-Path $dir 'settings.ini'), ([byte[]](0xFF, 0xFE)) + [Text.Encoding]::Unicode.GetBytes($ini))

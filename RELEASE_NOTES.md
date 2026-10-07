@@ -17,4 +17,4 @@ one 32-bit exe (about 200 kb) for 32-bit windows, 64-bit windows and windows on 
 - drop files on the window to insert their paths, selected line breaks are visible, text scrolls to the very edge, thin classic scrollbars
 - find / replace, go to, font, page setup, print: everything notepad has
 
-settings are in `%appdata%\notepad mint\settings.ini`. written in raw c and x86 assembly, no crt, imports only kernel32 / user32 / gdi32.
+settings are in `%appdata%\notepad-mint\settings.ini`. written in raw c and x86 assembly, no crt, imports only kernel32 / user32 / gdi32.

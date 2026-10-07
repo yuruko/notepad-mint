@@ -382,14 +382,14 @@ $script:launchN = 0
 function Start-App([string]$file = '', [string]$appdata = '') {
     if (-not $appdata) { $script:launchN++; $appdata = Join-Path $work ('appdata' + $script:launchN) }
     [void](New-Item -ItemType Directory -Force -Path $appdata)
-    $env:APPDATA = $appdata                                                      # the app reads %APPDATA%\notepad mint\settings.ini (main.c IniLocate)
+    $env:APPDATA = $appdata                                                      # the app reads %APPDATA%\notepad-mint\settings.ini (main.c IniLocate)
     $argLine = ''
     if ($file) { $argLine = '"' + $file + '"' }
     $procId = [U]::Launch($exeCopy, $argLine, $work)
     $proc = $null
     try { $proc = [Diagnostics.Process]::GetProcessById([int]$procId) } catch { throw 'the exe exited right after it was launched (not a gui app, or it crashed at startup)' }
     $app = [pscustomobject]@{ Pid = [uint32]$procId; Proc = $proc; AppData = $appdata
-                              Ini = (Join-Path $appdata 'notepad mint\settings.ini'); Main = [long]0; Tid = [uint32]0 }
+                              Ini = (Join-Path $appdata 'notepad-mint\settings.ini'); Main = [long]0; Tid = [uint32]0 }
     $script:apps += $app
     $main = WaitFor { [U]::FindTop($app.Pid, $MainClass, '') } 8000
     if (-not $main) { throw ('the main window (class ' + $MainClass + ') did not appear') }
@@ -2208,11 +2208,11 @@ function Test-T25 {
 
     Reset-Doc $app (Band-Doc 120 ("`t" + 'tab' + "`t" + 'stops' + "`t" + '!'))
     Band-Ck 'T25.4 tabs: the default tab stops, the same as the control''s' $app 0
-    foreach ($ts in 4, 2) {                                                      # format > tab size: the band's own rows follow the control's tab stops
+    foreach ($ts in 8, 2) {                                                      # format > tab size: the band's own rows follow the control's tab stops
         Cmd $app ('IDM_TAB_' + $ts); Start-Sleep -Milliseconds 500
-        Band-Ck ('T25.4' + $(if ($ts -eq 4) { 'b' } else { 'c' }) + ' tab size ' + $ts + ': the same as the control''s') $app 0
+        Band-Ck ('T25.4' + $(if ($ts -eq 8) { 'b' } else { 'c' }) + ' tab size ' + $ts + ': the same as the control''s') $app 0
     }
-    Cmd $app 'IDM_TAB_8'; Start-Sleep -Milliseconds 500
+    Cmd $app 'IDM_TAB_4'; Start-Sleep -Milliseconds 500
 
     $jp = Chars @(0x65E5, 0x672C, 0x8A9E, 0x306E, 0x30C6, 0x30B9, 0x30C8, 0x3067, 0x3059, 0xFF21, 0xFF22)       # kanji, hiragana, katakana, full width latin
     Reset-Doc $app (Band-Doc 120 ($jp + ' ' + $jp))
@@ -2714,7 +2714,7 @@ function Test-T30 {
 function Recent-List($ini) { $i = Read-Ini $ini; $l = @(); if ($i.ContainsKey('recent')) { foreach ($k in 1..12) { if ($i['recent'].ContainsKey([string]$k)) { $l += $i['recent'][[string]$k] } } }; return $l }
 function Test-T31 {
     $ad = Join-Path $work 'recent_appdata'
-    $ini = Join-Path $ad 'notepad mint\settings.ini'
+    $ini = Join-Path $ad 'notepad-mint\settings.ini'
     $f = @(); foreach ($n in 1..11) { $p = Join-Path $work ('rec' + $n + '.txt'); [IO.File]::WriteAllText($p, 'file ' + $n); $f += $p }
     foreach ($n in 1..11) {
         $a = Start-App $f[$n - 1] $ad
@@ -2738,33 +2738,32 @@ function Test-T31 {
 }
 
 # =========================================================================================================== T32
-# format > tab size: 2, 4 or 8 columns (8 until chosen otherwise), saved in settings.ini ([editor] tab), used by the control, by the rows edit.c draws itself and by printing
+# format > tab size: 2, 4 or 8 columns (4 until chosen otherwise), saved in settings.ini ([editor] tab), used by the control, by the rows edit.c draws itself and by printing
 function Test-T32 {
     $app = Start-App
     $ed = Get-Edit $app
     $pad = [int][Math]::Round($IDM.EDIT_PAD * ([U]::Dpi([long]$app.Main)) / 96, [MidpointRounding]::AwayFromZero)
     Reset-Doc $app ("`tx")
     function TabW { param($a) $e = Get-Edit $a; return ([int](([long](Snd $e 0xD6 1 0)) -band 0xFFFF)) - $pad }       # EM_POSFROMCHAR of the "x": how far the tab reaches
-    $w8 = TabW $app
-    Ck 'T32.1 the default tab size is 8 columns (a tab reaches a positive multiple of 8 average characters)' ($w8 -gt 0 -and $w8 % 8 -eq 0) ('tab reaches ' + $w8 + ' px')
-    Cmd $app 'IDM_TAB_4'
-    $ok = WaitFor { (TabW $app) -ne $w8 } 3000
     $w4 = TabW $app
-    Ck 'T32.2 tab size 4: a tab is half as wide' ($ok -and $w4 * 2 -eq $w8) ('8: ' + $w8 + ' px, 4: ' + $w4 + ' px')
-    Cmd $app 'IDM_TAB_2'
+    Ck 'T32.1 the default tab size is 4 columns (a tab reaches a positive multiple of 4 average characters)' ($w4 -gt 0 -and $w4 % 4 -eq 0) ('tab reaches ' + $w4 + ' px')
+    Cmd $app 'IDM_TAB_8'
     $ok = WaitFor { (TabW $app) -ne $w4 } 3000
+    $w8 = TabW $app
+    Ck 'T32.2 tab size 8: a tab is twice as wide' ($ok -and $w4 * 2 -eq $w8) ('4: ' + $w4 + ' px, 8: ' + $w8 + ' px')
+    Cmd $app 'IDM_TAB_2'
+    $ok = WaitFor { (TabW $app) -ne $w8 } 3000
     $w2 = TabW $app
-    Ck 'T32.3 tab size 2: a quarter as wide as 8' ($ok -and $w2 * 4 -eq $w8) ('8: ' + $w8 + ' px, 2: ' + $w2 + ' px')
+    Ck 'T32.3 tab size 2: half as wide as 4' ($ok -and $w2 * 2 -eq $w4) ('4: ' + $w4 + ' px, 2: ' + $w2 + ' px')
     Ck 'T32.4 the choice is saved (settings.ini [editor] tab=2)' (Ini-Val $app 'editor' 'tab' '2') ('tab=' + $script:iniV)
     $ad = $app.AppData
     Stop-App $app
     $b = Start-App '' $ad
     Reset-Doc $b ("`tx")
-    $e = Get-Edit $b
     Ck 'T32.5 a new window starts with the saved tab size' ((TabW $b) -eq $w2) ('tab reaches ' + (TabW $b) + ' px, wanted ' + $w2)
-    Cmd $b 'IDM_TAB_8'
-    $ok = WaitFor { (TabW $b) -eq $w8 } 3000
-    Ck 'T32.6 back to 8 columns' $ok ('tab reaches ' + (TabW $b) + ' px, wanted ' + $w8)
+    Cmd $b 'IDM_TAB_4'
+    $ok = WaitFor { (TabW $b) -eq $w4 } 3000
+    Ck 'T32.6 back to 4 columns' $ok ('tab reaches ' + (TabW $b) + ' px, wanted ' + $w4)
 }
 
 # ====================================================================================================== run them all

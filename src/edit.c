@@ -153,16 +153,21 @@ static int CaretIndex(void)
 
 void EditCaretPos(int *line, int *col)
 {
+    static struct { DWORD rev; int n, idx, line, col, ok; } c;      /* the status bar asks several times for one keystroke: the same text and caret are not scanned again */
     HLOCAL h;
     int n, idx = CaretIndex(), i;
-    const WCHAR *p = TextLock(&h, &n);
+    const WCHAR *p;
     *line = 1; *col = 1;
+    n = GetWindowTextLengthW(g_edit);
+    if (c.ok && c.rev == g_textRev && c.n == n && c.idx == idx) { *line = c.line; *col = c.col; return; }
+    p = TextLock(&h, &n);
     if (!p) return;
     if (idx > n) idx = n;
     *line = 1 + (int)mp_count_lf(p, (size_t)idx);
     for (i = idx; i > 0 && p[i - 1] != '\n'; i--) {}
     *col = idx - i + 1;
     LocalUnlock(h);
+    c.rev = g_textRev; c.n = n; c.idx = idx; c.line = *line; c.col = *col; c.ok = 1;
 }
 
 /* the selection as the status bar shows it ("162:54 [5 L 54 B]"): TRUE when something is selected, then
@@ -194,15 +199,6 @@ BOOL EditSelStats(int enc, int eol, int *lines, DWORD *bytes)
     *lines = c.lines;
     *bytes = c.bytes;
     return TRUE;
-}
-
-int EditLineCount(void)
-{
-    HLOCAL h;
-    int n, r = 1;
-    const WCHAR *p = TextLock(&h, &n);
-    if (p) { r = 1 + (int)mp_count_lf(p, (size_t)n); LocalUnlock(h); }
-    return r;
 }
 
 /* caret to the start of logical line `line` (1-based). FALSE when the document has fewer lines */
@@ -750,7 +746,7 @@ static int StubWatch(UINT m, WPARAM w)              /* messages after which the 
  *
  * the text is drawn with TabbedTextOutW, which is what the control uses for text (same font, the default tab stops, the same language pack for shaped
  * scripts), in up to three pieces (before / inside / after the selection), pixel for pixel like the control (tests\ui T25). what is NOT drawn, and stays
- * blank like the whole band used to: a right to left editor's band; rows of arabic / hebrew presentation forms, and rows with right to left letters
+ * blank: a right to left editor's band; rows of arabic / hebrew presentation forms, and rows with right to left letters
  * or bidi marks while any of the row is selected (BandKind); rows too wide for the 16 bits a text width has (like for the blocks above). */
 #define BAND_SEL_EXTRA 1                            /* the control's highlight is this many pixels wider than the text it covers */
 
@@ -1052,7 +1048,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         Sleep(8);                                               /* calibration only (tools\flicker_test.ps1 must see this): a visible gap between the erase and the text */
 #endif
         return r;
-    case WM_SIZE: {                                             /* with word wrap on every size change re-wraps ALL the text (45 ms per 3000 lines) and one resize step used to cost six wraps: three WM_SIZE, each re-wrapped for the client width by the control and again for the padded one by EditPad. now: a size that is already the control's is skipped, and a new one sets the padded rectangle only (the same function behind EM_SETRECT does the work of WM_SIZE): one wrap */
+    case WM_SIZE: {                                             /* with word wrap on every size change re-wraps ALL the text (45 ms per 3000 lines): a size that is already the control's is skipped, and a new one sets the padded rectangle only (the same function behind EM_SETRECT does the work of WM_SIZE): one wrap */
         static HWND szH;
         static LPARAM szL;
         static DWORD lastAt, lastCost;

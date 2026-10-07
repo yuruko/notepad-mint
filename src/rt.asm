@@ -72,10 +72,17 @@ _memmove proc
     lea     edx, [esi + ecx]
     cmp     edi, edx
     jae     mm_fwd                  ; dst >= src+n: no overlap
-    lea     edi, [edi + ecx - 1]    ; overlapping, dst above src: copy backwards
+    lea     edi, [edi + ecx - 1]    ; overlapping, dst above src: copy backwards: the last n mod 4 bytes, then dwords
     lea     esi, [esi + ecx - 1]
+    mov     edx, ecx
+    and     ecx, 3
     std
     rep     movsb
+    sub     esi, 3                  ; (both now at the last byte of the last whole dword: its first byte)
+    sub     edi, 3
+    mov     ecx, edx
+    shr     ecx, 2
+    rep     movsd
     cld
     jmp     mm_done
 mm_fwd:
@@ -100,6 +107,19 @@ _memcmp proc
     mov     esi, [esp + 12]
     mov     edi, [esp + 16]
     mov     ecx, [esp + 20]
+mc_dw:
+    cmp     ecx, 4
+    jb      mc_bytes
+    mov     eax, [esi]
+    cmp     eax, [edi]
+    jne     mc_diff                 ; a different dword: the byte loop below finds the first different byte of it
+    add     esi, 4
+    add     edi, 4
+    sub     ecx, 4
+    jmp     mc_dw
+mc_diff:
+    mov     ecx, 4
+mc_bytes:
     xor     eax, eax
     test    ecx, ecx
     jz      mc_done

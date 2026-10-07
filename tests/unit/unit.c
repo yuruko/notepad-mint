@@ -449,6 +449,28 @@ static void TestRt(void)
     Want(g_cmp(&x, &y, 1) > 0 && g_cmp(&y, &x, 1) < 0, L"bytes must compare as unsigned", 0, 0);
     Want(g_cmp(&x, &y, 0) == 0, L"zero length must be equal", 0, 0);
     Done(L"memcmp");
+    for (ok = 1, n = 0; n <= 41; n++) {                                 /* every length (dword steps and a byte tail) x every overlap, up and down, against a plain byte loop */
+        for (off = 1; off <= 7; off++) {
+            BYTE ref[64];
+            for (i = 0; i < 64; i++) a[i] = ref[i] = (BYTE)(i * 5 + 1);
+            g_move(a + off, a, (size_t)n);                              /* destination above */
+            for (i = n - 1; i >= 0; i--) ref[off + i] = (BYTE)(i * 5 + 1);
+            if (memcmp(a, ref, 64) != 0) ok = 0;
+            for (i = 0; i < 64; i++) a[i] = ref[i] = (BYTE)(i * 5 + 1);
+            g_move(a, a + off, (size_t)n);                              /* destination below */
+            for (i = 0; i < n; i++) ref[i] = (BYTE)((off + i) * 5 + 1);
+            if (memcmp(a, ref, 64) != 0) ok = 0;
+        }
+    }
+    Want(ok, L"wrong bytes", 0, 0);
+    Done(L"memmove every length 0..41 at every overlap 1..7, both directions");
+    for (ok = 1, n = 0; n < 37; n++) {                                  /* one different byte at every position: the sign says which side is bigger */
+        for (i = 0; i < 37; i++) a[i] = b[i] = (BYTE)(i + 3);
+        b[n] = (BYTE)(a[n] + 1);
+        if (g_cmp(a, b, 37) >= 0 || g_cmp(b, a, 37) <= 0 || g_cmp(a, b, (size_t)n) != 0) ok = 0;
+    }
+    Want(ok, L"a different byte was missed or compared the wrong way", 0, 0);
+    Done(L"memcmp finds a different byte at every position of 37");
     Int(L"__chkstk big stack frame", BigFrame(3), 190 + 20 * 3);
 }
 

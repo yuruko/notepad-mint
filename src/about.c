@@ -131,7 +131,7 @@ static LRESULT CALLBACK AboutProc(HWND h, UINT m, WPARAM w, LPARAM l)
                    L"no ai, no sign-in, no telemetry, no cloud.", 20, 80, 340, 52, 0, SS_NOPREFIX);
         UiLabel(h, L"written in c and assembly with no runtime libraries. one small 32-bit exe runs on "
                    L"32-bit, 64-bit and arm windows.", 20, 138, 340, 34, IDC_DIM, SS_NOPREFIX);
-        UiLabel(h, L"settings: %appdata%\\notepad mint\\settings.ini", 20, 176, 340, 16, IDC_DIM, SS_NOPREFIX);
+        UiLabel(h, L"settings: %appdata%\\notepad-mint\\settings.ini", 20, 176, 340, 16, IDC_DIM, SS_NOPREFIX);
         c = CreateWindowExW(0, L"mp_link", L"yuru.be", WS_CHILD | WS_VISIBLE | WS_TABSTOP, S(20), S(206), S(76), S(20),
                             h, (HMENU)(ULONG_PTR)ID_LINK, g_hinst, NULL);
         SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUI, FALSE);

@@ -175,22 +175,15 @@ typedef struct {
 #define HWND_TOP        ((HWND)0)
 #define HWND_BOTTOM     ((HWND)1)
 #define HWND_TOPMOST    ((HWND)(LONG_PTR)-1)
-#define HWND_NOTOPMOST  ((HWND)(LONG_PTR)-2)
-#define HWND_DESKTOP    ((HWND)0)
 
 /* window styles */
 #define WS_OVERLAPPED 0x00000000L
 #define WS_POPUP      0x80000000L
 #define WS_CHILD      0x40000000L
-#define WS_MINIMIZE   0x20000000L
 #define WS_VISIBLE    0x10000000L
-#define WS_DISABLED   0x08000000L
 #define WS_CLIPSIBLINGS 0x04000000L
 #define WS_CLIPCHILDREN 0x02000000L
-#define WS_MAXIMIZE   0x01000000L
 #define WS_CAPTION    0x00C00000L
-#define WS_BORDER     0x00800000L
-#define WS_DLGFRAME   0x00400000L
 #define WS_VSCROLL    0x00200000L
 #define WS_HSCROLL    0x00100000L
 #define WS_SYSMENU    0x00080000L
@@ -203,13 +196,9 @@ typedef struct {
 #define WS_EX_RIGHT         0x00001000L
 #define WS_EX_RTLREADING    0x00002000L
 #define WS_EX_LEFTSCROLLBAR 0x00004000L
-#define WS_EX_DLGMODALFRAME 0x00000001L
 #define WS_EX_TOPMOST       0x00000008L
 #define WS_EX_ACCEPTFILES   0x00000010L
 #define WS_EX_TOOLWINDOW    0x00000080L
-#define WS_EX_CLIENTEDGE    0x00000200L
-#define WS_EX_CONTROLPARENT 0x00010000L
-#define WS_EX_APPWINDOW     0x00040000L
 #define WS_EX_NOACTIVATE    0x08000000L
 
 #define CS_VREDRAW 0x0001
@@ -235,9 +224,7 @@ typedef struct {
 #define WM_CLOSE 0x0010
 #define WM_QUIT 0x0012
 #define WM_ERASEBKGND 0x0014
-#define WM_SETTINGCHANGE 0x001A
 #define WM_QUERYENDSESSION 0x0011
-#define WM_ENDSESSION 0x0016
 #define WM_ACTIVATEAPP 0x001C
 #define WM_CANCELMODE 0x001F
 #define WM_SETCURSOR 0x0020
@@ -245,11 +232,8 @@ typedef struct {
 #define WM_GETMINMAXINFO 0x0024
 #define WM_DRAWITEM 0x002B
 #define WM_MEASUREITEM 0x002C
-#define WM_VKEYTOITEM 0x002E
-#define WM_CHARTOITEM 0x002F
 #define WM_SETFONT 0x0030
 #define WM_GETFONT 0x0031
-#define WM_WINDOWPOSCHANGED 0x0047
 #define WM_CONTEXTMENU 0x007B
 #define WM_SETICON 0x0080
 #define WM_NCCREATE 0x0081
@@ -257,7 +241,6 @@ typedef struct {
 #define WM_NCCALCSIZE 0x0083
 #define WM_NCHITTEST 0x0084
 #define WM_NCACTIVATE 0x0086
-#define WM_NCLBUTTONDBLCLK 0x00A3
 #define WM_NCRBUTTONDOWN 0x00A4
 #define WM_NCRBUTTONUP 0x00A5
 #define WM_GETDLGCODE 0x0087
@@ -271,7 +254,6 @@ typedef struct {
 #define WM_SYSDEADCHAR 0x0107
 #define WM_IME_ENDCOMPOSITION 0x010E
 #define WM_IME_COMPOSITION 0x010F
-#define WM_INITDIALOG 0x0110
 #define WM_COMMAND 0x0111
 #define WM_SYSCOMMAND 0x0112
 #define WM_TIMER 0x0113
@@ -279,8 +261,6 @@ typedef struct {
 #define WM_VSCROLL 0x0115
 #define WM_CTLCOLOREDIT 0x0133
 #define WM_CTLCOLORLISTBOX 0x0134
-#define WM_CTLCOLORBTN 0x0135
-#define WM_CTLCOLORDLG 0x0136
 #define WM_CTLCOLORSTATIC 0x0138
 #define WM_MOUSEMOVE 0x0200
 #define WM_LBUTTONDOWN 0x0201
@@ -291,8 +271,6 @@ typedef struct {
 #define WM_MOUSEWHEEL 0x020A
 #define WM_CAPTURECHANGED 0x0215
 #define WM_PRINTCLIENT 0x0318
-#define PRF_CLIENT 0x00000004L
-#define PRF_ERASEBKGND 0x00000008L
 #define WM_DROPFILES 0x0233
 #define WM_DPICHANGED 0x02E0
 #define WM_MOUSELEAVE 0x02A3
@@ -328,13 +306,11 @@ typedef struct {
 #define SW_SHOWMAXIMIZED 3
 #define SW_SHOWNOACTIVATE 4
 #define SW_SHOW 5
-#define SW_RESTORE 9
 #define SW_SHOWDEFAULT 10
 
 #define SWP_NOSIZE 0x0001
 #define SWP_NOMOVE 0x0002
 #define SWP_NOZORDER 0x0004
-#define SWP_NOREDRAW 0x0008
 #define SWP_NOACTIVATE 0x0010
 #define SWP_FRAMECHANGED 0x0020
 #define SWP_SHOWWINDOW 0x0040
@@ -359,45 +335,34 @@ typedef struct {
 #define SB_PAGEUP 2
 #define SB_PAGEDOWN 3
 #define SB_THUMBPOSITION 4
-#define SM_CXVSCROLL 2
-#define SM_CYHSCROLL 3
 #define SM_CYFRAME 33
 #define SM_CXPADDEDBORDER 92
 #define DI_NORMAL 3
-#define SM_CXICON 11
-#define SM_CYICON 12
 #define SM_CXSMICON 49
 #define SM_CYSMICON 50
 
 #define IDC_ARROW MAKEINTRESOURCEW(32512)
-#define IDC_IBEAM MAKEINTRESOURCEW(32513)
 #define IDC_WAIT  MAKEINTRESOURCEW(32514)
 #define IDC_HAND  MAKEINTRESOURCEW(32649)
 #define IMAGE_ICON 1
 #define LR_DEFAULTCOLOR 0
-#define LR_SHARED 0x8000
 
 #define IDOK 1
 #define IDCANCEL 2
 #define IDYES 6
 #define IDNO 7
-#define MB_OK 0
-#define MB_ICONERROR 0x10
 
 #define RDW_INVALIDATE 0x0001
 #define RDW_ERASE 0x0004
 #define RDW_FRAME 0x0400
 #define RDW_ALLCHILDREN 0x0080
-#define PM_NOREMOVE 0
 #define PM_REMOVE 1
 #define TME_LEAVE 2
 #define MONITOR_DEFAULTTONULL 0
 #define MONITOR_DEFAULTTONEAREST 2
-#define SPI_GETCARETWIDTH 0x2006
 #define COLOR_HIGHLIGHT 13
 #define COLOR_HIGHLIGHTTEXT 14
 #define SPI_GETWORKAREA 0x0030
-#define SPI_GETNONCLIENTMETRICS 0x0029
 
 #define FVIRTKEY 1
 #define FSHIFT 4
@@ -406,22 +371,18 @@ typedef struct {
 
 /* virtual keys */
 #define VK_BACK 0x08
-#define VK_TAB 0x09
 #define VK_RETURN 0x0D
 #define VK_SHIFT 0x10
 #define VK_CONTROL 0x11
 #define VK_MENU 0x12
 #define VK_ESCAPE 0x1B
 #define VK_SPACE 0x20
-#define VK_PRIOR 0x21
-#define VK_NEXT 0x22
 #define VK_END 0x23
 #define VK_HOME 0x24
 #define VK_LEFT 0x25
 #define VK_UP 0x26
 #define VK_RIGHT 0x27
 #define VK_DOWN 0x28
-#define VK_INSERT 0x2D
 #define VK_DELETE 0x2E
 #define VK_NUMPAD0 0x60
 #define VK_ADD 0x6B
@@ -434,15 +395,11 @@ typedef struct {
 #define VK_OEM_MINUS 0xBD
 
 /* edit control */
-#define ES_LEFT 0x0000
-#define ES_CENTER 0x0001
-#define ES_RIGHT 0x0002
 #define ES_MULTILINE 0x0004
 #define ES_AUTOVSCROLL 0x0040
 #define ES_AUTOHSCROLL 0x0080
 #define ES_NOHIDESEL 0x0100
 #define ES_READONLY 0x0800
-#define ES_WANTRETURN 0x1000
 #define ES_NUMBER 0x2000
 #define EM_GETSEL 0x00B0
 #define EM_SETSEL 0x00B1
@@ -465,20 +422,14 @@ typedef struct {
 #define EM_SETTABSTOPS 0x00CB
 #define EM_EMPTYUNDOBUFFER 0x00CD
 #define EM_GETFIRSTVISIBLELINE 0x00CE
-#define EM_SETREADONLY 0x00CF
 #define EM_SETMARGINS 0x00D3
 #define EM_POSFROMCHAR 0x00D6
-#define EM_CHARFROMPOS 0x00D7
 #define EC_LEFTMARGIN 1
 #define EC_RIGHTMARGIN 2
-#define EN_SETFOCUS 0x0100
 #define EN_KILLFOCUS 0x0200
 #define EN_CHANGE 0x0300
-#define EN_UPDATE 0x0400
 #define EN_ERRSPACE 0x0500
 #define EN_MAXTEXT 0x0501
-#define EN_HSCROLL 0x0601
-#define EN_VSCROLL 0x0602
 
 /* buttons / statics / list boxes */
 #define BS_PUSHBUTTON 0x00
@@ -494,10 +445,6 @@ typedef struct {
 #define BN_CLICKED 0
 #define BST_UNCHECKED 0
 #define BST_CHECKED 1
-#define DLGC_WANTARROWS 0x0001
-#define DLGC_WANTTAB 0x0002
-#define DLGC_WANTALLKEYS 0x0004
-#define DLGC_WANTCHARS 0x0080
 #define DLGC_BUTTON 0x2000
 #define DLGC_DEFPUSHBUTTON 0x0010
 #define DLGC_UNDEFPUSHBUTTON 0x0020
@@ -506,9 +453,7 @@ typedef struct {
 #define DM_GETDEFID (WM_USER + 0)
 #define SS_LEFT 0x00
 #define SS_CENTER 0x01
-#define SS_RIGHT 0x02
 #define SS_NOPREFIX 0x80
-#define SS_NOTIFY 0x0100
 #define LB_ADDSTRING 0x0180
 #define LB_RESETCONTENT 0x0184
 #define LB_SETCURSEL 0x0186
@@ -516,28 +461,19 @@ typedef struct {
 #define LB_GETTEXT 0x0189
 #define LB_GETTEXTLEN 0x018A
 #define LB_GETCOUNT 0x018B
-#define LB_FINDSTRING 0x018F
-#define LB_GETTOPINDEX 0x018E
 #define LB_SETTOPINDEX 0x0197
-#define LB_GETITEMRECT 0x0198
 #define LB_GETITEMDATA 0x0199
 #define LB_SETITEMDATA 0x019A
-#define LB_SETITEMHEIGHT 0x01A0
 #define LB_FINDSTRINGEXACT 0x01A2
-#define LB_INITSTORAGE 0x01A8
-#define LB_ITEMFROMPOINT 0x01A9
 #define LBN_SELCHANGE 1
 #define LBN_DBLCLK 2
 #define LBS_NOTIFY 0x0001
-#define LBS_SORT 0x0002
 #define LBS_OWNERDRAWFIXED 0x0010
 #define LBS_HASSTRINGS 0x0040
 #define LBS_NOINTEGRALHEIGHT 0x0100
-#define LBS_WANTKEYBOARDINPUT 0x0400L
 #define LB_ERR (-1)
 #define ODS_SELECTED 0x0001
 #define ODS_FOCUS 0x0010
-#define ODT_LISTBOX 2
 
 /* drawing */
 #define DT_LEFT 0x0000
@@ -546,15 +482,11 @@ typedef struct {
 #define DT_VCENTER 0x0004
 #define DT_WORDBREAK 0x0010
 #define DT_SINGLELINE 0x0020
-#define DT_NOCLIP 0x0100
 #define DT_CALCRECT 0x0400
 #define DT_NOPREFIX 0x0800
-#define DT_PATH_ELLIPSIS 0x4000
 #define DT_END_ELLIPSIS 0x8000
 #define TRANSPARENT 1
-#define OPAQUE 2
 #define ETO_OPAQUE 0x0002
-#define ETO_CLIPPED 0x0004
 #define SRCCOPY 0x00CC0020
 #define PS_SOLID 0
 #define FW_NORMAL 400
@@ -562,16 +494,11 @@ typedef struct {
 #define ANSI_CHARSET 0
 #define DEFAULT_CHARSET 1
 #define OUT_DEFAULT_PRECIS 0
-#define OUT_TT_PRECIS 4
 #define CLIP_DEFAULT_PRECIS 0
 #define DEFAULT_QUALITY 0
-#define ANTIALIASED_QUALITY 4
 #define CLEARTYPE_QUALITY 5
 #define DEFAULT_PITCH 0
-#define FIXED_PITCH 1
-#define VARIABLE_PITCH 2
 #define FF_DONTCARE 0
-#define FF_MODERN 0x30
 #define LOGPIXELSX 88
 #define LOGPIXELSY 90
 #define HORZRES 8
@@ -580,14 +507,10 @@ typedef struct {
 #define PHYSICALOFFSETY 113
 #define PHYSICALWIDTH 110
 #define PHYSICALHEIGHT 111
-#define NULL_BRUSH 5
 #define NULL_PEN 8
-#define DEFAULT_GUI_FONT 17
 #define DC_BRUSH 18
 #define DC_PEN 19
 #define RASTER_FONTTYPE 0x0001
-#define TRUETYPE_FONTTYPE 4
-#define MM_TEXT 1
 
 /* files / strings */
 #define GENERIC_READ  0x80000000L
@@ -598,31 +521,20 @@ typedef struct {
 #define CREATE_ALWAYS 2
 #define OPEN_EXISTING 3
 #define FILE_ATTRIBUTE_DIRECTORY 0x10
-#define FILE_ATTRIBUTE_HIDDEN 0x02
 #define FILE_ATTRIBUTE_NORMAL 0x80
 #define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
 #define CP_ACP 0
 #define CP_UTF8 65001
-#define MB_ERR_INVALID_CHARS 0x08
-#define WC_ERR_INVALID_CHARS 0x80
 #define HEAP_ZERO_MEMORY 8
-#define MOVEFILE_REPLACE_EXISTING 1
 #define LOCALE_USER_DEFAULT 0x0400
 #define TIME_NOSECONDS 2
 #define DATE_SHORTDATE 1
 #define FORMAT_MESSAGE_IGNORE_INSERTS 0x200
 #define FORMAT_MESSAGE_FROM_SYSTEM 0x1000
 #define CF_UNICODETEXT 13
-#define CREATE_UNICODE_ENVIRONMENT 0x400
-#define DRIVE_NO_ROOT_DIR 1
-#define DRIVE_REMOVABLE 2
-#define DRIVE_FIXED 3
-#define DRIVE_REMOTE 4
-#define DRIVE_CDROM 5
 #define SEM_FAILCRITICALERRORS 0x0001
 #define ERROR_FILE_NOT_FOUND 2L
 #define ERROR_PRINT_CANCELLED 63L
-#define ERROR_ALREADY_EXISTS 183
 #define ERROR_CANCELLED 1223L
 #define CSTR_EQUAL 2
 
@@ -640,11 +552,9 @@ typedef struct {
 #define PD_HIDEPRINTTOFILE 0x00100000
 #define PD_RETURNDC 0x00000100
 #define PD_NOSELECTION 0x00000004
-#define PD_NOPAGENUMS 0x00000008
 #define PD_USEDEVMODECOPIESANDCOLLATE 0x00040000
 #define PSD_MARGINS 0x00000002
 #define PSD_INTHOUSANDTHSOFINCHES 0x00000004
-#define PSD_DISABLEPRINTER 0x00000020
 #define PDERR_NODEVICES 0x1007                          /* cderr.h */
 #define PDERR_NODEFAULTPRN 0x1008
 #define PDERR_DNDMMISMATCH 0x1009
@@ -672,16 +582,9 @@ API BOOL    WINAPI WriteFile(HANDLE, LPCVOID, DWORD, DWORD *, void *);
 API BOOL    WINAPI CloseHandle(HANDLE);
 API BOOL    WINAPI GetFileSizeEx(HANDLE, __int64 *);
 API DWORD   WINAPI GetFileAttributesW(LPCWSTR);
-API HANDLE  WINAPI FindFirstFileW(LPCWSTR, WIN32_FIND_DATAW *);
-API BOOL    WINAPI FindNextFileW(HANDLE, WIN32_FIND_DATAW *);
-API BOOL    WINAPI FindClose(HANDLE);
-API DWORD   WINAPI GetCurrentDirectoryW(DWORD, LPWSTR);
 API DWORD   WINAPI GetFullPathNameW(LPCWSTR, DWORD, LPWSTR, LPWSTR *);
-API DWORD   WINAPI GetLogicalDrives(void);
-API UINT    WINAPI GetDriveTypeW(LPCWSTR);
 API BOOL    WINAPI CreateDirectoryW(LPCWSTR, void *);
 API BOOL    WINAPI DeleteFileW(LPCWSTR);
-API BOOL    WINAPI MoveFileExW(LPCWSTR, LPCWSTR, DWORD);
 API HANDLE  WINAPI GetProcessHeap(void);
 API LPVOID  WINAPI HeapAlloc(HANDLE, DWORD, SIZE_T);
 API LPVOID  WINAPI HeapReAlloc(HANDLE, DWORD, LPVOID, SIZE_T);
@@ -692,7 +595,6 @@ API int     WINAPI lstrlenW(LPCWSTR);
 API DWORD   WINAPI GetEnvironmentVariableW(LPCWSTR, LPWSTR, DWORD);
 API BOOL    WINAPI WritePrivateProfileStringW(LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR);
 API DWORD   WINAPI GetPrivateProfileStringW(LPCWSTR, LPCWSTR, LPCWSTR, LPWSTR, DWORD, LPCWSTR);
-API UINT    WINAPI GetPrivateProfileIntW(LPCWSTR, LPCWSTR, INT, LPCWSTR);
 API int     WINAPI GetTimeFormatW(DWORD, DWORD, const SYSTEMTIME *, LPCWSTR, LPWSTR, int);
 API int     WINAPI GetDateFormatW(DWORD, DWORD, const SYSTEMTIME *, LPCWSTR, LPWSTR, int);
 API void    WINAPI GetLocalTime(SYSTEMTIME *);
@@ -703,10 +605,8 @@ API LPVOID  WINAPI LocalLock(HLOCAL);
 API BOOL    WINAPI LocalUnlock(HLOCAL);
 API int     WINAPI CompareStringOrdinal(LPCWSTR, int, LPCWSTR, int, BOOL);
 API DWORD   WINAPI GetModuleFileNameW(HMODULE, LPWSTR, DWORD);
-API void    WINAPI OutputDebugStringW(LPCWSTR);
 API DWORD   WINAPI GetTickCount(void);
 API BOOL    WINAPI CreateProcessW(LPCWSTR, LPWSTR, void *, void *, BOOL, DWORD, LPVOID, LPCWSTR, STARTUPINFOW *, PROCESS_INFORMATION *);
-API BOOL    WINAPI SetCurrentDirectoryW(LPCWSTR);
 API DWORD   WINAPI FormatMessageW(DWORD, LPCVOID, DWORD, DWORD, LPWSTR, DWORD, void *);
 API DWORD   WINAPI GetCurrentThreadId(void);
 API HGLOBAL WINAPI GlobalFree(HGLOBAL);
@@ -741,7 +641,6 @@ API BOOL    WINAPI GetWindowRect(HWND, RECT *);
 API BOOL    WINAPI ClientToScreen(HWND, POINT *);
 API BOOL    WINAPI ScreenToClient(HWND, POINT *);
 API BOOL    WINAPI InvalidateRect(HWND, const RECT *, BOOL);
-API BOOL    WINAPI ValidateRect(HWND, const RECT *);
 API HDC     WINAPI BeginPaint(HWND, PAINTSTRUCT *);
 API BOOL    WINAPI EndPaint(HWND, const PAINTSTRUCT *);
 API HDC     WINAPI GetDC(HWND);
@@ -782,7 +681,6 @@ API HWND    WINAPI GetDlgItem(HWND, int);
 API BOOL    WINAPI SetWindowTextW(HWND, LPCWSTR);
 API int     WINAPI GetWindowTextW(HWND, LPWSTR, int);
 API int     WINAPI GetWindowTextLengthW(HWND);
-API int     WINAPI MessageBoxW(HWND, LPCWSTR, LPCWSTR, UINT);
 API BOOL    WINAPI GetCursorPos(POINT *);
 API BOOL    WINAPI TrackMouseEvent(TRACKMOUSEEVENT *);
 API HWND    WINAPI GetParent(HWND);
@@ -802,20 +700,15 @@ API BOOL    WINAPI InflateRect(RECT *, int, int);
 API BOOL    WINAPI PtInRect(const RECT *, POINT);
 API BOOL    WINAPI IntersectRect(RECT *, const RECT *, const RECT *);
 API LPWSTR  WINAPI CharLowerW(LPWSTR);
-API LPWSTR  WINAPI CharUpperW(LPWSTR);
 API int     WINAPI wsprintfW(LPWSTR, LPCWSTR, ...);
-API BOOL    WINAPI MessageBeep(UINT);
 API BOOL    WINAPI RedrawWindow(HWND, const RECT *, HRGN, UINT);
 API int     WINAPI GetClassNameW(HWND, LPWSTR, int);
 API BOOL    WINAPI EnumChildWindows(HWND, BOOL (CALLBACK *)(HWND, LPARAM), LPARAM);
 API BOOL    WINAPI EnumThreadWindows(DWORD, BOOL (CALLBACK *)(HWND, LPARAM), LPARAM);
 API HWND    WINAPI GetActiveWindow(void);
 API DWORD   WINAPI SetClassLongW(HWND, int, LONG);              /* SetClassLongPtrW on 32-bit */
-API LRESULT WINAPI SendDlgItemMessageW(HWND, int, UINT, WPARAM, LPARAM);
 API BOOL    WINAPI GetCaretPos(POINT *);
-API BOOL    WINAPI SetCaretPos(int, int);
 API BOOL    WINAPI CreateCaret(HWND, HBITMAP, int, int);
-API BOOL    WINAPI DestroyCaret(void);
 API BOOL    WINAPI ShowCaret(HWND);
 API BOOL    WINAPI HideCaret(HWND);
 API BOOL    WINAPI GetUpdateRect(HWND, RECT *, BOOL);
@@ -823,7 +716,6 @@ API BOOL    WINAPI GetScrollInfo(HWND, int, SCROLLINFO *);
 API BOOL    WINAPI ShowScrollBar(HWND, int, BOOL);
 API BOOL    WINAPI IsClipboardFormatAvailable(UINT);
 API HWND    WINAPI FindWindowExW(HWND, HWND, LPCWSTR, LPCWSTR);
-API BOOL    WINAPI GetKeyboardState(BYTE *);
 API BOOL    WINAPI DrawIconEx(HDC, int, int, HICON, int, int, UINT, HBRUSH, UINT);
 API LONG    WINAPI TabbedTextOutW(HDC, int, int, LPCWSTR, int, int, const INT *, int);      /* low word of the result = the width of the text, high word = its height */
 API DWORD   WINAPI GetTabbedTextExtentW(HDC, LPCWSTR, int, int, const INT *);               /* same result, nothing drawn; the text starts at the tab origin */
@@ -844,7 +736,6 @@ API BOOL     WINAPI ExtTextOutW(HDC, int, int, UINT, const RECT *, LPCWSTR, UINT
 API BOOL     WINAPI GetTextExtentPoint32W(HDC, LPCWSTR, int, SIZE *);
 API BOOL     WINAPI GetTextExtentExPointW(HDC, LPCWSTR, int, int, INT *, INT *, SIZE *);
 API BOOL     WINAPI GetTextMetricsW(HDC, TEXTMETRICW *);
-API int      WINAPI GetTextFaceW(HDC, int, LPWSTR);
 API int      WINAPI GetDeviceCaps(HDC, int);
 API int      WINAPI EnumFontFamiliesExW(HDC, LOGFONTW *, FONTENUMPROCW, LPARAM, DWORD);
 API HDC      WINAPI CreateCompatibleDC(HDC);
@@ -860,9 +751,7 @@ API int      WINAPI SaveDC(HDC);
 API BOOL     WINAPI RestoreDC(HDC, int);
 API int      WINAPI IntersectClipRect(HDC, int, int, int, int);
 API int      WINAPI ExcludeClipRect(HDC, int, int, int, int);
-API int      WINAPI SetMapMode(HDC, int);
 API BOOL     WINAPI SetViewportOrgEx(HDC, int, int, POINT *);
-API HDC      WINAPI CreateDCW(LPCWSTR, LPCWSTR, LPCWSTR, const void *);
 API int      WINAPI StartDocW(HDC, const DOCINFOW *);
 API int      WINAPI EndDoc(HDC);
 API int      WINAPI StartPage(HDC);
