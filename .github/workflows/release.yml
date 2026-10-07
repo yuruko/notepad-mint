@@ -31,6 +31,11 @@ jobs:
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$($Matches[1])" >> $env:GITHUB_OUTPUT
 
+      # the tag, the version resource, the about box (mp.h) and the installer must all say the same version
+      - name: version strings
+        shell: pwsh
+        run: ./tools/check_version.ps1 -Expect ${{ steps.ver.outputs.version }}
+
       # puts the 32-bit msvc toolchain (cl / ml / link / rc) on the path; build.bat then skips its own vcvars lookup
       - name: msvc x86 environment
         uses: ilammy/msvc-dev-cmd@v1

@@ -9,6 +9,7 @@ one 32-bit exe (about 140 kb) for 32-bit windows, 64-bit windows and windows on 
 
 **what is in it**
 
+- help topics (f1) rewritten: a key table and short paragraphs that wrap by themselves, the text fills the window, esc closes it; the about box shows the real version
 - dark (default) and light theme, mint accent; alt+x or the sun / moon button switches
 - word wrap (alt+z or the button), tab size 2 / 4 / 8, zoom 10-96 pt
 - file > recent: the last 9 files opened or saved, with a "clear list" item at the bottom

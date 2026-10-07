@@ -1209,11 +1209,21 @@ function Test-T10 {                                                             
             $t = ''
             foreach ($k in [U]::Kids($h)) { if ([U]::Cls($k) -eq 'Edit') { $t = [U]::GetText($k) } }
             Ck ($s[0] + 'b the help text is there') ($t.StartsWith('notepad mint - keyboard shortcuts and tips')) ('help text starts [' + (Show $t) + ']')
+            $kids = @([U]::Kids($h) | Where-Object { [U]::Cls($_) -ne 'mp_sbar' })    # (the scrollbar overlays are windows of ours too) no ok button, and the text fills the whole window (no padding)
+            Ck ($s[0] + 'e the help window has one child, the text (no button)') ($kids.Count -eq 1 -and [U]::Cls($kids[0]) -eq 'Edit') ('children: ' + (($kids | ForEach-Object { [U]::Cls($_) }) -join ', '))
+            $cr = [U]::CRect($h); $er = [U]::WRect($kids[0])
+            Ck ($s[0] + 'f ... and it is as big as the client area') ($er[2] - $er[0] -ge $cr[2] - $cr[0] -and $er[3] - $er[1] -ge $cr[3] - $cr[1]) ('edit ' + ($er -join ',') + ' client ' + ($cr -join ','))
+            Ck ($s[0] + 'g ... and no line of the text is broken by hand mid sentence (every text line is a title, a key row or a whole paragraph)') (-not ($t -split "`r`n" | Where-Object { $_ -ne '' -and $_ -notmatch '^(  \S|[a-z][a-z ]*$|notepad mint - |(status bar|font|theme|files|menus): )' })) 'a line that is none of those'
         }
         Pst $h $WM_CLOSE 0 0
         Ck ($s[0] + 'c it closes on WM_CLOSE (esc / cancel)') (Gone $h) 'the window is still visible'
         Ck ($s[0] + 'd the app is still running and answers') ((-not $app.Proc.HasExited) -and [U]::Responds($app.Main, 2000, $false)) 'the app died or hangs'
     }
+    Cmd $app 'IDM_HELP_TOPICS'                                                   # the help window has no button: esc (read by the dialog loop) closes it
+    $h = Wait-Win $app 'mp_help' 'help topics'
+    $ed = 0; foreach ($k in [U]::Kids($h)) { if ([U]::Cls($k) -eq 'Edit') { $ed = $k } }
+    Pst $ed $WM_KEYDOWN $VK_ESCAPE 0
+    Ck 'T10.3h esc closes the help window' (Gone $h) 'the window is still visible after esc'
     $before = @([U]::Tops($app.Pid, $true))                                      # page setup: the native comdlg32 dialog (title is localized)
     Cmd $app 'IDM_FILE_PAGESETUP'
     $h = WaitFor { @([U]::Tops($app.Pid, $true) | Where-Object { ($before -notcontains $_) -and (@('#32770', 'mp_msg') -contains [U]::Cls($_)) }) | Select-Object -First 1 } 10000   # (system overlay / ime windows also show up in the app process: ignore them)
@@ -1446,6 +1456,10 @@ function Test-T17 {                                                             
         $lr = [U]::WRect($link); $dr = [U]::WRect($h)                            # left, top, right, bottom (screen)
         Ck 'T17.3 ... it is visible and lies inside the dialog' ([U]::Visible($link) -and $lr[0] -ge $dr[0] -and $lr[1] -ge $dr[1] -and $lr[2] -le $dr[2] -and $lr[3] -le $dr[3]) ('link ' + ($lr -join ',') + ' dialog ' + ($dr -join ','))
     }
+    $said = '(no label)'                                                         # the version of the exe (FILEVERSION in src\notepad_mint.rc), not a stale one
+    foreach ($k in [U]::Kids($h)) { if ([U]::Text($k) -match '^version (\S+)') { $said = $Matches[1] } }
+    $fv = [regex]::Match([IO.File]::ReadAllText((Join-Path $Src 'notepad_mint.rc')), 'FILEVERSION (\d+),(\d+),(\d+),(\d+)')
+    CkEq 'T17.5 the about box says "version x.y.z" with the FILEVERSION of notepad_mint.rc' ($fv.Groups[1].Value + '.' + $fv.Groups[2].Value + '.' + $fv.Groups[3].Value) $said
     Pst $h $WM_CLOSE 0 0
     Ck 'T17.4 the about box closes on WM_CLOSE' (Gone $h) 'the window is still visible'
 }

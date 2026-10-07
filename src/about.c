@@ -160,16 +160,17 @@ void AboutDlg(HWND owner)
 }
 
 /* ------------------------------------------------------------------- help -- */
+/* keys are a table (monospace: the columns line up), everything else is one paragraph per line: the edit wraps it, so no line is broken by hand */
 static const WCHAR g_help[] =
     L"notepad mint - keyboard shortcuts and tips\r\n"
     L"\r\n"
     L"file\r\n"
     L"  ctrl+n            new\r\n"
     L"  ctrl+shift+n      new window\r\n"
-    L"  ctrl+o            open...\r\n"
+    L"  ctrl+o            open\r\n"
     L"  ctrl+s            save\r\n"
-    L"  ctrl+shift+s      save as...\r\n"
-    L"  ctrl+p            print...\r\n"
+    L"  ctrl+shift+s      save as\r\n"
+    L"  ctrl+p            print\r\n"
     L"  ctrl+w            close the window (exit)\r\n"
     L"\r\n"
     L"edit\r\n"
@@ -177,7 +178,7 @@ static const WCHAR g_help[] =
     L"  ctrl+x / c / v    cut / copy / paste\r\n"
     L"  ctrl+a            select all\r\n"
     L"  ctrl+f            find\r\n"
-    L"  f3 / shift+f3     find next / find previous\r\n"
+    L"  f3 / shift+f3     find next / previous\r\n"
     L"  ctrl+h            replace\r\n"
     L"  ctrl+g            go to line\r\n"
     L"  f5                insert the time and date\r\n"
@@ -191,44 +192,35 @@ static const WCHAR g_help[] =
     L"view\r\n"
     L"  alt+x             switch between the dark and light theme\r\n"
     L"  ctrl+u            show / hide the status bar\r\n"
-    L"\r\n"
-    L"font size\r\n"
-    L"  ctrl+plus         bigger  (also ctrl + mouse wheel up)\r\n"
-    L"  ctrl+minus        smaller (also ctrl + mouse wheel down)\r\n"
+    L"  ctrl+plus         bigger font (or ctrl + mouse wheel up)\r\n"
+    L"  ctrl+minus        smaller font (or ctrl + mouse wheel down)\r\n"
     L"  ctrl+0            back to the size picked in the font dialog\r\n"
-    L"  sizes run from 10 to 96 pt. the menus, title bar and status bar\r\n"
-    L"  use the editor font face at a fixed 11 px.\r\n"
     L"\r\n"
-    L"format and status bar\r\n"
-    L"  word wrap, font, tab size (2, 4 or 8 columns), line ending and\r\n"
-    L"  encoding are in the\r\n"
-    L"  format menu. the status bar shows line and column (with a\r\n"
-    L"  selection: how many lines and bytes are selected, like\r\n"
-    L"  \"162:54 [5 L 54 B]\"), the number of lines, the size in\r\n"
-    L"  bytes, the line ending and the encoding - click the last two to\r\n"
-    L"  change them.\r\n"
+    L"tips\r\n"
     L"\r\n"
-    L"theme\r\n"
-    L"  view > theme switches between dark (the default) and light.\r\n"
-    L"  the editor, menus, dialogs and title bar all follow it.\r\n"
-    L"  the sun / moon button at the very right of the menu bar\r\n"
-    L"  does the same with one click (it shows the theme in use). the\r\n"
-    L"  button left of it switches word wrap on / off (brighter\r\n"
-    L"  while it is on).\r\n"
+    L"status bar: the line and column, the number of lines, the size in bytes, the line ending and the encoding. "
+    L"with a selection the position also shows the lines and bytes it covers, like \"162:54 [5 L 54 B]\". "
+    L"click the line ending or the encoding to change it.\r\n"
     L"\r\n"
-    L"files\r\n"
-    L"  any text file opens: utf-8, utf-16 (with or without a bom) and the\r\n"
-    L"  legacy code pages (format > encoding > reopen with encoding...).\r\n"
-    L"  give a file's name on the command line, or use file > open.\r\n"
-    L"  file > recent lists the last 9 files you opened or saved; clear list (its last item) empties it.\r\n"
-    L"  drag files or folders onto the window to insert their paths at the\r\n"
-    L"  caret, one per line (hold shift while dropping to open the files).\r\n"
+    L"font: format > font picks the face and the size, 10 to 96 pt. the menus, title bar and status bar use "
+    L"the same face at a fixed 11 px. tab size (2, 4 or 8 columns), line ending and encoding are in the format menu.\r\n"
     L"\r\n"
-    L"menus\r\n"
-    L"  alt or f10 selects the menu bar, alt + a letter opens that menu,\r\n"
-    L"  the arrow keys and enter work as usual, esc closes.\r\n"
-    L"  right click in the text for the edit menu (it also has the\r\n"
-    L"  right to left reading order and unicode control characters).\r\n";
+    L"theme: view > theme switches between dark (the default) and light. the sun / moon button at the right "
+    L"end of the menu bar does the same with one click; the button left of it turns word wrap on / off.\r\n"
+    L"\r\n"
+    L"files: utf-8, utf-16 (with or without a bom) and the legacy code pages open; format > encoding > "
+    L"reopen with encoding picks one by hand. give a file's name on the command line or use file > open. "
+    L"file > recent keeps the last 9 files you opened or saved, and clear list (its last item) empties it. "
+    L"drop files or folders on the window to insert their paths at the caret, one per line; hold shift "
+    L"while dropping to open the files instead.\r\n"
+    L"\r\n"
+    L"menus: alt or f10 selects the menu bar, alt + a letter opens that menu, esc closes it. right click "
+    L"in the text for the edit menu, which also has the right to left reading order and the unicode "
+    L"control characters.\r\n";
+
+/* the text fills the whole window: no frame, no padding around it and no button (esc or enter closes) */
+#define HELP_W 560
+#define HELP_H 420
 
 static LRESULT CALLBACK HelpProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -238,17 +230,18 @@ static LRESULT CALLBACK HelpProc(HWND h, UINT m, WPARAM w, LPARAM l)
     if (!b) return DefWindowProcW(h, m, w, l);
 
     switch (m) {
-    case WM_CREATE:
-        DlgFrame(b, 16, 16, 528, 368, BV_SUNKEN);
+    case WM_CREATE: {
+        RECT tr;
         d->edit = CreateWindowExW(0, L"EDIT", g_help,
                                   WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
-                                  S(16) + 2, S(16) + 2, S(528) - 4, S(368) - 4, h, (HMENU)(ULONG_PTR)1001, g_hinst, NULL);
+                                  0, 0, S(HELP_W), S(HELP_H), h, (HMENU)(ULONG_PTR)1001, g_hinst, NULL);
         SendMessageW(d->edit, WM_SETFONT, (WPARAM)g_fontMenu, FALSE);       /* monospace: the columns line up */
-        SendMessageW(d->edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(S(8), S(8)));
+        GetClientRect(d->edit, &tr);
+        InflateRect(&tr, -S(10), -S(8));                                    /* the text sits inside the window, not against its edges */
+        SendMessageW(d->edit, EM_SETRECTNP, 0, (LPARAM)&tr);
         DarkScroll(d->edit);
-        UiButton(h, L"ok", 456, 396, 88, 24, IDOK, BS_DEFPUSHBUTTON);
         b->focus = d->edit;
-        return 0;
+        return 0; }
     case WM_CTLCOLORSTATIC:                                  /* a read-only edit asks for the "static" colors */
         if ((HWND)l == d->edit) {
             SetTextColor((HDC)w, C_TEXT);
@@ -271,6 +264,6 @@ void HelpDlg(HWND owner)
     if (!reg) { RegClass(L"mp_help", HelpProc, 0, NULL); reg = TRUE; }
     memset(&d, 0, sizeof d);
     DlgBaseInit(&d.b, owner);
-    if (!DlgOpen(&d.b, L"mp_help", L"help topics", 560, 436, 0)) return;
+    if (!DlgOpen(&d.b, L"mp_help", L"help topics", HELP_W, HELP_H, 0)) return;
     DlgRunModal(&d.b);
 }

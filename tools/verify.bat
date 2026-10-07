@@ -20,6 +20,9 @@ for %%f in ("%ROOT%\build\notepad-mint.exe") do set "EXESIZE=%%~zf"
 if %EXESIZE% GEQ 300000 echo verify: THE EXE IS %EXESIZE% BYTES, OVER THE 300000 BYTE LIMIT & exit /b 1
 echo [verify] exe size %EXESIZE% bytes (limit 300000)
 
+echo [verify] version strings
+powershell -NoProfile -File "%ROOT%\tools\check_version.ps1" || (echo verify: VERSION STRINGS DISAGREE & exit /b 1)
+
 echo [verify] imports
 powershell -NoProfile -File "%ROOT%\tools\check_imports.ps1" || (echo verify: IMPORTS FAILED & exit /b 1)
 
