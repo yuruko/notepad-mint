@@ -1,0 +1,78 @@
+# release pipeline: push a tag "v1.2.3" (or run it by hand with a tag name) and github builds the exe, checks it, builds the NSIS installer and
+# publishes a release with both files: notepad-mint-<version>.exe (standalone) and notepad-mint-<version>-setup.exe (installer).
+#   git tag v1.0.0 && git push origin v1.0.0
+# keep the version in step with FILEVERSION / ProductVersion in src/notepad_mint.rc.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "tag to build and publish (v1.2.3); created on the current commit when it does not exist"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: version
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { '${{ github.event.inputs.tag }}' } else { $env:GITHUB_REF_NAME }
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw "tag '$tag' is not v<major>.<minor>.<patch>" }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($Matches[1])" >> $env:GITHUB_OUTPUT
+
+      # puts the 32-bit msvc toolchain (cl / ml / link / rc) on the path; build.bat then skips its own vcvars lookup
+      - name: msvc x86 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
+      - name: build (release)
+        shell: cmd
+        run: build.bat
+
+      # the project promises an exe that links kernel32 / user32 / gdi32 only
+      - name: imports
+        shell: pwsh
+        run: ./tools/check_imports.ps1
+
+      - name: unit tests
+        shell: cmd
+        run: tests\unit\build.bat
+
+      - name: nsis
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) { choco install nsis -y --no-progress }
+          $nsis = "${env:ProgramFiles(x86)}\NSIS"
+          if (Test-Path $nsis) { $nsis >> $env:GITHUB_PATH }
+
+      - name: installer
+        shell: cmd
+        run: tools\installer.bat ${{ steps.ver.outputs.version }}
+
+      - name: publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.ver.outputs.tag }}'
+          $v = '${{ steps.ver.outputs.version }}'
+          $files = @("build/notepad-mint-$v.exe", "build/notepad-mint-$v-setup.exe")
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @files --clobber
+          } else {
+            gh release create $tag @files --title "notepad mint $v" --notes-file RELEASE_NOTES.md --target $env:GITHUB_SHA
+          }
+          if ($LASTEXITCODE -ne 0) { throw "publishing the release failed" }

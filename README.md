@@ -2,18 +2,42 @@
 
 a free, dark replacement for `notepad.exe`: plain text only. no ai, no sign-in, no telemetry.
 
+| dark (the default) | light |
+|---|---|
+| ![notepad mint, dark theme](assets/screenshot-dark.png) | ![notepad mint, light theme](assets/screenshot-light.png) |
+
+## download
+
+from the [latest release](https://github.com/yuruko/notepad-mint/releases/latest):
+
+- `notepad-mint-<version>-setup.exe`: the installer (start menu shortcut, optional desktop shortcut, uninstaller in *installed apps*; your settings are left alone when you uninstall)
+- `notepad-mint-<version>.exe`: the standalone exe, nothing to install: put it anywhere and run it
+
+one 32-bit exe (about 200 kb) runs on 32-bit windows, 64-bit windows and windows on arm. settings are in `%appdata%\notepad mint\settings.ini`.
+
+## what it does
+
 - written in raw c and **32-bit x86 assembly**. no crt, no libraries, no `windows.h`: every win32 declaration is hand-written in `src/w32.h`
   (checked against the real sdk by `tools/layout_check`). the exe imports only kernel32 / user32 / gdi32 (everything else is loaded at run time).
-- one small 32-bit exe runs on 32-bit windows, 64-bit windows and windows on arm.
-- behaves like notepad (same menus, status bar and wording) plus: a dark theme (the default, mint accent `#9df5bd`) and a light one (a softer green accent `#2f7d58`);
-  hover and the caret use the accent; classic style scrollbars in both themes' colours; an 8 px padding around the text; title bar (white / black over a soft accent fade), menu bar and status bar in the editor's font face at a fixed 11 px, the status bar compact (`12:5`, `crlf`, `utf8 bom`) and never cut off; ctrl+plus / ctrl+minus / ctrl+0 font-size zoom (10-96 pt);
-  line ending and encoding pickers (format menu, status bar); utf-8 / utf-16 / legacy code pages; right-to-left toggle; unicode control characters; drag and drop; per-monitor dpi;
-  an unsaved document is called `mintXXXX` (4 characters of 0-9 a-z from the date and time) instead of "untitled"; "modified" means *different from the file* (type and delete again, or undo back, is not a change).
+- behaves like notepad (same menus, status bar and wording) plus:
+  - **themes**: a dark theme (the default, mint accent `#9df5bd`) and a light one (a softer green accent `#2f7d58`); alt+x or the sun / moon button at the very right of the menu bar switches them; hover uses the accent, the caret is plain white / black;
+    title bar (white / black over a soft accent fade), menu bar and status bar in the editor's font face at a fixed 11 px; classic style scrollbars in both themes' colours, 13 px thin;
+  - **word wrap**: alt+z, or the button left of the theme button; hover either button for a moment and a tooltip says what it does and its key combo;
+  - **tab size**: format > tab size: 2, 4 or 8 columns (8 by default), remembered, also used when printing;
+  - **recent files**: file > recent keeps the last 9 files you opened or saved (newest first, press 1-9), shared by all open windows;
+  - **text runs to the edge**: an 8 px margin around the text (4 px on top), but text that is scrolled out of it runs to the very edge of the editor, no blank frame; the row that is only partly in view at the bottom is drawn, cut off at the edge;
+  - **status bar**: compact (`12:5`, `5 L`, `124 B`, `crlf`, `utf8 bom`), the lines and bytes panels grow and shrink with the document, never cut off; with a selection it shows the lines and bytes selected (`162:54 [5 L 54 B]`); click the line ending / encoding panels to change them;
+  - **zoom**: ctrl+plus / ctrl+minus / ctrl+0, ctrl + mouse wheel (10-96 pt);
+  - **encodings and line endings**: utf-8 (with or without bom), utf-16 le / be, legacy code pages, reopen with another encoding; windows / unix / classic mac line endings; right-to-left toggle; unicode control characters; per-monitor dpi;
+  - **drop files or folders** on the window to insert their paths at the caret, one per line (shift+drop opens the files instead); a selected line break shows as a small highlighted block, so empty lines and line ends inside a selection can be seen;
+  - **ctrl+k** clears the current line (ctrl+z brings it back); ctrl+backspace / ctrl+delete delete a word;
+  - an unsaved document is called `mint-XXXX` (4 characters of 0-9 a-z from the date and time) instead of "untitled"; "modified" means *different from the file* (type and delete again, or undo back, is not a change);
+  - the window can be made small: down to 320 x 140 px.
 
 ## status
 
-every menu item works: file (new, new window, open, save, save as, page setup, print, exit), edit (undo ... select all, time / date, find, find next / previous,
-replace, go to), format (word wrap, font, line ending, encoding), view (zoom, status bar, theme), help (the about box links to yuru.be). find / replace, go to, font, encodings, about and help
+every menu item works: file (new, new window, open, recent, save, save as, page setup, print, exit), edit (undo ... select all, time / date, find, find next / previous,
+replace, go to, clear line), format (word wrap, font, tab size, line ending, encoding), view (zoom, status bar, theme), help (the about box links to yuru.be). find / replace, go to, font, encodings, about and help
 are our own dark / light dialogs; open, save as, print and page setup are the native windows dialogs (they follow windows' own dark / light mode, not the app theme). the encoding and line ending of a file are set from the
 format menu or the status bar, not in the save as dialog.
 
@@ -23,10 +47,20 @@ how each part was verified, and what is still open, is in `NOTES.md` (status) an
 
 needs visual studio's c++ build tools (x86 target) and the windows sdk (python 3 for the layout check).
 
-    build.bat                 release build -> build\notepad mint.exe (zero warnings at /W3)
+    build.bat                 release build -> build\notepad-mint.exe (zero warnings at /W3)
     build.bat dbg             debug build (symbols, build\dbg.log tracing)
 
 `build.bat` looks for `vcvarsamd64_x86.bat` of visual studio 18 community and falls back to `vswhere`.
+
+## installer and release
+
+    tools\installer.bat [version]    build\notepad-mint-<version>.exe (standalone) + build\notepad-mint-<version>-setup.exe (NSIS installer)
+
+needs [NSIS 3](https://nsis.sourceforge.io/) (`makensis` on the path, in program files, or the portable zip unpacked to `build\nsis-3.10`); the installer script is `installer\notepad-mint.nsi`.
+
+the release pipeline is `.github/workflows/release.yml`: push a tag `v1.2.3` (keep the version in step with `FILEVERSION` in `src/notepad_mint.rc`) and github builds the exe, checks its imports, runs the unit tests, builds the installer and publishes a release with both files.
+
+    git tag v1.0.0 && git push origin v1.0.0
 
 ## checks
 
@@ -34,8 +68,8 @@ needs visual studio's c++ build tools (x86 target) and the windows sdk (python 3
     tools\verify.bat ui       ... plus the message-driven gui tests (tests\ui\ui_test.ps1; private desktop, nothing shows)
     tools\verify.bat frame    ... plus the title strip test (tools\frame_test.ps1: real mouse input, it moves the mouse for a few seconds)
 
-github ci is switched off (only the cloud agent needs it): the workflow with the same steps (minus the gui and title strip tests) is parked as `.github/workflows/build.yml.disabled`, rename it to `build.yml` to turn it on.
-`tools\` also has `pw_shot.ps1` (screenshot on a private desktop: nothing shows), `shot.ps1` (launch, send keys / a menu command / a mouse drag, screenshot on the real desktop), `cc.bat` (compile-check one file), `probe.bat` (experimental build) and `make_icon.ps1` (builds the icon).
+github ci for every push is switched off (the maintainer builds and tests locally with `tools\verify.bat ui`): the workflow with the same steps (minus the gui and title strip tests) is parked as `.github/workflows/build.yml.disabled`, rename it to `build.yml` to turn it on. only the release workflow runs, on version tags.
+`tools\` also has `pw_shot.ps1` (screenshot on a private desktop: nothing shows; `-File`, `-Theme`, `-Sel`, `-HScroll`, `-VScroll`), `shot.ps1` (launch, send keys / a menu command / a mouse drag, screenshot on the real desktop), `cc.bat` (compile-check one file), `probe.bat` (experimental build), `flicker_test.ps1` (counts flicker frames while the window is resized: it shows the exe on your real desktop for a few seconds, takes no focus and sends no input) and `make_icon.ps1` (builds the icon).
 
 ## notes
 
