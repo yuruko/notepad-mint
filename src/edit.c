@@ -15,6 +15,7 @@ static WNDPROC g_orig;
 static HFONT   g_font;
 static HBRUSH  g_brEdit;
 static int     g_wheel;
+static int     g_paintDepth;                    /* nested native paint / print calls may erase; a standalone resize erase must wait */
 static int     g_stubW, g_stubMax;                /* width of a selected line break's block, widest character of the font (see "selected line breaks" below); g_stubW 0 = measure again (the font changed) */
 
 /* -------------------------------------------------- scrollbars on demand -- */
@@ -1045,8 +1046,30 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         LRESULT v = (LRESULT)((g_shotWiped << 16) | g_shotKept);
         g_shotWiped = g_shotKept = 0;
         return v; }
+    case WM_APP + 92: {                                         /* standalone resize erase, captured before the next WM_PAINT can run */
+        HDC dc;
+        if (!w) return 0x4D494E54;
+        dc = GetDC(h);
+        if (dc) {
+            SendMessageW(h, WM_ERASEBKGND, (WPARAM)dc, 0);
+            ReleaseDC(h, dc);
+        }
+        ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
+        return 0; }
+    case WM_APP + 93: {                                         /* a real invalidated repaint must clear stale pixels as well as draw the text */
+        HDC dc = GetDC(h);
+        HBRUSH br = CreateSolidBrush(0x00FF00FF);
+        RECT cr;
+        if (dc && br && GetClientRect(h, &cr)) FillRect(dc, &cr, br);
+        if (br) DeleteObject(br);
+        if (dc) ReleaseDC(h, dc);
+        InvalidateRect(h, NULL, TRUE);
+        UpdateWindow(h);
+        ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
+        return 0; }
 #endif
-    case WM_ERASEBKGND:                                         /* the stock erase, but not the band below the rows: BandPaint paints it in one go */
+    case WM_ERASEBKGND:                                         /* resize can erase now and paint later: leave the text visible until the native painter is ready */
+        if (!g_paintDepth) return 0;                            /* keep erasure pending for BeginPaint, which then erases and draws in the same call */
         r = BandErase(h, w, l);
 #ifdef FLICKER_PROBE
         Sleep(8);                                               /* calibration only (tools\flicker_test.ps1 must see this): a visible gap between the erase and the text */
@@ -1085,14 +1108,23 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_PAINT: {
         RECT ur;
         int have = !w && GetUpdateRect(h, &ur, FALSE);
+        g_paintDepth++;
         r = CallWindowProcW(g_orig, h, m, w, l);
+        g_paintDepth--;
         if (w) { StubPaint(h, (HDC)w, NULL); BandPaint(h, (HDC)w, NULL); }      /* (painting into a DC somebody handed over) */
         else if (have) { StubPaint(h, NULL, &ur); BandPaint(h, NULL, &ur); }
         return r; }
     case WM_PRINTCLIENT:                                        /* PrintWindow / WM_PRINT: the whole client area into a DC */
+        g_paintDepth++;
         r = CallWindowProcW(g_orig, h, m, w, l);
+        g_paintDepth--;
         StubPaint(h, (HDC)w, NULL);
         BandPaint(h, (HDC)w, NULL);
+        return r;
+    case WM_PRINT:                                              /* its erase can precede the nested WM_PRINTCLIENT */
+        g_paintDepth++;
+        r = CallWindowProcW(g_orig, h, m, w, l);
+        g_paintDepth--;
         return r;
     case WM_BARS:
         g_barsPending = 0;

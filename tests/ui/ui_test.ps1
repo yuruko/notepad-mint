@@ -1851,10 +1851,10 @@ function Ed-Shot($app) {                                                        
 function Is-Hl($c) { $h = [System.Drawing.SystemColors]::Highlight; return ([Math]::Abs($c.R - $h.R) + [Math]::Abs($c.G - $h.G) + [Math]::Abs($c.B - $h.B)) -le 12 }
 function Hl-At($shot, [int]$x, [int]$y) { return (Is-Hl ($shot.Bmp.GetPixel($shot.Ox + $x, $shot.Oy + $y))) }
 function Hl-Run($shot, [int]$x0, [int]$y) { $n = 0; while ((Hl-At $shot ($x0 + $n) $y) -and $n -lt 600) { $n++ }; return $n }   # highlight pixels in a row from x0 to the right
-function Ed-Direct($app, [int]$w, [int]$h, [int]$y0 = 0) {                       # the editor's own pixels, w x h from row y0 (SHOTDC probe message WM_APP + 90; about 20 us a pixel), $null when the exe has none
+function Ed-Direct($app, [int]$w, [int]$h, [int]$y0 = 0, [int]$msg = (0x8000 + 90)) { # the editor's own pixels, w x h from row y0 (SHOTDC probe messages; about 20 us a pixel), $null when the exe has none
     $f = Join-Path $env:TEMP 'mint_dc.ppm'
     Remove-Item -LiteralPath $f -ErrorAction SilentlyContinue
-    [void](Snd (Get-Edit $app) (0x8000 + 90) $w ($h -bor ($y0 -shl 16)))
+    [void](Snd (Get-Edit $app) $msg $w ($h -bor ($y0 -shl 16)))
     if (-not (Test-Path -LiteralPath $f)) { return $null }
     $b = [IO.File]::ReadAllBytes($f)
     $nl = 0; $i = 0
@@ -2959,12 +2959,71 @@ function Test-T34 {                                                             
     [void](Gone $dlg)
 }
 
+# =========================================================================================================== T37
+# resize can erase the native editor before a later WM_PAINT redraws its text. the SHOTDC probe sends that erase and dumps the same DC
+# synchronously, so a repaint cannot hide the blank frame. a second probe poisons the client before a real erased repaint, checking that
+# deferring standalone erasure still clears stale text and backgrounds. both themes, selected text and direct editing are covered.
+function Test-T37 {
+    $app = Start-App
+    $ed = Get-Edit $app
+    if ((Snd $ed (0x8000 + 92) 0 0) -ne 0x4D494E54) {
+        Skip 'T37 resize erase / repaint regression' 'build the probe: tools\probe.bat /DSHOTDC, run with -Exe build\probe\notepad-mint.exe'
+        return
+    }
+    $w = 320; $h = 100
+    $text = "resize keeps this text visible`r`nselected text and empty space`r`nlast row"
+    $idx = 0
+    foreach ($theme in @('dark', 'light')) {
+        if ($theme -eq 'light') { [void](Snd $app.Main $WM_COMMAND $IDM.IDM_THEME_LIGHT 0) }
+        Reset-Doc $app $text
+        [void](Snd $ed 0x8 0 0)                                                 # no caret blink in the captured region; ES_NOHIDESEL keeps selection visible
+        $paint = Ed-Direct $app $w $h 0 (0x8000 + 93)
+        $s = Ed-Shot $app
+        try {
+            $c = $s.Bmp.GetPixel($s.Ox + $w - 1, $s.Oy + $h - 1)
+            $bg = ([int]$c.R -shl 16) -bor ([int]$c.G -shl 8) -bor [int]$c.B
+            $ink = [Bx]::NotColor($s.Bmp, $s.Ox, $s.Oy, $w, $h, $bg)
+            $idx++; Ck ('T37.' + $idx + ' ' + $theme + ': the reference contains text') ($ink[0] -gt 100) ('ink pixels ' + $ink[0])
+            $d = [Bx]::DiffPpm($paint.B, $paint.Off, $w, 0, $s.Bmp, $s.Ox, $s.Oy, 0, 0, $w, $h)
+            $idx++; Ck ('T37.' + $idx + ' ' + $theme + ': actual WM_PAINT clears the poisoned background and draws every row') ($d[0] -eq 0) ('different pixels ' + $d[0])
+            foreach ($erase in @(1, 2)) {                                       # resize commonly sends two separate erase messages before painting
+                $blank = Ed-Direct $app $w $h 0 (0x8000 + 92)
+                $d = [Bx]::DiffPpm($blank.B, $blank.Off, $w, 0, $s.Bmp, $s.Ox, $s.Oy, 0, 0, $w, $h)
+                $idx++; Ck ('T37.' + $idx + ' ' + $theme + ': standalone erase ' + $erase + ' preserves the painted text until WM_PAINT') ($d[0] -eq 0) ('different pixels ' + $d[0])
+            }
+        } finally { $s.Bmp.Dispose() }
+
+        [void](Ed-Direct $app $w $h 0 (0x8000 + 93))                              # restore the baseline's deliberately erased pixels before testing direct selection
+        [void](Snd $ed $EM_SETSEL 0 36)
+        $sel = Ed-Direct $app $w $h
+        $s = Ed-Shot $app
+        try {
+            $d = [Bx]::DiffPpm($sel.B, $sel.Off, $w, 0, $s.Bmp, $s.Ox, $s.Oy, 0, 0, $w, $h)
+            $idx++; Ck ('T37.' + $idx + ' ' + $theme + ': direct selection painting matches a complete repaint') ($d[0] -eq 0) ('different pixels ' + $d[0])
+            $sel = Ed-Direct $app $w $h 0 (0x8000 + 92)
+            $d = [Bx]::DiffPpm($sel.B, $sel.Off, $w, 0, $s.Bmp, $s.Ox, $s.Oy, 0, 0, $w, $h)
+            $idx++; Ck ('T37.' + $idx + ' ' + $theme + ': standalone erase preserves the selection and selected line break') ($d[0] -eq 0) ('different pixels ' + $d[0])
+        } finally { $s.Bmp.Dispose() }
+
+        [void][U]::SndStr($ed, $EM_REPLACESEL, 1, '')
+        $deleted = Ed-Direct $app $w $h
+        $s = Ed-Shot $app
+        try {
+            $d = [Bx]::DiffPpm($deleted.B, $deleted.Off, $w, 0, $s.Bmp, $s.Ox, $s.Oy, 0, 0, $w, $h)
+            $idx++; Ck ('T37.' + $idx + ' ' + $theme + ': direct deletion clears the removed characters and selection') ($d[0] -eq 0) ('different pixels ' + $d[0])
+            $deleted = Ed-Direct $app $w $h 0 (0x8000 + 93)
+            $d = [Bx]::DiffPpm($deleted.B, $deleted.Off, $w, 0, $s.Bmp, $s.Ox, $s.Oy, 0, 0, $w, $h)
+            $idx++; Ck ('T37.' + $idx + ' ' + $theme + ': erased repaint leaves no removed characters or stale background') ($d[0] -eq 0) ('different pixels ' + $d[0])
+        } finally { $s.Bmp.Dispose() }
+    }
+}
+
 # ====================================================================================================== run them all
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine

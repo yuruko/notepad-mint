@@ -47,7 +47,7 @@ one 32-bit exe (about 145 kb) runs on 32-bit windows, 64-bit windows and windows
   - the status bar caches the caret's line / column per keystroke instead of rescanning the text several times, and on a text over a million characters the line / byte counts follow when typing pauses instead of on every key;
   - find / replace uses linear-time KMP matching, including backwards searches; `memcmp` compares a dword at a time, `memmove` copies dwords backwards too, and `mp_count_lf` (line counting) is sse2 assembly;
   - dirty-state comparisons are cached until the text changes, and settings skip unchanged values and bound retries when their file is locked;
-  - everything the window draws itself (the rows that are only partly in view, the scrolled-out text in the margin) is drawn off screen and put on in one blit, so a resize or a scroll does not flicker.
+  - custom partial rows and scrolled-out margin text are drawn off screen and put on in one blit; the editor keeps its existing text during resize until native painting starts, avoiding a blank frame between background clearing and drawing.
 - **clean**: zero warnings at `/W3`; `tools/layout_check` proves every struct, constant and function in the hand-written `src/w32.h` against the real windows sdk (the header was pruned of 111 declarations nothing used); an audit found no unused function, and the notes that only described how the code used to be are gone; 454 unit checks (including randomized search cases and file failure injection), 15 print checks and over 500 gui checks that drive the real exe on a private desktop (nothing shows on your screen) all pass: `tools\verify.bat ui`.
 
 ## status

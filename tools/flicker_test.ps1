@@ -197,10 +197,14 @@ try {
         if ($a.Count -eq 0) { return }
         $sorted = $a | Sort-Object
         $med = $sorted[[int]($sorted.Count / 2)]
-        $lo = [int]($med * 0.85)
+        $reference = @($list | Select-Object -First $skip | Sort-Object)
+        if ($reference.Count -eq 0) { throw 'no still-frame reference was captured' }
+        $ink = $reference[[int]($reference.Count / 2)]
+        if ($name -eq 'editor' -and $ink -le 0) { throw 'the reference editor patch contains no text' }
+        $lo = [int]($ink * 0.85)
         $bad = @($a | Where-Object { $_ -lt $lo }).Count
         $min = $sorted[0]
-        '{0,-7} frames {1,5}  median ink {2,5}  min {3,5}  frames below 85% of the median: {4,4} ({5:N1}%)' -f $name, $a.Count, $med, $min, $bad, (100.0 * $bad / $a.Count)
+        '{0,-7} frames {1,5}  median ink {2,5}  min {3,5}  frames below 85% of still-frame ink {6}: {4,4} ({5:N1}%)' -f $name, $a.Count, $med, $min, $bad, (100.0 * $bad / $a.Count), $ink
     }
     '--- {0} ({1} resize steps, {2} ms apart, theme {3}{4}), {5} frames captured, {6} of them before the resize' -f (Split-Path $Exe -Leaf), $Steps, $StepMs, $Theme, $(if ($Wrap) { ', wrap' } else { '' }), $cap.Frames, $still
     Summ 'editor' $cap.Edit $still
