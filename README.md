@@ -32,6 +32,7 @@ one 32-bit exe (about 140 kb) runs on 32-bit windows, 64-bit windows and windows
   - **drop files or folders** on the window to insert their paths at the caret, one per line (shift+drop opens the files instead); a selected line break shows as a small highlighted block, so empty lines and line ends inside a selection can be seen;
   - **ctrl+k** clears the current line (ctrl+z brings it back); ctrl+backspace / ctrl+delete delete a word;
   - an unsaved document is called `mint-XXXX` (4 characters of 0-9 a-z from the date and time) instead of "untitled"; "modified" means *different from the file* (type and delete again, or undo back, is not a change);
+  - **command line**: `notepad-mint /p file` prints the file on the default printer without a dialog and exits (like notepad's `/p`); a plain `notepad-mint file` opens it;
   - the window can be made small: down to 320 x 140 px.
 
 ## small, fast, clean

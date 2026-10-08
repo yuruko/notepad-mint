@@ -357,7 +357,7 @@ static int PrintJob(HDC dc, const WCHAR *text, int n, int copies, int from, int 
     return ok;
 }
 
-void PrintDoc(HWND owner)
+void PrintDoc(HWND owner, int quiet)
 {
     PRINTDLGW pd;
     HCURSOR cur;
@@ -370,7 +370,7 @@ void PrintDoc(HWND owner)
     pd.hwndOwner = owner;
     /* no "print to file" box: PrintJob never sets DOCINFO.lpszOutput, so a ticked box would still print on the printer
      * (the pdf / xps printers ask for their file name themselves) */
-    pd.Flags = PD_RETURNDC | PD_NOSELECTION | PD_USEDEVMODECOPIESANDCOLLATE | PD_HIDEPRINTTOFILE | PD_DISABLEPRINTTOFILE;
+    pd.Flags = (quiet ? PD_RETURNDEFAULT : 0) | PD_RETURNDC | PD_NOSELECTION | PD_USEDEVMODECOPIESANDCOLLATE | PD_HIDEPRINTTOFILE | PD_DISABLEPRINTTOFILE;
     pd.nFromPage = 1;
     pd.nToPage = 1;
     pd.nMinPage = 1;

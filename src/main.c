@@ -675,7 +675,7 @@ static void Cmd(int id)
     case IDM_FILE_SAVE:     FileSave(FALSE); break;
     case IDM_FILE_SAVEAS:   FileSave(TRUE); break;
     case IDM_FILE_PAGESETUP: PageSetup(g_hwnd); break;
-    case IDM_FILE_PRINT:    PrintDoc(g_hwnd); break;
+    case IDM_FILE_PRINT:    PrintDoc(g_hwnd, 0); break;
     case IDM_FILE_EXIT:     SendMessageW(g_hwnd, WM_CLOSE, 0, 0); return;
 
     case IDM_EDIT_UNDO:     SendMessageW(g_edit, EM_UNDO, 0, 0); break;
@@ -1170,6 +1170,17 @@ int mp_main(void)
     ShowMain();
 
     CmdLineFile(arg, PATH_CAP);
+    if (arg[0] == '/' && (arg[1] == 'p' || arg[1] == 'P') && arg[2] == ' ') {     /* notepad /p file: print it on the default printer and quit */
+        const WCHAR *f = arg + 3;
+        int n;
+        while (*f == ' ') f++;
+        if (*f == '"') { f++; for (n = 0; f[n] && f[n] != '"'; n++) ; arg[(f - arg) + n] = 0; }
+        if (*f && GetFileAttributesW(f) != INVALID_FILE_ATTRIBUTES) {
+            OpenDoc(f, -1);
+            PrintDoc(g_hwnd, 1);
+        }
+        return 0;
+    }
     if (arg[0]) OpenCmdFile(arg);
 
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {

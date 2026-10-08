@@ -303,7 +303,7 @@ BOOL  FontDlg(HWND owner);                      /* edits g_pf on ok; main applie
 BOOL  EncDlg(HWND owner, int *enc, int reopen);
 BOOL  FileDlgOpen(HWND owner, WCHAR *path, int cap);   /* native open dialog; path in: the current file (its folder is the start folder), out: the pick (only on ok) */
 BOOL  FileDlgSave(HWND owner, WCHAR *path, int cap);   /* native save as dialog; path in: the file or the default name to propose, out: the pick (only on ok). no encoding / line ending pickers: the document keeps its own */
-void  PrintDoc(HWND owner);
+void  PrintDoc(HWND owner, int quiet);   /* quiet: default printer, no dialog (notepad /p) */
 void  PageSetup(HWND owner);
 
 #endif
