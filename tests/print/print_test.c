@@ -11,6 +11,7 @@ static int TestEndDoc(HDC dc);
 static int TestAbortDoc(HDC dc);
 static BOOL TestTextOut(HDC dc, int x, int y, LPCWSTR text, int n);
 static BOOL TestDeleteDC(HDC dc);
+static void *TestAlloc(size_t n);
 
 #define GetDeviceCaps TestCaps
 #define StartDocW TestStartDoc
@@ -20,6 +21,7 @@ static BOOL TestDeleteDC(HDC dc);
 #define AbortDoc TestAbortDoc
 #define TextOutW TestTextOut
 #define DeleteDC TestDeleteDC
+#define mem_alloc TestAlloc
 #include "../../src/print.c"
 #undef GetDeviceCaps
 #undef StartDocW
@@ -29,11 +31,15 @@ static BOOL TestDeleteDC(HDC dc);
 #undef AbortDoc
 #undef TextOutW
 #undef DeleteDC
+#undef mem_alloc
 
 Prefs g_pf;
 HWND g_edit;
 static int g_pass, g_fail, g_started, g_ended, g_aborted, g_pages, g_deleted, g_asked;
 static int g_cancel, g_noDC, g_noText, g_failText;
+static int g_failAlloc, g_allocCalls, g_copyCalls, g_locked, g_spoolLocked;
+static size_t g_allocLimit, g_allocMax;
+static const WCHAR *g_dialogText, *g_spoolText;
 static DWORD g_requested, g_response;
 static WCHAR g_printed[1024];
 
@@ -50,12 +56,38 @@ WCHAR *EditGetDocText(int *len)
 {
     int n = GetWindowTextLengthW(g_edit);
     WCHAR *text;
+    g_copyCalls++;
     if (g_noText) return NULL;
-    text = mem_alloc(((size_t)n + 1) * sizeof(WCHAR));
+    text = TestAlloc(((size_t)n + 1) * sizeof(WCHAR));
     if (!text) return NULL;
     if (GetWindowTextW(g_edit, text, n + 1) != n) { mem_free(text); return NULL; }
     *len = n;
     return text;
+}
+
+const WCHAR *EditLockText(void **h, int *n)
+{
+    const WCHAR *text;
+    *h = NULL;
+    *n = GetWindowTextLengthW(g_edit);
+    if (g_noText) return NULL;
+    *h = (void *)SendMessageW(g_edit, EM_GETHANDLE, 0, 0);
+    text = *h ? (const WCHAR *)LocalLock((HLOCAL)*h) : NULL;
+    if (text) g_locked++;
+    return text;
+}
+
+void EditUnlockText(void *h)
+{
+    if (h) { LocalUnlock((HLOCAL)h); if (g_locked) g_locked--; }
+}
+
+static void *TestAlloc(size_t n)
+{
+    g_allocCalls++;
+    if (n > g_allocMax) g_allocMax = n;
+    if (g_failAlloc || (g_allocLimit && n > g_allocLimit)) return NULL;
+    return mem_alloc(n);
 }
 
 static int TestCaps(HDC dc, int cap)
@@ -68,7 +100,14 @@ static int TestCaps(HDC dc, int cap)
     default: return 0;
     }
 }
-static int TestStartDoc(HDC dc, const DOCINFOW *info) { (void)dc; (void)info; g_started++; return 1; }
+static int TestStartDoc(HDC dc, const DOCINFOW *info)
+{
+    (void)dc; (void)info;
+    if (g_locked) g_spoolLocked = 1;
+    if (g_spoolText && !g_locked) SetWindowTextW(g_edit, g_spoolText);
+    g_started++;
+    return 1;
+}
 static int TestStartPage(HDC dc) { (void)dc; return 1; }
 static int TestEndPage(HDC dc) { (void)dc; g_pages++; return 1; }
 static int TestEndDoc(HDC dc) { (void)dc; g_ended++; return 1; }
@@ -93,6 +132,7 @@ static BOOL WINAPI TestDialog(PRINTDLGW *pd)
     pd->Flags |= g_response;
     pd->nFromPage = 10; pd->nToPage = 10;
     pd->hDC = g_noDC ? NULL : CreateCompatibleDC(NULL);
+    if (g_dialogText) SetWindowTextW(g_edit, g_dialogText);
     return TRUE;
 }
 static BOOL WINAPI TestPageDialog(PAGESETUPDLGW *ps) { (void)ps; return FALSE; }
@@ -117,14 +157,19 @@ static void Reset(const WCHAR *text, int start, int end, DWORD response)
     SendMessageW(g_edit, EM_SETSEL, (WPARAM)start, (LPARAM)end);
     g_started = g_ended = g_aborted = g_pages = g_deleted = g_asked = 0;
     g_cancel = g_noDC = g_noText = g_failText = 0;
+    g_failAlloc = g_allocCalls = g_copyCalls = g_locked = g_spoolLocked = 0;
+    g_allocLimit = g_allocMax = 0;
+    g_dialogText = g_spoolText = NULL;
     g_requested = 0; g_response = response; g_printed[0] = 0;
 }
 
 void start(void)
 {
+    WCHAR *large;
+    int i;
     g_pf.pt = 12; g_pf.tab = 4;
     wcopy(g_pf.font, L"consolas", COUNTOF(g_pf.font));
-    g_edit = CreateWindowExW(0, L"EDIT", L"", WS_POPUP | ES_MULTILINE, 0, 0, 400, 300,
+    g_edit = CreateWindowExW(0, L"EDIT", L"", WS_POPUP | ES_MULTILINE | ES_AUTOHSCROLL, 0, 0, 400, 300,
                            NULL, NULL, GetModuleHandleW(NULL), NULL);
     if (!g_edit) { Check(L"create hidden native edit", 0); ExitProcess(1); }
     g_cd = (HMODULE)1; pPrintDlg = TestDialog; pPageDlg = TestPageDialog; pCdErr = TestDialogError;
@@ -134,6 +179,40 @@ void start(void)
     Check(L"selection is offered for selected text", !(g_requested & PD_NOSELECTION));
     Check(L"only selected text reaches pagination", wcmp(g_printed, L"selected") == 0);
     Check(L"selected job completes and releases its dc", g_started == 1 && g_ended == 1 && !g_aborted && g_pages == 1 && g_deleted == 1 && !g_asked);
+    Check(L"selection snapshot allocates only its text and terminator", !g_copyCalls && g_allocCalls == 1 && g_allocMax == 18);
+    Check(L"editor text is unlocked before any spooler callback", !g_locked && !g_spoolLocked);
+
+    large = mem_alloc(1000001u * sizeof(WCHAR));
+    if (!large) { Check(L"allocate large printing fixture", 0); ExitProcess(1); }
+    for (i = 0; i < 1000000; i++) large[i] = 'x';
+    memcpy(large + 500000, L"selected", 8 * sizeof(WCHAR));
+    large[1000000] = 0;
+    Reset(large, 500000, 500008, PD_SELECTION);
+    mem_free(large);
+    g_allocLimit = 64;                                      /* snapshot budget only: pagination keeps its ordinary small row buffer */
+    PrintDoc(NULL, 0);
+    Check(L"tiny selection in a million-character document fits a bounded snapshot", wcmp(g_printed, L"selected") == 0 && g_allocMax == 18 && !g_copyCalls);
+    Check(L"bounded selection completes with no locked editor or leaked printer dc", g_started == 1 && g_ended == 1 && g_deleted == 1 && !g_locked && !g_spoolLocked && !g_asked);
+
+    Reset(L"before selected after", 7, 15, PD_SELECTION); g_spoolText = L"changed by printer callback";
+    PrintDoc(NULL, 0);
+    Check(L"selected snapshot survives document changes in a printer callback", wcmp(g_printed, L"selected") == 0 && !g_spoolLocked && !g_locked && GetWindowTextLengthW(g_edit) == 27);
+
+    Reset(L"before selected after", 2, 15, PD_SELECTION); g_dialogText = L"short";
+    PrintDoc(NULL, 0);
+    Check(L"clamped selection allocates only its remaining text", wcmp(g_printed, L"ort") == 0 && g_allocMax == 8 && !g_asked);
+
+    Reset(L"before selected after", 7, 15, PD_SELECTION); g_dialogText = L"short";
+    PrintDoc(NULL, 0);
+    Check(L"empty clamped selection uses a two-byte snapshot and prints one page", !g_printed[0] && g_allocMax == 2 && g_started == 1 && g_ended == 1 && g_pages == 1 && !g_asked);
+
+    Reset(L"before selected after", 7, 15, PD_SELECTION); g_failAlloc = 1;
+    PrintDoc(NULL, 0);
+    Check(L"selection snapshot allocation failure unlocks text and releases dc", !g_started && !g_locked && g_deleted == 1 && g_asked == 1);
+
+    Reset(L"before selected after", 7, 15, PD_SELECTION); g_noText = 1;
+    PrintDoc(NULL, 0);
+    Check(L"selection text access failure starts no job and releases dc", !g_started && !g_locked && !g_allocCalls && g_deleted == 1 && g_asked == 1);
 
     Reset(L"before selected after", 7, 15, 0);
     PrintDoc(NULL, 0);
@@ -181,6 +260,6 @@ void start(void)
     Check(L"range beyond document aborts silently", g_started == 1 && g_aborted == 1 && !g_ended && !g_pages && !g_printed[0] && g_deleted == 1 && !g_asked);
 
     DestroyWindow(g_edit);
-    Check(L"printing regression suite", g_pass == 15 && g_fail == 0);
+    Check(L"printing regression suite", g_pass == 24 && g_fail == 0);
     ExitProcess(g_fail ? 1 : 0);
 }

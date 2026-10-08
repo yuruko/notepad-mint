@@ -166,6 +166,7 @@ const WCHAR *PathName(const WCHAR *path)
 /* directory part without the trailing slash (keeps "c:\" intact) */
 void PathDir(const WCHAR *path, WCHAR *out, int cap)
 {
+    if (cap <= 0) return;
     const WCHAR *name = PathName(path);
     int n = (int)(name - path);
     if (n > 1 && !(n == 3 && path[1] == ':')) n--;

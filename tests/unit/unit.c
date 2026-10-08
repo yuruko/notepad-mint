@@ -310,6 +310,16 @@ static void TestPaths(void)
     WantStr(L"text", b, wlen(b), WLIT(L"c:\\"));
     Want(b[4] == 0x5555, L"wrote past cap", 0, 0);
     Done(L"pathdir truncates to cap");
+    memset(b, 0x55, sizeof b);
+    PathDir(L"c:\\dir\\file", b, 0);
+    Want(b[0] == 0x5555 && b[1] == 0x5555, L"zero capacity changed the buffer", 0, 0);
+    Done(L"pathdir zero capacity writes nothing");
+    PathDir(L"c:\\dir\\file", b, -4);
+    Want(b[0] == 0x5555 && b[1] == 0x5555, L"negative capacity changed the buffer", 0, 0);
+    Done(L"pathdir negative capacity writes nothing");
+    PathDir(L"c:\\dir\\file", b, 1);
+    Want(b[0] == 0 && b[1] == 0x5555, L"capacity one failed to terminate or wrote past its limit", 0, 0);
+    Done(L"pathdir capacity one writes only its terminator");
     wcopy(b, L"c:\\dir", 64);   PathJoin(b, L"f.txt", 64); Str(L"pathjoin adds a backslash", b, L"c:\\dir\\f.txt");
     wcopy(b, L"c:\\dir\\", 64); PathJoin(b, L"f.txt", 64); Str(L"pathjoin no double backslash", b, L"c:\\dir\\f.txt");
     wcopy(b, L"c:\\", 64);      PathJoin(b, L"f", 64);     Str(L"pathjoin drive root", b, L"c:\\f");

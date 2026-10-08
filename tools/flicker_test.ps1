@@ -9,13 +9,14 @@
 # calibration: tools\probe.bat /DFLICKER_PROBE builds an exe whose editor sleeps 8 ms between its erase and its paint (edit.c, compiled out of the normal build);
 # this harness has to see that one (it catches about a third of the editor frames and a few percent of the title frames). a clean run on a normal exe means
 # "no gap of a few milliseconds in what is watched", not "no flicker anywhere": it only looks at the patches named above, not at the window edges, the status bar or the scrollbars.
-#   powershell -NoProfile -File tools\flicker_test.ps1 [-Exe build\notepad-mint.exe] [-Steps 600] [-Theme dark|light] [-Wrap] [-Save build\flicker_worst.png]
+#   powershell -NoProfile -File tools\flicker_test.ps1 [-Exe build\notepad-mint.exe] [-File tests\multilingual-sample.txt] [-Steps 600] [-Theme dark|light] [-Wrap] [-Save build\flicker_worst.png]
 # the window is visible for the few seconds it runs (on top of your other windows, without taking the focus). run it when you are not about to read that spot.
 param(
     [string]$Exe = (Join-Path $PSScriptRoot '..\build\notepad-mint.exe'),
     [int]$Steps = 600,
     [string]$Theme = 'dark',
     [switch]$Wrap,
+    [string]$File = '',                            # an actual document: multilingual text can use a different native EDIT paint path
     [int]$StepMs = 10,
     [int]$Lines = 300,                             # lines in the document (22 or so: the scrollbars come and go while the window is resized)
     [int]$DW = 5,                                  # pixels the width / height change per step (a fast drag moves 20 to 60 per message)
@@ -158,9 +159,13 @@ $wrapV = 0; if ($Wrap) { $wrapV = 1 }
 $ini = "[view]`r`ntheme=" + $Theme + "`r`n[editor]`r`nwrap=" + $wrapV + "`r`n"                       # (no [window] section: the first show is SW_SHOWDEFAULT = SW_SHOWNOACTIVATE from the startup info)
 [IO.File]::WriteAllBytes((Join-Path $dir 'settings.ini'), ([byte[]](0xFF, 0xFE)) + [Text.Encoding]::Unicode.GetBytes($ini))
 $doc = Join-Path $work 'doc.txt'
-$sb = New-Object System.Text.StringBuilder
-for ($i = 1; $i -le $Lines; $i++) { [void]$sb.Append(('line {0:D3}  the quick brown fox jumps over the lazy dog 0123456789 ' -f $i)); [void]$sb.Append("`r`n") }
-[IO.File]::WriteAllText($doc, $sb.ToString(), (New-Object Text.UTF8Encoding($false)))
+if ($File) {
+    Copy-Item -LiteralPath (Resolve-Path -LiteralPath $File).Path -Destination $doc
+} else {
+    $sb = New-Object System.Text.StringBuilder
+    for ($i = 1; $i -le $Lines; $i++) { [void]$sb.Append(('line {0:D3}  the quick brown fox jumps over the lazy dog 0123456789 ' -f $i)); [void]$sb.Append("`r`n") }
+    [IO.File]::WriteAllText($doc, $sb.ToString(), (New-Object Text.UTF8Encoding($false)))
+}
 
 $origAppData = $env:APPDATA
 $env:APPDATA = $ad

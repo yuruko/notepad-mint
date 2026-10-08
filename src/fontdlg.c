@@ -23,12 +23,7 @@ static int      g_nfonts, g_capfonts;               /* whole process: measuring 
 static int      g_monoOnly = 1;                     /* the filter's last explicit setting */
 
 static const int g_sizes[15] = { 9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 48, 70 };
-static const WCHAR g_intl[] =                       /* japanese korean arabic hebrew russian greek */
-    L"\u65e5\u672c\u8a9e \ud55c\uad6d\uc5b4 \u0627\u0644\u0639\u0631\u0628\u064a\u0629 \u05e2\u05d1\u05e8\u05d9\u05ea "
-    L"\u0440\u0443\u0441\u0441\u043a\u0438\u0439 \u03b5\u03bb\u03bb\u03b7\u03bd\u03b9\u03ba\u03ac";
-static const WCHAR *const g_sample[3] = {
-    L"the quick brown fox jumps over the lazy dog 0123456789", g_intl, L"int main(void) { return 0; }"
-};
+static const WCHAR g_sample[] = L"sphinx of black quartz, judge my vow. 0123456789";
 
 static int Clamp(int v) { return v < FONT_MIN ? FONT_MIN : (v > FONT_MAX ? FONT_MAX : v); }
 
@@ -208,96 +203,56 @@ static HFONT MakeFont(const FontSt *d, int px)
                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, d->face);
 }
 
-/* the text column of the panel has PV_L / PV_R of padding. a line box is the font's cell (height + external leading) plus PV_AIR:
- * the cjk / arabic line falls back to other fonts whose glyphs can stand taller than the cell, and DrawText clips to its box */
+/* one line at the actual selected size. long samples are clipped horizontally rather than shrinking the font */
 #define PV_L   S(10)
 #define PV_R   S(6)
-#define PV_AIR S(4)
-#define PV_MINPX 8                                  /* the preview font is never made smaller than this (px high) */
-
-/* the height of one line's cell in the font selected into dc: tmHeight + tmExternalLeading (0 when the metrics fail) */
-static int PvCell(HDC dc)
-{
-    TEXTMETRICW tm;
-    memset(&tm, 0, sizeof tm);
-    GetTextMetricsW(dc, &tm);
-    return tm.tmHeight + tm.tmExternalLeading;
-}
-
-/* f's cell height and the width of the widest of the three sample lines (f is only selected into dc for the call) */
-static void PvMeasure(HDC dc, HFONT f, int *cell, int *wide)
-{
-    HGDIOBJ of = SelectObject(dc, f);
-    int i, w;
-    *cell = PvCell(dc);
-    *wide = 0;
-    for (i = 0; i < COUNTOF(g_sample); i++) {
-        w = TextW(dc, g_sample[i], -1);
-        if (w > *wide) *wide = w;
-    }
-    SelectObject(dc, of);
-}
-
-/* the chosen size at the current dpi, made smaller until the three lines fit the panel in height and in width. at most 3
- * refits: the first estimate (a MulDiv ratio of the size) can be a px off because hinted advances are not linear in the size */
 static void PreviewFont(FontSt *d)
 {
-    RECT rc;
-    HDC dc;
     HFONT f;
-    int px = MulDiv(d->pt, g_dpi, 72), room, col, cell, wide, np, t, i;
-    if (!d->pv || !GetClientRect(d->pv, &rc)) return;
-    room = (rc.bottom - S(6)) / 3 - PV_AIR;         /* what the cell of one of the three lines may take */
-    col = rc.right - PV_L - PV_R;                   /* the width of the text column */
-    f = MakeFont(d, px);
-    dc = GetDC(d->pv);
-    for (i = 0; f && dc && i < 3; i++) {
-        PvMeasure(dc, f, &cell, &wide);
-        if ((room <= 0 || cell <= room) && (col <= 0 || wide <= col)) break;        /* it fits */
-        np = px - 1;                                /* always at least one px smaller, whatever the estimates say */
-        if (room > 0 && cell > room) { t = MulDiv(px, room, cell); if (t < np) np = t; }
-        if (col > 0 && wide > col) { t = MulDiv(px, col, wide); if (t < np) np = t; }
-        if (np < PV_MINPX) np = PV_MINPX;
-        if (np >= px) break;                        /* already at the floor */
-        DeleteObject(f);                            /* (not selected into any dc here) */
-        px = np;
-        f = MakeFont(d, px);                        /* same face, bold, italic: only the height changes */
-    }
-    if (dc) ReleaseDC(d->pv, dc);
+    if (!d->pv) return;
+    f = MakeFont(d, MulDiv(d->pt, g_dpi, 72));
+    if (!f) return;                                 /* preserve the last preview if a GDI allocation fails */
     if (d->font) DeleteObject(d->font);
     d->font = f;
     InvalidateRect(d->pv, NULL, FALSE);
+}
+
+static void PreviewDraw(HDC dc, const RECT *rc, const FontSt *d)
+{
+    RECT line = *rc;
+    HGDIOBJ of;
+    FillC(dc, rc, C_EDIT_BG);
+    if (!d || !d->font) return;
+    of = SelectObject(dc, d->font);
+    line.left += PV_L; line.right -= PV_R;
+    TextC(dc, g_sample, -1, &line, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, C_EDIT_FG);
+    if (of) SelectObject(dc, of);
 }
 
 /* double buffered, in the editor colours of the current theme (read here, never cached) */
 static void PreviewPaint(HWND h, const FontSt *d)
 {
     PAINTSTRUCT ps;
-    RECT rc, lr;
-    HDC dc = BeginPaint(h, &ps), mdc;
-    HBITMAP bmp;
-    HGDIOBJ ob, of;
-    int i, lh, y;
-    GetClientRect(h, &rc);
+    RECT rc;
+    HDC dc, mdc;
+    HBITMAP bmp = NULL;
+    HGDIOBJ ob = NULL;
+    memset(&ps, 0, sizeof ps);
+    dc = BeginPaint(h, &ps);
+    if (!dc) { EndPaint(h, &ps); return; }
+    if (!GetClientRect(h, &rc) || rc.right <= 0 || rc.bottom <= 0) { EndPaint(h, &ps); return; }
     mdc = CreateCompatibleDC(dc);
-    bmp = CreateCompatibleBitmap(dc, rc.right, rc.bottom);
-    ob = SelectObject(mdc, bmp);
-    FillC(mdc, &rc, C_EDIT_BG);
-    if (d && d->font) {
-        of = SelectObject(mdc, d->font);
-        lh = PvCell(mdc) + PV_AIR;
-        y = (rc.bottom - 3 * lh) / 2;
-        if (y < 0) y = 0;
-        for (i = 0; i < 3; i++) {
-            lr.left = PV_L; lr.top = y + i * lh; lr.right = rc.right - PV_R; lr.bottom = lr.top + lh;
-            TextC(mdc, g_sample[i], -1, &lr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, C_EDIT_FG);
-        }
-        SelectObject(mdc, of);
+    if (mdc) bmp = CreateCompatibleBitmap(dc, rc.right, rc.bottom);
+    if (bmp) ob = SelectObject(mdc, bmp);
+    if (ob && ob != (HGDIOBJ)(LONG_PTR)-1) {
+        PreviewDraw(mdc, &rc, d);
+        if (!BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY)) PreviewDraw(dc, &rc, d);
+        SelectObject(mdc, ob);
+    } else {
+        PreviewDraw(dc, &rc, d);
     }
-    BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY);
-    SelectObject(mdc, ob);
-    DeleteObject(bmp);
-    DeleteDC(mdc);
+    if (bmp) DeleteObject(bmp);
+    if (mdc) DeleteDC(mdc);
     EndPaint(h, &ps);
 }
 
@@ -308,6 +263,16 @@ static LRESULT CALLBACK PreviewProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return DefWindowProcW(h, m, w, l);
     }
     if (m == WM_ERASEBKGND) return 1;
+    if (m == WM_GETFONT) {
+        const FontSt *d = (const FontSt *)GetWindowLongPtrW(h, GWLP_USERDATA);
+        return d ? (LRESULT)d->font : 0;
+    }
+    if (m == WM_PRINTCLIENT) {
+        RECT rc;
+        GetClientRect(h, &rc);
+        PreviewDraw((HDC)w, &rc, (const FontSt *)GetWindowLongPtrW(h, GWLP_USERDATA));
+        return 0;
+    }
     if (m == WM_PAINT) { PreviewPaint(h, (const FontSt *)GetWindowLongPtrW(h, GWLP_USERDATA)); return 0; }
     return DefWindowProcW(h, m, w, l);
 }
@@ -358,7 +323,7 @@ static void FontLayout(FontSt *d)
     UiLabel(h, L"9 to 70 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
     UiLabel(h, L"preview:", 12, 228, 200, 16, 0, SS_NOPREFIX);
     DlgFrame(b, 12, 246, 504, 146, BV_SUNKEN);
-    d->pv = CreateWindowExW(0, L"mp_fontpv", NULL, WS_CHILD | WS_VISIBLE, S(12) + 2, S(246) + 2, S(504) - 4, S(146) - 4,
+    d->pv = CreateWindowExW(0, L"mp_fontpv", g_sample, WS_CHILD | WS_VISIBLE, S(12) + 2, S(246) + 2, S(504) - 4, S(146) - 4,
                             h, (HMENU)(ULONG_PTR)ID_PREVIEW, g_hinst, d);
 
     DlgFrame(b, 12, 28, 236, 166, BV_SUNKEN);

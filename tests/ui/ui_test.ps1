@@ -62,6 +62,9 @@ public static class U {
     [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW")] static extern IntPtr SendMessageTimeoutP(IntPtr h, uint m, ref uint w, ref uint l, uint fl, uint to, out IntPtr res);
     [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint tid, ref GTI g);
     [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+    [DllImport("user32.dll")] static extern bool InvalidateRect(IntPtr h, ref RECT r, bool erase);
+    [DllImport("user32.dll")] static extern bool UpdateWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern uint GetGuiResources(IntPtr proc, uint flags);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
     [StructLayout(LayoutKind.Sequential)] public struct GTI { public int cb, flags; public IntPtr active, focus, capture, menuOwner, moveSize, caret; public RECT rc; }
 
@@ -125,6 +128,8 @@ public static class U {
     public static uint Tid(long h) { uint p; return GetWindowThreadProcessId(H(h), out p); }
     public static int[] WRect(long h) { RECT r; GetWindowRect(H(h), out r); return new int[] { r.L, r.T, r.R, r.B }; }
     public static int[] CRect(long h) { RECT r; GetClientRect(H(h), out r); return new int[] { r.L, r.T, r.R, r.B }; }
+    public static bool Repaint(long h, int l, int t, int r, int b) { RECT dirty = new RECT { L = l, T = t, R = r, B = b }; return InvalidateRect(H(h), ref dirty, true) && UpdateWindow(H(h)); }
+    public static uint GdiCount(System.Diagnostics.Process proc) { return GetGuiResources(proc.Handle, 0); }
     public static bool Post(long h, uint m, long w, long l) { return PostMessageW(H(h), m, H(w), H(l)); }
 
     public static long Snd(long h, uint m, long w, long l) {                     // synchronous; throws when the window does not answer in To ms
@@ -3018,12 +3023,97 @@ function Test-T37 {
     }
 }
 
+# =========================================================================================================== T38
+# unlike T37's standalone erase, this observes the actual erase inside an invalidated WM_PAINT. the probe reads the live window after
+# native erasure and before native text drawing; no extra erase is sent by the test. mixed-script fallback fonts make that gap visible.
+function Test-T38 {
+    $probe = Start-App
+    if ((Snd (Get-Edit $probe) (0x8000 + 94) 0 0) -ne 0x4D494E54) {
+        Skip 'T38 text remains visible inside an erased repaint' 'build the probe: tools\probe.bat /DSHOTDC, run with -Exe build\probe\notepad-mint.exe'
+        return
+    }
+    Stop-App $probe
+    $plain = Join-Path $work 'resize-plain.txt'
+    [IO.File]::WriteAllText($plain, "plain text resize control`r`ntext stays visible during painting`r`n0123456789 abcdefghijklmnopqrstuvwxyz`r`nlast row", (New-Object Text.UTF8Encoding($false)))
+    $idx = 0
+    foreach ($theme in @('dark', 'light')) {
+        foreach ($wrap in @($false, $true)) {
+            foreach ($file in @($plain, $sampleMulti)) {
+                $app = Start-App $file                                         # fresh profile and native control for every document/theme/wrap combination
+                $ed = Get-Edit $app
+                if ($theme -eq 'light') { [void](Snd $app.Main $WM_COMMAND $IDM.IDM_THEME_LIGHT 0) }
+                if ($wrap) { [void](Snd $app.Main $WM_COMMAND $IDM.IDM_FMT_WRAP 0); $ed = Get-Edit $app }
+                [void](Snd $ed 0x8 0 0)                                       # stop the caret blink; only text/background pixels are compared
+                Start-Sleep -Milliseconds 300
+                $w = 320; $h = 80; $y0 = 0
+                $name = 'plain'
+                if ($file -eq $sampleMulti) {
+                    $name = 'multilingual'
+                    $y0 = (Ed-Pos $app ([int](Snd $ed 0xBB 4 0)))[1]          # the Japanese, Chinese and Korean rows, rather than only the ASCII heading
+                }
+                $label = $theme + ', wrap ' + $wrap + ', ' + $name
+                [void](Snd $ed (0x8000 + 94) $w ($h -bor ($y0 -shl 16)))       # settle initial theme/layout painting with the same ordinary erased repaint
+                $before = Ed-Direct $app $w $h $y0
+                $bg = $before.Off + (($h - 1) * $w + $w - 1) * 3
+                $ink = 0
+                for ($p = $before.Off; $p -lt $before.B.Length; $p += 3) {
+                    if ($before.B[$p] -ne $before.B[$bg] -or $before.B[$p + 1] -ne $before.B[$bg + 1] -or $before.B[$p + 2] -ne $before.B[$bg + 2]) { $ink++ }
+                }
+                $idx++; Ck ('T38.' + $idx + ' ' + $label + ': the live reference contains painted text') ($ink -gt 100) ('ink pixels ' + $ink)
+                $mid = Ed-Direct $app $w $h $y0 (0x8000 + 94)
+                $idx++; Ck ('T38.' + $idx + ' ' + $label + ': the actual native erase was observed') ([bool]$mid) 'no snapshot from the actual WM_ERASEBKGND'
+                if ($mid) {
+                    $expected = [Convert]::ToBase64String($before.B, $before.Off, ($w * $h * 3))
+                    $observed = [Convert]::ToBase64String($mid.B, $mid.Off, ($w * $h * 3))
+                    $idx++; Ck ('T38.' + $idx + ' ' + $label + ': text stays visible while the new frame is erased and drawn') ($observed -ceq $expected) 'the live window changed before the complete frame was ready'
+                    $after = Ed-Direct $app $w $h $y0
+                    $finished = [Convert]::ToBase64String($after.B, $after.Off, ($w * $h * 3))
+                    $idx++; Ck ('T38.' + $idx + ' ' + $label + ': the completed repaint preserves the same text and background') ($finished -ceq $expected) 'completed repaint pixels differ from the original'
+                }
+                Stop-App $app
+            }
+        }
+    }
+    foreach ($theme in @('dark', 'light')) {
+        $app = Start-App $plain
+        $ed = Get-Edit $app
+        $cap = (Snd $ed (0x8000 + 95) 0 0) -eq 0x4D494E54
+        $idx++; Ck ('T38.' + $idx + ' ' + $theme + ': the partial repaint probe is available') $cap 'no WM_APP + 95 probe'
+        if (-not $cap) { Stop-App $app; return }
+        if ($theme -eq 'light') { [void](Snd $app.Main $WM_COMMAND $IDM.IDM_THEME_LIGHT 0) }
+        [void](Snd $ed 0x8 0 0)
+        [void][U]::Repaint($ed, 0, 0, 320, 100)
+        $before = Ed-Direct $app 320 100
+        $partial = Ed-Direct $app 320 100 0 (0x8000 + 95)
+        [byte[]]$marked = $before.B.Clone()
+        $px = $before.Off + (96 * 320 + 316) * 3
+        $marked[$px] = 255; $marked[$px + 1] = 0; $marked[$px + 2] = 255
+        $expected = [Convert]::ToBase64String($marked, $before.Off, (320 * 100 * 3))
+        $actual = [Convert]::ToBase64String($partial.B, $partial.Off, (320 * 100 * 3))
+        $idx++; Ck ('T38.' + $idx + ' ' + $theme + ': a partial dirty rectangle restores its text and preserves every exterior pixel') ($actual -ceq $expected) 'partial repaint changed an exterior pixel or shifted/clipped text at its nonzero origin'
+        [void][U]::Repaint($ed, 0, 0, 320, 100)
+        $clean = Ed-Direct $app 320 100
+        $expected = [Convert]::ToBase64String($before.B, $before.Off, (320 * 100 * 3))
+        $actual = [Convert]::ToBase64String($clean.B, $clean.Off, (320 * 100 * 3))
+        $idx++; Ck ('T38.' + $idx + ' ' + $theme + ': a complete repaint clears the exterior marker') ($actual -ceq $expected) 'full repaint left a stale marker'
+        for ($j = 0; $j -lt 20; $j++) { [void][U]::Repaint($ed, 17, 19, 157, 51) }
+        $start = [U]::GdiCount($app.Proc)
+        $ok = $true
+        for ($j = 0; $j -lt 200; $j++) { if (-not [U]::Repaint($ed, 17, 19, 157, 51)) { $ok = $false } }
+        $end = [U]::GdiCount($app.Proc)
+        $idx++; Ck ('T38.' + $idx + ' ' + $theme + ': 200 partial repaints release their DCs and bitmaps') ($ok -and $start -gt 0 -and $end -eq $start) ('GDI objects before ' + $start + ', after ' + $end + ', paint calls succeeded ' + $ok)
+        Stop-App $app
+    }
+}
+
 # ====================================================================================================== run them all
+. (Join-Path $PSScriptRoot 'font_preview_test.ps1')
+. (Join-Path $PSScriptRoot 'caret_position_test.ps1')
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine

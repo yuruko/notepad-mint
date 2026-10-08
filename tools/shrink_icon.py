@@ -3,7 +3,8 @@
 make_icon.ps1 builds the icon at full quality; run this after it (python 3 with pillow and numpy):
     python tools\\shrink_icon.py [assets\\notepad_mint.ico]
 the big image becomes an 8-bit palette png (with per-colour alpha), after an ordered dither of +-3.5 levels so that the soft gradient of the
-glass does not turn into visible bands. the small bmp sizes are left as they are. running it twice does nothing (it only touches a png with more than 256 colours)."""
+glass does not turn into visible bands. smaller images (bmp or png) are left as they are; pack_icon.py losslessly compresses those separately.
+running it twice does nothing (it only touches a 256 x 256 png with more than 256 colours)."""
 import io
 import struct
 import sys
@@ -18,6 +19,8 @@ entries = [list(struct.unpack('<BBBBHHII', data[6 + 16 * i:22 + 16 * i])) for i 
 bodies = [data[e[7]:e[7] + e[6]] for e in entries]
 
 for i, e in enumerate(entries):
+    if (e[0] or 256) != 256 or (e[1] or 256) != 256:
+        continue
     if bodies[i][:4] != b'\x89PNG':
         continue
     img = Image.open(io.BytesIO(bodies[i]))

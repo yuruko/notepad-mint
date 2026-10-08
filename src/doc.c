@@ -260,7 +260,7 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
     size_t n, got, off = 0, i, nCRLF = 0, nLF = 0, nCR = 0, nNul = 0, first = 0, outn;
     WCHAR *w, *out;
     int wn, e, k;
-    BOOL bom8, bomLE, bomBE;
+    BOOL bom8, bomLE, bomBE, validUtf8 = FALSE;
 
     *text = NULL; *len = 0; *enc = ENC_UTF8; *eol = EOL_CRLF;
     f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -300,6 +300,7 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
             if (k == 1) e = ENC_UTF16LE;
             else if (k == 2) e = ENC_UTF16BE;
             else if (!Utf8Valid(buf, n)) e = ENC_ANSI;
+            else validUtf8 = TRUE;                        /* detection already checked these exact bytes */
         }
     }
 
@@ -316,7 +317,7 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
     } else {
         UINT cp = CpOf(e);
         int src = (int)(n - off);
-        if (cp == CP_UTF8 && !Utf8Valid(buf + off, n - off)) { mem_free(buf); return ERR_LOSSY; }
+        if (cp == CP_UTF8 && !validUtf8 && !Utf8Valid(buf + off, n - off)) { mem_free(buf); return ERR_LOSSY; }
         w = (WCHAR *)mem_alloc(((size_t)src + 1) * sizeof(WCHAR));  /* one conversion, no size query: no code page makes more characters than it has bytes */
         wn = (w && src) ? MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, w, src) : 0;
         if (w && src && !wn && GetLastError() == 122) {              /* (ERROR_INSUFFICIENT_BUFFER: one that does: ask for the size) */
@@ -429,16 +430,14 @@ static WCHAR *EolConvert(const WCHAR *t, int len, int eol, int *outLen, int *own
  * (a lossy '?' is still one byte) */
 DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol)
 {
-    size_t breaks;
+    size_t cut;
     if (!text || len <= 0) return 0;
-    breaks = mp_count_lf(text, (size_t)len);
-    size_t cut = (eol == EOL_CRLF) ? 0 : breaks;
-    if (len < 0) len = 0;
+    cut = (eol == EOL_CRLF) ? 0 : mp_count_lf(text, (size_t)len);
     if (enc == ENC_UTF16LE || enc == ENC_UTF16BE) return (DWORD)(((size_t)len - cut) * 2);
     {
         UINT cp = CpOf(enc);
         DWORD fl = CpHasDefaultChar(cp) ? WC_NO_BEST_FIT_CHARS : 0;
-        size_t need = len ? (size_t)WideCharToMultiByte(cp, fl, text, len, NULL, 0, NULL, NULL) : 0;
+        size_t need = (size_t)WideCharToMultiByte(cp, fl, text, len, NULL, 0, NULL, NULL);
         return need >= cut ? (DWORD)(need - cut) : 0; /* an unavailable converter reports zero, not an unsigned wraparound */
     }
 }

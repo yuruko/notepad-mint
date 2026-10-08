@@ -54,7 +54,7 @@ powershell -NoProfile -File "%ROOT%\tests\ui\ui_test.ps1" || (echo verify: GUI T
 echo [verify] selected line breaks, partly visible rows, theme button hover, button tooltips and resize erase regression (probe build: /DSHOTDC dumps the editor's own pixels, /DMENU_NO_TRACK keeps a synthetic hover)
 cmd /c ""%ROOT%\tools\probe.bat" /DSHOTDC /DMENU_NO_TRACK" > build\verify-probe.log 2>&1
 if errorlevel 1 type build\verify-probe.log & echo verify: PROBE BUILD FAILED & exit /b 1
-powershell -NoProfile -File "%ROOT%\tests\ui\ui_test.ps1" -Exe "%ROOT%\build\probe\notepad-mint.exe" -Only T23,T25,T28,T30,T37 || (echo verify: DIRECT PAINT TEST FAILED & exit /b 1)
+powershell -NoProfile -File "%ROOT%\tests\ui\ui_test.ps1" -Exe "%ROOT%\build\probe\notepad-mint.exe" -Only T23,T25,T28,T30,T37,T38 || (echo verify: DIRECT PAINT TEST FAILED & exit /b 1)
 goto done
 :frame
 echo [verify] title strip test

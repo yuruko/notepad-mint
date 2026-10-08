@@ -1,15 +1,17 @@
-notepad mint 1.0.5
+notepad mint 1.0.6
 
-fixes the editor text disappearing for a frame when resizing the window.
+- editor repaints are buffered as complete frames, keeping text visible while multilingual glyphs are drawn during resize
+- the font preview uses one line at the actual selected size, from 9 to 70 pt: "sphinx of black quartz, judge my vow. 0123456789"
+- smaller executable: 134,656 bytes, 6.7% smaller than 1.0.5, through lossless icon packing and link-time optimization
+- nearby caret movement avoids rescanning the whole document prefix; utf-8 loading reuses validation, and crlf byte sizing skips an unused newline scan
+- selection printing copies only selected text; zero-capacity path handling is guarded
 
-during a resize, windows can request background clearing before the text is painted again. the editor now keeps its existing text visible until painting starts, and still clears backgrounds during normal painting and print-window capture.
-
-regression coverage checks the live editor pixels before a repaint can hide the issue, in dark and light themes, with text selections and deleted characters. the previous release fails the standalone-erase checks; the fix preserves the text without leaving stale pixels.
+regression coverage includes multilingual painting, partial repaints, resource lifetime, every preview size in both themes, randomized caret/status comparisons, encoding and file failures, and selection-print allocation failures.
 
 **download**
 
-- `notepad-mint-1.0.5-setup.exe`: installer and uninstaller
-- `notepad-mint-1.0.5.exe`: standalone executable
+- `notepad-mint-1.0.6-setup.exe`: installer and uninstaller
+- `notepad-mint-1.0.6.exe`: standalone executable
 - `SHA256SUMS.txt`: download checksums
 
 settings remain in `%appdata%\notepad-mint\settings.ini`.

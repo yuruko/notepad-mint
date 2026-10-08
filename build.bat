@@ -22,8 +22,8 @@ del /q build\*.obj build\*.res build\notepad-mint.exe 2>nul
 set "CFLAGS=/nologo /c /std:c17 /GS- /Zl /Gy /Gw /W3 /utf-8 /Fobuild\\"
 set "LFLAGS=/NOLOGO /MACHINE:X86 /SUBSYSTEM:WINDOWS,6.01 /ENTRY:start /NODEFAULTLIB /INCREMENTAL:NO /MANIFEST:NO /SAFESEH:NO /LARGEADDRESSAWARE /OPT:REF /OPT:ICF /MAP:build\notepad_mint.map"
 if /i "%1"=="dbg" goto dbgflags
-set "CFLAGS=%CFLAGS% /O1"
-set "LFLAGS=%LFLAGS% /DEBUG:NONE"
+set "CFLAGS=%CFLAGS% /O1 /GL"
+set "LFLAGS=%LFLAGS% /LTCG /DEBUG:NONE"
 goto flagsdone
 :dbgflags
 set "CFLAGS=%CFLAGS% /Od /Zi /DDBGLOG /Fdbuild\\vc.pdb"

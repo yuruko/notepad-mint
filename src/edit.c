@@ -154,7 +154,7 @@ static int CaretIndex(void)
 
 void EditCaretPos(int *line, int *col)
 {
-    static struct { DWORD rev; int n, idx, line, col, ok; } c;      /* the status bar asks several times for one keystroke: the same text and caret are not scanned again */
+    static struct { DWORD rev; int n, idx, line, col, ok; } c;      /* unchanged text: reuse the position and scan only a shorter moved span */
     HLOCAL h;
     int n, idx = CaretIndex(), i;
     const WCHAR *p;
@@ -164,9 +164,20 @@ void EditCaretPos(int *line, int *col)
     p = TextLock(&h, &n);
     if (!p) return;
     if (idx > n) idx = n;
-    *line = 1 + (int)mp_count_lf(p, (size_t)idx);
-    for (i = idx; i > 0 && p[i - 1] != '\n'; i--) {}
-    *col = idx - i + 1;
+    if (c.ok && c.rev == g_textRev && c.n == n && (idx > c.idx ? idx - c.idx : c.idx - idx) < idx) {
+        int lo = idx < c.idx ? idx : c.idx, span = idx > c.idx ? idx - c.idx : c.idx - idx;
+        int breaks = (int)mp_count_lf(p + lo, (size_t)span);
+        *line = c.line + (idx < c.idx ? -breaks : breaks);
+        if (!breaks) *col = c.col + (idx - c.idx);
+        else {
+            for (i = idx; i > 0 && p[i - 1] != '\n'; i--) {}
+            *col = idx - i + 1;
+        }
+    } else {
+        *line = 1 + (int)mp_count_lf(p, (size_t)idx);
+        for (i = idx; i > 0 && p[i - 1] != '\n'; i--) {}
+        *col = idx - i + 1;
+    }
     LocalUnlock(h);
     c.rev = g_textRev; c.n = n; c.idx = idx; c.line = *line; c.col = *col; c.ok = 1;
 }
@@ -982,12 +993,81 @@ static LRESULT BandErase(HWND h, WPARAM w, LPARAM l)
     return r;
 }
 
+/* ordinary WM_PAINT: keep the previous frame visible while the native control shapes mixed-script text. prepare every buffer resource
+ * before BeginPaint validates the update region; a failed allocation leaves the original painter free to handle it. supplied-DC paints
+ * and the native control's direct selection / editing paths retain their normal handling. BeginPaint / EndPaint manage its caret. */
+static int EditPaintBuffered(HWND h, const RECT *dirty)
+{
+    RECT cr;
+    PAINTSTRUCT ps;
+    HDC own = NULL, mdc = NULL, dc;
+    HBITMAP bmp = NULL;
+    HGDIOBJ ob = NULL;
+    int saved = 0, depth, done = 0, copied = 0;
+
+    if (!GetClientRect(h, &cr) || cr.right <= 0 || cr.bottom <= 0) return 0;
+    own = GetDC(h);
+    if (!own) return 0;
+    mdc = CreateCompatibleDC(own);
+    if (!mdc) goto cleanup;
+    bmp = CreateCompatibleBitmap(own, cr.right, cr.bottom);
+    if (!bmp) goto cleanup;
+    ob = SelectObject(mdc, bmp);                               /* a bitmap selection fails with NULL */
+    if (!ob) goto cleanup;
+    saved = SaveDC(mdc);
+    if (!saved || !FillRect(mdc, &cr, EditBrush())) goto cleanup;
+    ReleaseDC(h, own);
+    own = NULL;
+
+    memset(&ps, 0, sizeof ps);
+    depth = g_paintDepth;
+    g_paintDepth = 0;                                         /* BeginPaint's live erase must wait for the complete offscreen frame */
+    dc = BeginPaint(h, &ps);
+    g_paintDepth = depth;
+    if (!dc) {
+        EndPaint(h, &ps);
+        InvalidateRect(h, dirty, TRUE);                       /* a failed BeginPaint may have consumed the update region */
+        goto cleanup;
+    }
+    g_paintDepth++;
+    SendMessageW(h, WM_ERASEBKGND, (WPARAM)mdc, 0);
+    Ctl(h, WM_PRINTCLIENT, (WPARAM)mdc, PRF_CLIENT | PRF_ERASEBKGND);
+    g_paintDepth--;
+    if (RestoreDC(mdc, saved)) {                              /* native DC state must not clip the overlays or move the final blit */
+        StubPaint(h, mdc, NULL);
+        BandPaint(h, mdc, NULL);
+        copied = BitBlt(dc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top,
+                       mdc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+    }
+    saved = 0;
+    if (!copied) {                                           /* the update was consumed: draw into this paint DC if presentation failed */
+        int state = SaveDC(dc);
+        g_paintDepth++;
+        SendMessageW(h, WM_ERASEBKGND, (WPARAM)dc, 0);
+        Ctl(h, WM_PRINTCLIENT, (WPARAM)dc, PRF_CLIENT | PRF_ERASEBKGND);
+        g_paintDepth--;
+        if (state) RestoreDC(dc, state);
+        StubPaint(h, dc, &ps.rcPaint);
+        BandPaint(h, dc, &ps.rcPaint);
+    }
+    EndPaint(h, &ps);
+    done = 1;
+cleanup:
+    if (saved) RestoreDC(mdc, saved);
+    if (ob) SelectObject(mdc, ob);
+    if (mdc) DeleteDC(mdc);
+    if (bmp) DeleteObject(bmp);
+    if (own) ReleaseDC(h, own);
+    return done;
+}
+
 #ifdef SHOTDC
 /* probe builds only (tools\probe.bat /DSHOTDC): WM_APP + 90 writes what is on the editor's window right now to %TEMP%\mint_dc.ppm (binary ppm,
  * wParam pixels wide, the low word of lParam rows high, from the row in the high word of lParam: 0 = the top left corner). it is read from the window's
  * own DC and nothing is repainted first, so it shows what the control painted straight onto the window (PrintWindow would repaint through WM_PAINT
  * and hide that). a process on another desktop cannot do this itself. a pixel read costs about 20 us: ask for the rows you need, not the whole window. */
 API DWORD WINAPI GetTempPathW(DWORD, LPWSTR);
+static int g_shotPaintW, g_shotPaintH, g_shotPaintY, g_shotPaintHit;
 
 static int ShotInt(char *d, int v)
 {
@@ -1067,10 +1147,63 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         UpdateWindow(h);
         ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
         return 0; }
+    case WM_APP + 94:                                           /* live pixels after the actual repaint erase, before native text drawing */
+        if (!w) return 0x4D494E54;
+        g_shotPaintW = (int)w;
+        g_shotPaintH = (int)(l & 0xFFFF);
+        g_shotPaintY = (int)((l >> 16) & 0xFFFF);
+        g_shotPaintHit = 0;
+        InvalidateRect(h, NULL, TRUE);
+        UpdateWindow(h);
+        g_shotPaintW = 0;
+        return g_shotPaintHit;
+    case WM_APP + 95: {                                         /* a partial repaint must preserve a marked pixel outside its dirty rectangle */
+        RECT dirty = { 17, 19, 157, 51 };
+        HDC dc;
+        int ht = (int)(l & 0xFFFF), y0 = (int)((l >> 16) & 0xFFFF);
+        if (!w) return 0x4D494E54;
+        dc = GetDC(h);
+        if (dc) {
+            SetPixelV(dc, (int)w - 4, y0 + ht - 4, 0x00FF00FF);
+            ReleaseDC(h, dc);
+        }
+        InvalidateRect(h, &dirty, TRUE);
+        UpdateWindow(h);
+        ShotDc(h, (int)w, ht, y0);
+        return 0; }
+    case WM_APP + 96: {                                         /* isolated caret/status calculation benchmark, alternating nearby positions near EOF */
+        DWORD ss = 0, se = 0, now, elapsed;
+        int n, i, a, b, line, col;
+        if (!w) return 0x4D494E54;
+        n = GetWindowTextLengthW(h);
+        b = n > 16 ? n - 16 : n;
+        a = b > (int)l ? b - (int)l : 0;
+        Ctl(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se);
+        SendMessageW(h, WM_SETREDRAW, FALSE, 0);
+        Ctl(h, EM_SETSEL, (WPARAM)a, (LPARAM)a);
+        EditCaretPos(&line, &col);                               /* the initial full-prefix calculation is outside the measurement */
+        now = GetTickCount();
+        for (i = 0; i < (int)w; i++) {
+            int idx = (i & 1) ? a : b;
+            Ctl(h, EM_SETSEL, (WPARAM)idx, (LPARAM)idx);
+            EditCaretPos(&line, &col);
+        }
+        elapsed = GetTickCount() - now;
+        Ctl(h, EM_SETSEL, ss, se);
+        SendMessageW(h, WM_SETREDRAW, TRUE, 0);
+        InvalidateRect(h, NULL, TRUE);
+        AppUpdateStatus();
+        return (LRESULT)elapsed; }
 #endif
     case WM_ERASEBKGND:                                         /* resize can erase now and paint later: leave the text visible until the native painter is ready */
         if (!g_paintDepth) return 0;                            /* keep erasure pending for BeginPaint, which then erases and draws in the same call */
         r = BandErase(h, w, l);
+#ifdef SHOTDC
+        if (g_shotPaintW && !g_shotPaintHit) {
+            g_shotPaintHit = 1;
+            ShotDc(h, g_shotPaintW, g_shotPaintH, g_shotPaintY);
+        }
+#endif
 #ifdef FLICKER_PROBE
         Sleep(8);                                               /* calibration only (tools\flicker_test.ps1 must see this): a visible gap between the erase and the text */
 #endif
@@ -1108,6 +1241,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_PAINT: {
         RECT ur;
         int have = !w && GetUpdateRect(h, &ur, FALSE);
+        if (have && EditPaintBuffered(h, &ur)) return 0;
         g_paintDepth++;
         r = CallWindowProcW(g_orig, h, m, w, l);
         g_paintDepth--;

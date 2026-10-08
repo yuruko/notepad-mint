@@ -7,3 +7,4 @@ build/
 *.map
 *.exe
 dbg.log
+__pycache__/

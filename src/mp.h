@@ -7,7 +7,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME                  /* the window title is "<name>" + this (main.c AppUpdateTitle); the title strip draws the name bold and this part regular */
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.0.5"
+#define APP_VERSION  L"1.0.6"
 #define PATH_CAP     1024
 
 /* ------------------------------------------------------------- palette --

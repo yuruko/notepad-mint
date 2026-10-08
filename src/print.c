@@ -385,14 +385,19 @@ void PrintDoc(HWND owner, int quiet)
     if (pd.Flags & PD_PAGENUMS) { from = pd.nFromPage; to = pd.nToPage; }
 
     cur = SetCursor(LoadCursorW(NULL, IDC_WAIT));
-    text = EditGetDocText(&n);
-    if (text && (pd.Flags & PD_SELECTION)) {
-        if (selStart > (DWORD)n) selStart = (DWORD)n;
-        if (selEnd > (DWORD)n) selEnd = (DWORD)n;
-        n = (int)(selEnd - selStart);
-        memmove(text, text + selStart, (size_t)n * sizeof(WCHAR));
-        text[n] = 0;
-    }
+    if (pd.Flags & PD_SELECTION) {
+        void *h = NULL;
+        const WCHAR *source = EditLockText(&h, &n);
+        text = NULL;
+        if (source) {
+            if (selStart > (DWORD)n) selStart = (DWORD)n;
+            if (selEnd > (DWORD)n) selEnd = (DWORD)n;
+            n = (int)(selEnd - selStart);
+            text = (WCHAR *)mem_alloc(((size_t)n + 1) * sizeof(WCHAR));
+            if (text) { memcpy(text, source + selStart, (size_t)n * sizeof(WCHAR)); text[n] = 0; }
+        }
+        EditUnlockText(h);                          /* printer/PDF callbacks may pump messages: only the owned snapshot reaches PrintJob */
+    } else text = EditGetDocText(&n);
     /* with PD_USEDEVMODECOPIESANDCOLLATE the driver makes the copies and nCopies comes back 1; more => repeat the document */
     ok = pd.hDC && text ? PrintJob(pd.hDC, text, n, pd.nCopies > 1 ? pd.nCopies : 1, from, to) : 0;
     SetCursor(cur);
