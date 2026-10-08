@@ -1,244 +1,21 @@
-/* main.c - notepad mint: entry point, main window, commands, file flow, settings.
- *
- * layout: [menu bar][sunken frame around the edit][status bar]. the menu bar, status bar
- * and edit control are child windows; everything except the edit control is drawn by us. */
-#include "mp.h"
+/* main.c - process entry point, main-window layout, commands and document flow.
+ * Layout: [title strip][menu bar][editor][status bar]. The editor has internal
+ * margins and clipped scrollbar overhangs; the other child windows draw chrome.
+ * Persistence, dirty-state tracking and status calculations live in dedicated
+ * modules, leaving command sequencing and window ownership here. */
+#include "app_internal.h"
+#include "ui_probe.h"
 
-Prefs    g_pf;
 HWND     g_hwnd, g_status;
 DocState g_doc;
 DWORD    g_textRev;
 
 static HWND   g_bar;
 static HACCEL g_accel;
-static WCHAR  g_iniDir[PATH_CAP], g_ini[PATH_CAP];
 static WCHAR  g_title[PATH_CAP + 64];
 
 #define MIN_WIN_W 320                                  /* smallest size of the ENTIRE window (frame included), px at 96 dpi: the width yields to the status panels if they need more */
 #define MIN_WIN_H 140
-
-/* ======================================================== settings ======= */
-static void PrefsDefaults(void)
-{
-    memset(&g_pf, 0, sizeof g_pf);
-    wcopy(g_pf.font, L"Consolas", 32);
-    g_pf.pt = 11;
-    g_pf.cur = 12;
-    g_pf.fg = C_EDIT_FG;
-    g_pf.bg = C_EDIT_BG;
-    g_pf.statusbar = 1;
-    g_pf.tab = 4;
-    g_pf.wrapAround = 1;
-    g_pf.marginL = 750; g_pf.marginT = 1000; g_pf.marginR = 750; g_pf.marginB = 1000;
-}
-
-static void IniLocate(void)
-{
-    WCHAR base[PATH_CAP];
-    DWORD n = GetEnvironmentVariableW(L"APPDATA", base, PATH_CAP - 64);
-    if (!n || n >= PATH_CAP - 64) {                                  /* no %appdata%: keep it next to the exe */
-        WCHAR exe[PATH_CAP];
-        GetModuleFileNameW(NULL, exe, PATH_CAP - 64);
-        PathDir(exe, base, PATH_CAP - 64);
-    }
-    wcopy(g_iniDir, base, PATH_CAP);
-    PathJoin(g_iniDir, L"notepad-mint", PATH_CAP);
-    wcopy(g_ini, g_iniDir, PATH_CAP);
-    PathJoin(g_ini, L"settings.ini", PATH_CAP);
-}
-
-static int IniGet(const WCHAR *sec, const WCHAR *key, int def)
-{
-    WCHAR b[32];
-    GetPrivateProfileStringW(sec, key, L"", b, 32, g_ini);
-    return b[0] ? wtoi(b) : def;
-}
-
-/* WritePrivateProfileStringW fails while something else (an antivirus scan, a backup tool) has the file open for a moment: try again a few times */
-static void IniPutStr(const WCHAR *sec, const WCHAR *key, const WCHAR *v)
-{
-    static DWORD retryAfter;
-    WCHAR current[PATH_CAP];
-    int n;
-    DWORD er;
-    if (retryAfter && (LONG)(GetTickCount() - retryAfter) < 0) return;
-    retryAfter = 0;
-    GetPrivateProfileStringW(sec, key, L"", current, COUNTOF(current), g_ini);
-    if (v && wcmp(current, v) == 0) return;
-    for (n = 0; n < 8; n++) {
-        if (WritePrivateProfileStringW(sec, key, v, g_ini)) return;
-        er = GetLastError();
-        if (er != 32 && er != 33) break;
-        if (n < 7) Sleep(25);
-    }
-    retryAfter = GetTickCount() + 1000;            /* one unavailable file must not stall for every settings key */
-}
-
-static void IniPutInt(const WCHAR *sec, const WCHAR *key, int v)
-{
-    WCHAR b[16];
-    wsprintfW(b, L"%d", v);
-    IniPutStr(sec, key, b);
-}
-
-/* the ini is utf-16 (font names and paths can be anything): make sure it exists as such before anything is written to it */
-static void IniEnsure(void)
-{
-    static const BYTE bom[2] = { 0xFF, 0xFE };
-    HANDLE f;
-    DWORD wr;
-    CreateDirectoryW(g_iniDir, NULL);
-    f = CreateFileW(g_ini, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (f != INVALID_HANDLE_VALUE) { WriteFile(f, bom, 2, &wr, NULL); CloseHandle(f); }
-}
-
-/* file > recent: the last RECENT_MAX files opened or saved, newest first, kept in settings.ini ([recent] 1 .. 9). every window reads the list again
- * before it changes it and when it is activated, so windows opened side by side share one list */
-static WCHAR g_recent[RECENT_MAX][PATH_CAP];
-static int   g_nRecent;
-#define RECENT_SECTION_CAP (RECENT_MAX * (PATH_CAP + 4) + 1)
-
-static void RecentLoad(void)
-{
-    WCHAR section[RECENT_SECTION_CAP], *p;
-    int i, k;
-    DWORD n = GetPrivateProfileSectionW(L"recent", section, COUNTOF(section), g_ini);
-    g_nRecent = 0;
-    if (n < COUNTOF(section) - 2) for (i = 1; i <= RECENT_MAX; i++) {
-        for (p = section; *p; p += wlen(p) + 1) {
-            if (p[0] != '0' + i || p[1] != '=' || !p[2]) continue;
-            for (k = 0; k < g_nRecent; k++) if (wcmpi(g_recent[k], p + 2) == 0) break;
-            if (k == g_nRecent) wcopy(g_recent[g_nRecent++], p + 2, PATH_CAP);
-            break;
-        }
-    }
-    MenuSetRecent((const WCHAR (*)[PATH_CAP])g_recent, g_nRecent);
-}
-
-static void RecentStore(void)
-{
-    WCHAR section[RECENT_SECTION_CAP] = { 0 }, *p = section;
-    int i;
-    IniEnsure();
-    for (i = 0; i < g_nRecent; i++) {
-        *p++ = (WCHAR)('1' + i); *p++ = '=';
-        wcopy(p, g_recent[i], PATH_CAP);
-        p += wlen(p) + 1;
-    }
-    /* One atomic section write prevents other windows observing a half-shifted list. */
-    for (i = 0; i < 8; i++) {
-        DWORD er;
-        if (WritePrivateProfileSectionW(L"recent", section, g_ini)) break;
-        er = GetLastError();
-        if (er != 32 && er != 33) break;
-        if (i < 7) Sleep(25);
-    }
-    MenuSetRecent((const WCHAR (*)[PATH_CAP])g_recent, g_nRecent);
-}
-
-static void RecentAdd(const WCHAR *path)
-{
-    int i, k;
-    if (!path || !path[0]) return;
-    RecentLoad();
-    for (i = 0; i < g_nRecent; i++) if (wcmpi(g_recent[i], path) == 0) break;
-    if (i == g_nRecent) { if (g_nRecent < RECENT_MAX) g_nRecent++; i = g_nRecent - 1; }       /* new: it pushes the oldest out; known: it moves up */
-    for (k = i; k > 0; k--) wcopy(g_recent[k], g_recent[k - 1], PATH_CAP);
-    wcopy(g_recent[0], path, PATH_CAP);
-    RecentStore();
-}
-
-static void RecentRemove(const WCHAR *path)                  /* a file that can't be opened any more */
-{
-    int i;
-    RecentLoad();
-    for (i = 0; i < g_nRecent; i++) if (wcmpi(g_recent[i], path) == 0) break;
-    if (i == g_nRecent) return;
-    for (; i + 1 < g_nRecent; i++) wcopy(g_recent[i], g_recent[i + 1], PATH_CAP);
-    g_nRecent--;
-    RecentStore();
-}
-
-static int Clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
-
-/* the editor colours come with the theme: g_pf.fg / bg are derived, never saved */
-static void ThemeUse(int theme)
-{
-    ThemeSet(theme);
-    g_pf.theme = ThemeGet();
-    g_pf.fg = C_EDIT_FG;
-    g_pf.bg = C_EDIT_BG;
-}
-
-static void PrefsLoad(void)
-{
-    WCHAR f[32];
-    PrefsDefaults();
-    GetPrivateProfileStringW(L"editor", L"font", L"", f, 32, g_ini);
-    if (f[0]) wcopy(g_pf.font, f, 32);
-    g_pf.pt      = Clamp(IniGet(L"editor", L"size", g_pf.pt), FONT_MIN, FONT_MAX);
-    g_pf.cur     = g_pf.pt;                                          /* the working size always starts at the chosen one */
-    g_pf.bold    = IniGet(L"editor", L"bold", 0) != 0;
-    g_pf.italic  = IniGet(L"editor", L"italic", 0) != 0;
-    g_pf.wrap    = IniGet(L"editor", L"wrap", 0) != 0;
-    g_pf.statusbar = IniGet(L"view", L"statusbar", 1) != 0;
-    g_pf.tab     = IniGet(L"editor", L"tab", 4);
-    if (g_pf.tab != 2 && g_pf.tab != 8) g_pf.tab = 4;                    /* only 2, 4 and 8 */
-    GetPrivateProfileStringW(L"view", L"theme", L"dark", f, 32, g_ini);
-    ThemeUse(wcmpi(f, L"light") == 0 ? THEME_LIGHT : THEME_DARK);       /* before any window exists: classes take g_brFace */
-    g_pf.winx    = IniGet(L"window", L"x", 0);
-    g_pf.winy    = IniGet(L"window", L"y", 0);
-    g_pf.winw    = IniGet(L"window", L"w", 0);
-    g_pf.winh    = IniGet(L"window", L"h", 0);
-    g_pf.maximized = IniGet(L"window", L"maximized", 0) != 0;
-    g_pf.matchCase  = IniGet(L"find", L"matchcase", 0) != 0;
-    g_pf.wrapAround = IniGet(L"find", L"wraparound", 1) != 0;
-    g_pf.wholeWord  = IniGet(L"find", L"wholeword", 0) != 0;
-    g_pf.marginL = IniGet(L"page", L"left", g_pf.marginL);
-    g_pf.marginT = IniGet(L"page", L"top", g_pf.marginT);
-    g_pf.marginR = IniGet(L"page", L"right", g_pf.marginR);
-    g_pf.marginB = IniGet(L"page", L"bottom", g_pf.marginB);
-}
-
-static void CapturePlacement(void)
-{
-    WINDOWPLACEMENT wp;
-    if (!g_hwnd) return;
-    wp.length = sizeof wp;
-    if (!GetWindowPlacement(g_hwnd, &wp)) return;
-    g_pf.maximized = (wp.showCmd == SW_SHOWMAXIMIZED);
-    g_pf.winx = wp.rcNormalPosition.left;
-    g_pf.winy = wp.rcNormalPosition.top;
-    g_pf.winw = wp.rcNormalPosition.right - wp.rcNormalPosition.left;
-    g_pf.winh = wp.rcNormalPosition.bottom - wp.rcNormalPosition.top;
-}
-
-void AppSavePrefs(void)
-{
-    CapturePlacement();
-    IniEnsure();                                  /* utf-16 ini: font names can be anything */
-
-    IniPutStr(L"editor", L"font", g_pf.font);
-    IniPutInt(L"editor", L"size", g_pf.pt);
-    IniPutInt(L"editor", L"bold", g_pf.bold);
-    IniPutInt(L"editor", L"italic", g_pf.italic);
-    IniPutInt(L"editor", L"wrap", g_pf.wrap);
-    IniPutInt(L"editor", L"tab", g_pf.tab);
-    IniPutInt(L"view", L"statusbar", g_pf.statusbar);
-    IniPutStr(L"view", L"theme", g_pf.theme == THEME_LIGHT ? L"light" : L"dark");
-    IniPutInt(L"window", L"x", g_pf.winx);
-    IniPutInt(L"window", L"y", g_pf.winy);
-    IniPutInt(L"window", L"w", g_pf.winw);
-    IniPutInt(L"window", L"h", g_pf.winh);
-    IniPutInt(L"window", L"maximized", g_pf.maximized);
-    IniPutInt(L"find", L"matchcase", g_pf.matchCase);
-    IniPutInt(L"find", L"wraparound", g_pf.wrapAround);
-    IniPutInt(L"find", L"wholeword", g_pf.wholeWord);
-    IniPutInt(L"page", L"left", g_pf.marginL);
-    IniPutInt(L"page", L"top", g_pf.marginT);
-    IniPutInt(L"page", L"right", g_pf.marginR);
-    IniPutInt(L"page", L"bottom", g_pf.marginB);
-}
 
 /* ===================================================== small helpers ===== */
 static void Say(const WCHAR *msg)
@@ -268,77 +45,12 @@ static void FileError(DWORD er, const WCHAR *path, BOOL saving)
     Say(msg);
 }
 
-/* ------------------------------------------------------------ dirty state -- */
-/* "modified" means: different from what was last loaded / saved (or from blank for a new document). the stock edit
- * only has a sticky flag, so typing something and deleting it again, or undoing back to the original, would still ask
- * "save changes?". the clean state is kept as length + two 32-bit hashes (no 64-bit math, nothing to copy for big files);
- * a content compare only happens when the flag is set and the length is back to the clean one */
-static struct { int n; DWORD h1, h2; int enc, eol; } g_clean;
-static struct { DWORD rev; int valid, changed; } g_dirtyCache;
-
-static void HashText(const WCHAR *t, int n, DWORD *a, DWORD *b)
-{
-    DWORD h1 = 2166136261u, h2 = 5381u;
-    int i;
-    for (i = 0; i < n; i++) {
-        h1 = (h1 ^ t[i]) * 16777619u;
-        h2 = (h2 * 33u) ^ t[i];
-    }
-    *a = h1;
-    *b = h2;
-}
-
-static void CleanMark(void)                         /* the document as it is now is the clean state: just loaded, created or saved */
-{
-    void *h = NULL;
-    int n = 0;
-    const WCHAR *p = EditLockText(&h, &n);
-    g_dirtyCache.valid = 0;
-    if (!p) { EditUnlockText(h); g_clean.n = -1; return; }
-    HashText(p ? p : L"", p ? n : 0, &g_clean.h1, &g_clean.h2);
-    EditUnlockText(h);
-    g_clean.n = p ? n : 0;
-    g_clean.enc = g_doc.enc;
-    g_clean.eol = g_doc.eol;
-    SendMessageW(g_edit, EM_SETMODIFY, FALSE, 0);
-}
-
-static BOOL TextChanged(void)
-{
-    void *h = NULL;
-    int n = 0;
-    const WCHAR *p;
-    DWORD a, b;
-    BOOL same;
-    if (!SendMessageW(g_edit, EM_GETMODIFY, 0, 0)) return FALSE;     /* untouched since the last load / save */
-    if (g_clean.n < 0) return TRUE;                              /* unavailable baseline: never discard edits */
-    if (GetWindowTextLengthW(g_edit) != g_clean.n) return TRUE;      /* another length: certainly changed (cheap) */
-    if (g_dirtyCache.valid && g_dirtyCache.rev == g_textRev) return g_dirtyCache.changed;
-    p = EditLockText(&h, &n);
-    if (!p) { EditUnlockText(h); return TRUE; }
-    HashText(p, n, &a, &b);
-    EditUnlockText(h);
-    same = (a == g_clean.h1 && b == g_clean.h2);
-    g_dirtyCache.rev = g_textRev; g_dirtyCache.valid = 1; g_dirtyCache.changed = !same;
-    if (same) SendMessageW(g_edit, EM_SETMODIFY, FALSE, 0);          /* back to the clean text: the control's own flag follows */
-    return !same;
-}
-
-BOOL AppIsDirty(void)
-{
-    if (!g_edit) return FALSE;
-    if ((g_doc.enc != g_clean.enc || g_doc.eol != g_clean.eol) &&    /* a new encoding / line ending needs a save ... */
-        (g_doc.path[0] || GetWindowTextLengthW(g_edit) > 0))         /* ... unless it is an empty unsaved document: nothing to save */
-        return TRUE;
-    return TextChanged();
-}
-
 static void FocusEdit(void)
 {
     if (g_edit && IsWindowEnabled(g_hwnd)) SetFocus(g_edit);
 }
 
-/* a fresh default name for a document that has no file yet ("mintXXXX", from the local date and time) */
+/* a fresh default name for a document that has no file yet ("mint-XXXX", from the local date and time) */
 static void NewDocName(void)
 {
     SYSTEMTIME st;
@@ -361,56 +73,6 @@ void AppUpdateTitle(void)
     if (wcmp(t, g_title) != 0) {
         wcopy(g_title, t, COUNTOF(g_title));
         SetWindowTextW(g_hwnd, t);                      /* (taskbar / alt-tab; the strip repaints from WM_SETTEXT) */
-    }
-}
-
-#define STATS_BIG   1000000                              /* characters: above this the line / byte counts are recounted when typing pauses, not on every key */
-#define STATS_TIMER 7
-static int g_statsNow;                                  /* the timer fired: recount now */
-
-void AppUpdateStatus(void)
-{
-    WCHAR b[64];
-    int line, col, sel;
-    DWORD selBytes;
-    if (!g_status || !g_pf.statusbar) return;
-    EditCaretPos(&line, &col);
-    if (EditSelStats(g_doc.enc, g_doc.eol, &sel, &selBytes)) wsprintfW(b, L"%d:%d [%d L %u B]", line, col, sel, selBytes);   /* "162:54 [5 L 54 B]": the lines it covers and the bytes a save would write for it */
-    else wsprintfW(b, L"%d:%d", line, col);
-    StatusSet(g_status, SB_POS, b);
-    {                                                   /* the number of lines ("5 L") and the size a save would write ("124 B"), the lines first: recounted only when the text, the encoding or the line ending changed (a big file is not scanned on every caret move) */
-        static struct { DWORD rev, bytes; int lines, len, enc, eol, ok; } c;
-        int len = GetWindowTextLengthW(g_edit);
-        int due = !c.ok || c.rev != g_textRev || c.len != len || c.enc != g_doc.enc || c.eol != g_doc.eol;
-        if (due && c.ok && len > STATS_BIG && !g_statsNow && c.enc == g_doc.enc && c.eol == g_doc.eol) {
-            SetTimer(g_hwnd, STATS_TIMER, 250, NULL);       /* a big text being typed in: the numbers follow when typing pauses (every recount is a pass over all of it) */
-            due = 0;
-        }
-        if (due) {
-            void *h = NULL;
-            int n = 0;
-            const WCHAR *p = EditLockText(&h, &n);
-            c.bytes = DocEncodedSize(p ? p : L"", p ? n : 0, g_doc.enc, g_doc.eol);
-            c.lines = p ? 1 + (int)mp_count_lf(p, (size_t)n) : 1;      /* the number of the last line (a trailing break makes an empty last line) */
-            EditUnlockText(h);
-            c.rev = g_textRev; c.len = len; c.enc = g_doc.enc; c.eol = g_doc.eol; c.ok = 1;
-        }
-        wsprintfW(b, L"%d L", c.lines);
-        StatusSet(g_status, SB_LINES, b);
-        wsprintfW(b, L"%u B", c.bytes);
-        StatusSet(g_status, SB_BYTES, b);
-    }
-    StatusSet(g_status, SB_EOL, g_eolShort[g_doc.eol]);
-    EncShort(g_doc.enc, b, COUNTOF(b));
-    StatusSet(g_status, SB_ENC, b);
-    {                                                   /* nothing is ever cut off: a text wider than the panels were made for (a long code page name) widens a window that is too narrow */
-        RECT cr, wr;
-        int need = StatusMinWidth();
-        GetClientRect(g_hwnd, &cr);
-        if (cr.right > 0 && cr.right < need && !IsZoomed(g_hwnd) && !IsIconic(g_hwnd)) {
-            GetWindowRect(g_hwnd, &wr);
-            SetWindowPos(g_hwnd, NULL, 0, 0, wr.right - wr.left + (need - cr.right), wr.bottom - wr.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-        }
     }
 }
 
@@ -525,7 +187,7 @@ static BOOL OpenDoc(const WCHAR *path, int force, BOOL logEntry)
     g_doc.enc = enc;
     g_doc.eol = eol;
     g_diskStamp = stamp;
-    CleanMark();
+    AppMarkClean();
     RecentAdd(g_doc.path);
     if (logFile && logEntry) AppendLogStamp();
     AppUpdateTitle();
@@ -562,7 +224,7 @@ static BOOL WriteDoc(const WCHAR *path, int enc, int eol)
     g_doc.enc = enc;
     g_doc.eol = eol;
     g_diskStamp = DiskStamp(path);
-    CleanMark();                                     /* what is on disk is the new clean state */
+    AppMarkClean();                                     /* what is on disk is the new clean state */
     RecentAdd(g_doc.path);
     AppUpdateTitle();
     AppUpdateStatus();
@@ -604,7 +266,7 @@ static void FileNew(void)
     NewDocName();                                            /* every new document gets its own default name */
     g_doc.enc = ENC_UTF8;
     g_doc.eol = EOL_CRLF;
-    CleanMark();                                             /* blank is the clean state: typing and deleting again is not a change */
+    AppMarkClean();                                             /* blank is the clean state: typing and deleting again is not a change */
     AppUpdateTitle();
     AppUpdateStatus();
 }
@@ -837,14 +499,12 @@ static void Cmd(int id)
         FrameSysCommand(g_hwnd, id);
         return;
 
-    case IDM_RECENT_CLEAR:  g_nRecent = 0; RecentStore(); break;           /* file > recent > clear list (the other windows read the empty list when they are activated) */
+    case IDM_RECENT_CLEAR:  RecentClear(); break;           /* file > recent > clear list (the other windows read the empty list when they are activated) */
 
     default:
         if (id >= IDM_RECENT_BASE && id < IDM_RECENT_BASE + RECENT_MAX) {          /* file > recent */
             WCHAR p[PATH_CAP];
-            RecentLoad();
-            if (id - IDM_RECENT_BASE < g_nRecent) {
-                wcopy(p, g_recent[id - IDM_RECENT_BASE], PATH_CAP);
+            if (RecentPath(id - IDM_RECENT_BASE, p, COUNTOF(p))) {
                 if (Confirm() && !OpenDoc(p, -1, TRUE)) RecentRemove(p);            /* (a file that is gone leaves the list) */
             }
         } else if (id >= IDM_UCC_BASE && id < IDM_UCC_BASE + 17) {
@@ -869,7 +529,8 @@ static void ApplyChrome(void)
 void AppApplyPrefs(void)
 {
     FontResolve(g_pf.font);
-    g_pf.pt = Clamp(g_pf.pt, FONT_MIN, FONT_MAX);
+    if (g_pf.pt < FONT_MIN) g_pf.pt = FONT_MIN;
+    if (g_pf.pt > FONT_MAX) g_pf.pt = FONT_MAX;
     g_pf.cur = g_pf.pt;                             /* a new pick also resets any ctrl+plus / minus offset */
     ApplyChrome();
     EditApplyFont();
@@ -971,7 +632,7 @@ static LRESULT OnCreate(HWND h)
     g_bar = MenuBarCreate(h, MenuState);
     g_status = StatusCreate(h);
     if (!EditCreate(h)) return -1;
-    CleanMark();                                    /* the new blank document (enc / eol were set in mp_main) is the clean state */
+    AppMarkClean();                                    /* the new blank document (enc / eol were set in mp_main) is the clean state */
     Layout();
     AppUpdateTitle();
     AppUpdateStatus();
@@ -993,11 +654,21 @@ static void OnDpiChanged(HWND h, WPARAM w, LPARAM l)
 static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
+#ifdef SHOTDC
+    case WM_APP + 60: {
+        RECT probeRect;
+        int dpi = (int)w;
+        if (dpi < 96 || dpi > 768 || !GetWindowRect(h, &probeRect)) return 0;
+        OnDpiChanged(h, MAKEWPARAM(dpi, dpi), (LPARAM)&probeRect);
+        return g_dpi; }
+    case WM_APP + 61:
+        return UiProbeFontAndDialogs(w, l);
+#endif
     case WM_CREATE:
         return OnCreate(h);
     case WM_SIZE:
         MenuCancel();
-        FrameInvalidate(h);                              /* the title strip's fade and buttons depend on the width: repaint all of it */
+        FrameInvalidate(h);                              /* the title strip's fill and buttons depend on the width: repaint all of it */
         if (w != SIZE_MINIMIZED && g_edit) Layout();
         return 0;
     case WM_MOVE:
@@ -1075,12 +746,7 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         break;
     case WM_TIMER:
-        if (w == STATS_TIMER) {
-            KillTimer(h, STATS_TIMER);
-            g_statsNow = 1;
-            AppUpdateStatus();
-            g_statsNow = 0;
-        }
+        AppStatusTimer(h, w);
         return 0;
     case WM_COMMAND:
         if ((HWND)l == g_edit) {                               /* notifications from the edit control */
@@ -1238,9 +904,7 @@ int mp_main(void)
     WCHAR arg[PATH_CAP];
 
     UiInit(hi);
-    IniLocate();
-    PrefsLoad();
-    RecentLoad();
+    PrefsInit();
     g_doc.enc = ENC_UTF8;
     g_doc.eol = EOL_CRLF;
     NewDocName();                                            /* before the window exists: its first title already uses it */

@@ -1,10 +1,7 @@
-/* edit.c - the native EDIT control: (re)creation, subclass, font + zoom, text transfer, caret helpers.
- *
- * the control is a plain multiline EDIT holding utf-16 text with CRLF breaks. everything
- * the stock control can't do is done here around it: ctrl+wheel zoom (font rescale),
- * ctrl+backspace / ctrl+delete word delete, our own context menu, logical line numbers
- * (EM_LINEFROMCHAR counts wrapped rows) via a direct scan of the control's text buffer. */
-#include "mp.h"
+/* edit.c - native EDIT lifetime, font/zoom, layout, scrollbars and painting.
+ * Text commands live in edit_text.c; native caret geometry lives in edit_caret.c.
+ * The native control retains its own selection, caret and undo behavior. */
+#include "edit_internal.h"
 
 #define IDC_EDIT 100
 #define SIZE_TIMER 0x4D50                           /* timer id: the re-wrap deferred during a drag */
@@ -26,6 +23,8 @@ static int     g_stubW, g_stubMax;                /* width of a selected line br
  * converges: showing a bar only ever makes the other one more needed, hiding one only ever less). */
 #define WM_BARS (WM_APP + 7)
 static int g_barsPending, g_inBars;
+static int g_revealPending, g_sizeDeferred;      /* only layout changes request a reveal; normal scrollbar polling must not move the view */
+static int g_allowTallReveal, g_revealing, g_tallCaret;
 
 void EditScrollSoon(void)
 {
@@ -38,12 +37,36 @@ void EditScrollSoon(void)
 static int LineHeight(void)
 {
     HDC dc = GetDC(g_edit);
-    HGDIOBJ of = SelectObject(dc, g_font);
+    HGDIOBJ of;
     TEXTMETRICW tm;
+    if (!dc) return 1;
+    memset(&tm, 0, sizeof tm);
+    of = SelectObject(dc, g_font);
     GetTextMetricsW(dc, &tm);
     SelectObject(dc, of);
     ReleaseDC(g_edit, dc);
     return tm.tmHeight + tm.tmExternalLeading > 0 ? tm.tmHeight + tm.tmExternalLeading : 1;
+}
+
+/* Native layout messages can re-enter the subclass. Keep their intermediate
+ * caret positions private until geometry and the active-end hint are final. */
+static void FitTallCaret(HWND h)
+{
+    int wasRevealing;
+    if (!g_allowTallReveal || g_inBars || g_revealing) return;
+    wasRevealing = g_revealing;
+    g_revealing = 1;
+    EditCaretFit(h, g_font, g_orig, &g_tallCaret);
+    g_revealing = wasRevealing;
+}
+
+static void RevealCaret(HWND h)
+{
+    if (g_revealPending && !g_inBars && !g_sizeDeferred) {
+        SendMessageW(h, EM_SCROLLCARET, 0, 0);
+    }
+    /* Native scrolling preserves the active end of a backward selection. Setting
+     * the selection ourselves would change where the next Shift+arrow extends it. */
 }
 
 static int VNeeded(void)
@@ -104,186 +127,9 @@ static void UpdateBars(void)
     SendMessageW(g_edit, WM_SETREDRAW, TRUE, 0);
     if (BARS(g_edit) != before) RedrawWindow(g_edit, NULL, NULL, RDW_INVALIDATE | RDW_FRAME);   /* only when a bar really came or went */
     g_inBars = 0;
+    RevealCaret(g_edit);                          /* a newly shown bar may have clipped the caret after the first reveal */
+    if (!g_sizeDeferred) g_revealPending = 0;
     SbarSync(g_edit);                             /* the classic bars over the native ones show / hide with them */
-}
-
-/* ----------------------------------------------------- text buffer access - */
-/* the control keeps its text in a local-memory block we can read in place (no copy) */
-static const WCHAR *TextLock(HLOCAL *h, int *n)
-{
-    *h = (HLOCAL)SendMessageW(g_edit, EM_GETHANDLE, 0, 0);
-    *n = GetWindowTextLengthW(g_edit);
-    return *h ? (const WCHAR *)LocalLock(*h) : NULL;
-}
-
-/* zero-copy read access for other modules (find / replace). the pointer is only valid until EditUnlockText
- * and the buffer is NOT guaranteed to be nul terminated: always honour *n */
-const WCHAR *EditLockText(void **h, int *n)
-{
-    return TextLock((HLOCAL *)h, n);
-}
-
-void EditUnlockText(void *h)
-{
-    if (h) LocalUnlock((HLOCAL)h);
-}
-
-BOOL EditHasSel(void)
-{
-    DWORD s = 0, e = 0;
-    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    return s != e;
-}
-
-/* index of the end of the selection the caret sits on (the stock control can't say which end that is) */
-static int CaretIndex(void)
-{
-    DWORD s = 0, e = 0;
-    POINT cp;
-    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    if (s != e && GetFocus() == g_edit && GetCaretPos(&cp)) {
-        LRESULT ps = SendMessageW(g_edit, EM_POSFROMCHAR, s, 0), pe = SendMessageW(g_edit, EM_POSFROMCHAR, e, 0);
-        int ds = (cp.x - (short)LOWORD(ps)), dy = (cp.y - (short)HIWORD(ps));
-        int de = (cp.x - (short)LOWORD(pe)), dz = (cp.y - (short)HIWORD(pe));
-        ds = (ds < 0 ? -ds : ds) + 64 * (dy < 0 ? -dy : dy);
-        de = (de < 0 ? -de : de) + 64 * (dz < 0 ? -dz : dz);
-        return (int)(ds < de ? s : e);
-    }
-    return (int)e;
-}
-
-void EditCaretPos(int *line, int *col)
-{
-    static struct { DWORD rev; int n, idx, line, col, ok; } c;      /* unchanged text: reuse the position and scan only a shorter moved span */
-    HLOCAL h;
-    int n, idx = CaretIndex(), i;
-    const WCHAR *p;
-    *line = 1; *col = 1;
-    n = GetWindowTextLengthW(g_edit);
-    if (c.ok && c.rev == g_textRev && c.n == n && c.idx == idx) { *line = c.line; *col = c.col; return; }
-    p = TextLock(&h, &n);
-    if (!p) return;
-    if (idx > n) idx = n;
-    if (c.ok && c.rev == g_textRev && c.n == n && (idx > c.idx ? idx - c.idx : c.idx - idx) < idx) {
-        int lo = idx < c.idx ? idx : c.idx, span = idx > c.idx ? idx - c.idx : c.idx - idx;
-        int breaks = (int)mp_count_lf(p + lo, (size_t)span);
-        *line = c.line + (idx < c.idx ? -breaks : breaks);
-        if (!breaks) *col = c.col + (idx - c.idx);
-        else {
-            for (i = idx; i > 0 && p[i - 1] != '\n'; i--) {}
-            *col = idx - i + 1;
-        }
-    } else {
-        *line = 1 + (int)mp_count_lf(p, (size_t)idx);
-        for (i = idx; i > 0 && p[i - 1] != '\n'; i--) {}
-        *col = idx - i + 1;
-    }
-    LocalUnlock(h);
-    c.rev = g_textRev; c.n = n; c.idx = idx; c.line = *line; c.col = *col; c.ok = 1;
-}
-
-/* the selection as the status bar shows it ("162:54 [5 L 54 B]"): TRUE when something is selected, then
- *   lines = the lines it covers, counted the way it looks: every line break in the selection ends one line and the text after the last break is one more,
- *           unless the selection ends right at the start of a line (shift+down three times from the start of a line selects 3 lines, not 4);
- *           a selection without a break is 1 line
- *   bytes = what a save would write for the selected text: the document's encoding and line ending (DocBodySize), no byte order mark.
- * the numbers are kept for as long as the selection, the text, the encoding and the line ending stay as they were: the status bar asks again on every
- * caret / mouse move, and a big selection is not scanned for each of them */
-BOOL EditSelStats(int enc, int eol, int *lines, DWORD *bytes)
-{
-    static struct { DWORD s, e, rev; int len, enc, eol, lines, ok; DWORD bytes; } c;
-    DWORD s = 0, e = 0;
-    HLOCAL h;
-    int n;
-    const WCHAR *p;
-    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    if (e <= s) return FALSE;
-    if (!c.ok || c.s != s || c.e != e || c.rev != g_textRev || c.len != GetWindowTextLengthW(g_edit) || c.enc != enc || c.eol != eol) {
-        p = TextLock(&h, &n);
-        if (!p) return FALSE;
-        if (e > (DWORD)n) e = (DWORD)n;
-        if (s >= e) { LocalUnlock(h); return FALSE; }
-        c.lines = (int)mp_count_lf(p + s, (size_t)(e - s)) + (p[e - 1] == '\n' ? 0 : 1);
-        c.bytes = DocBodySize(p + s, (int)(e - s), enc, eol);
-        LocalUnlock(h);
-        c.s = s; c.e = e; c.rev = g_textRev; c.len = n; c.enc = enc; c.eol = eol; c.ok = 1;
-    }
-    *lines = c.lines;
-    *bytes = c.bytes;
-    return TRUE;
-}
-
-/* caret to the start of logical line `line` (1-based). FALSE when the document has fewer lines */
-BOOL EditGotoLine(int line)
-{
-    HLOCAL h;
-    int n, cur = 1, i = 0;
-    const WCHAR *p = TextLock(&h, &n);
-    if (!p) return line <= 1;
-    if (line < 1) line = 1;
-    while (cur < line) {
-        while (i < n && p[i] != '\n') i++;
-        if (i >= n) { LocalUnlock(h); return FALSE; }
-        i++; cur++;
-    }
-    LocalUnlock(h);
-    SendMessageW(g_edit, EM_SETSEL, (WPARAM)i, (LPARAM)i);
-    SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);
-    return TRUE;
-}
-
-/* ctrl+k: empty the logical line the caret is on (the one the status bar shows, also with word wrap on: a paragraph is one line). its text
- * goes, its line break stays and the caret ends up at its start. one replace = one undo step. an empty line is left alone (no change at all) */
-void EditClearLine(void)
-{
-    HLOCAL h;
-    int n, idx = CaretIndex(), a, b;
-    const WCHAR *p = TextLock(&h, &n);
-    if (!p) return;
-    if (idx > n) idx = n;
-    for (a = idx; a > 0 && p[a - 1] != '\n'; a--) {}              /* the line starts after the previous line break */
-    for (b = idx; b < n && p[b] != '\n'; b++) {}                  /* and ends before its own: the CR of a CR LF is not part of the text */
-    if (b < n && b > a && p[b - 1] == '\r') b--;
-    LocalUnlock(h);
-    if (a == b) return;
-    SendMessageW(g_edit, EM_SETSEL, (WPARAM)a, (LPARAM)b);
-    SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)L"");
-    SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);                   /* (a long line leaves the view scrolled sideways: back to the start) */
-}
-
-/* ------------------------------------------------------------ text i/o ---- */
-BOOL EditSetDocText(const WCHAR *t)
-{
-    BOOL ok;
-    SendMessageW(g_edit, WM_SETREDRAW, FALSE, 0);
-    ok = SetWindowTextW(g_edit, t ? t : L"");
-    if (ok) {
-        SendMessageW(g_edit, EM_SETSEL, 0, 0);
-        SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);
-        SendMessageW(g_edit, EM_EMPTYUNDOBUFFER, 0, 0);
-        SendMessageW(g_edit, EM_SETMODIFY, FALSE, 0);
-    }
-    SendMessageW(g_edit, WM_SETREDRAW, TRUE, 0);
-    InvalidateRect(g_edit, NULL, TRUE);
-    return ok;
-}
-
-WCHAR *EditGetDocText(int *len)
-{
-    int n = GetWindowTextLengthW(g_edit), got;
-    WCHAR *buf = (WCHAR *)mem_alloc(((size_t)n + 1) * sizeof(WCHAR));
-    if (!buf) return NULL;
-    got = GetWindowTextW(g_edit, buf, n + 1);
-    if (got != n) { mem_free(buf); return NULL; }
-    buf[got] = 0;
-    if (len) *len = got;
-    return buf;
-}
-
-void EditInsert(const WCHAR *s)
-{
-    SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)s);
-    SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);       /* the caret ends up after the text: show it (a dropped list of paths can run off the bottom) */
 }
 
 /* ---------------------------------------------------- font / colors / zoom - */
@@ -334,18 +180,28 @@ BOOL EditIsRtl(void);
 static void EditPad2(HWND h, int margins)
 {
     RECT r;
-    int pad = S(EDIT_PAD), top = S(EDIT_PAD_TOP);
+    int pad = S(EDIT_PAD), top = S(EDIT_PAD_TOP), height = LineHeight(), visibleBottom;
     LONG_PTR st = GetWindowLongPtrW(h, GWL_STYLE);
     int hidR = (st & WS_VSCROLL) ? 0 : S(SBAR_TRIM), hidB = (st & WS_HSCROLL) ? 0 : S(SBAR_TRIM);   /* the window overhangs the visible area (SBAR_TRIM): without a bar that part is client area, out of sight */
     if (margins) SendMessageW(h, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(pad, pad));
     GetClientRect(h, &r);
     r.right -= hidR; r.bottom -= hidB;
+    visibleBottom = r.bottom;
     if (r.bottom - r.top > top + pad + 8 && r.right - r.left > 2 * pad + 8) {
         r.left += pad;
         if (g_pf.wrap || EditIsRtl()) r.right -= pad;
         r.top += top; r.bottom -= pad;
-        SendMessageW(h, EM_SETRECTNP, 0, (LPARAM)&r);
     }
+    if (r.right <= r.left) r.right = r.left + 1;
+    if (r.bottom <= r.top) r.bottom = r.top + 1;
+    if (r.bottom - r.top < height) {
+        r.top = 0;                              /* give up vertical padding before giving up any of the visible row */
+        r.bottom = visibleBottom > height ? visibleBottom : height;
+        /* EDIT hides its native caret at (-20000,-20000) when no complete row
+         * fits its formatting rectangle. Reserve one row even if the viewport
+         * can only show its top; the editing position stays on screen. */
+    }
+    SendMessageW(h, EM_SETRECTNP, 0, (LPARAM)&r);   /* tiny viewports must replace the previous, larger rectangle too */
 }
 
 static void EditPad(HWND h) { EditPad2(h, 1); }
@@ -362,6 +218,10 @@ void EditApplyTabs(void)
     TEXTMETRICW tm;
     UINT u = 4u * (UINT)g_pf.tab;
     if (!g_edit || !g_font) return;
+    g_allowTallReveal = 1;
+    EditCaretInvalidate();
+    KillTimer(g_edit, SIZE_TIMER);
+    g_sizeDeferred = 0;                           /* a font/tab change already needs a fresh wrap, so finish any deferred resize with it */
     dc = GetDC(g_edit);
     of = SelectObject(dc, g_font);
     GetTextMetricsW(dc, &tm);
@@ -370,6 +230,8 @@ void EditApplyTabs(void)
     g_tabPx = g_pf.tab * tm.tmAveCharWidth;
     SendMessageW(g_edit, EM_SETTABSTOPS, 1, (LPARAM)&u);
     EditPad(g_edit);                                /* (a wrapped text breaks its rows again with the new tabs) */
+    g_revealPending = 1;
+    RevealCaret(g_edit);
     InvalidateRect(g_edit, NULL, TRUE);
     EditScrollSoon();
 }
@@ -392,6 +254,7 @@ void EditApplyFont(void)
     wcopy(lf.lfFaceName, g_pf.font, 32);
     nf = CreateFontIndirectW(&lf);
     if (!nf) return;
+    if (g_edit) EditCaretRemember(g_edit, g_font);   /* retain selection orientation and native EOF advance before font layout can hide the caret */
     g_font = nf;
     g_stubW = 0;                                    /* (the width of a selected line break's block follows the font) */
     if (g_edit) {
@@ -465,66 +328,11 @@ BOOL EditIsRtl(void)
 void EditToggleRtl(void)
 {
     LONG_PTR ex = GetWindowLongPtrW(g_edit, GWL_EXSTYLE);
+    EditCaretInvalidate();
     ex = (ex & WS_EX_RTLREADING) ? (ex & ~(LONG_PTR)RTL_BITS) : (ex | RTL_BITS);
     SetWindowLongPtrW(g_edit, GWL_EXSTYLE, ex);
     SetWindowPos(g_edit, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     InvalidateRect(g_edit, NULL, TRUE);
-}
-
-/* ------------------------------------------------------- word delete ------ */
-/* 0 blank, 1 word, 2 punctuation (also used by the dialog edits' ctrl+backspace in ui.c) */
-int WordClass(WCHAR c)
-{
-    if (c == ' ' || c == '\t') return 0;
-    if (c >= 0x80) return 1;
-    if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_') return 1;
-    return 2;
-}
-
-/* ctrl+backspace (dir < 0) / ctrl+delete (dir > 0) */
-static void DelWord(int dir)
-{
-    DWORD s = 0, e = 0;
-    HLOCAL h;
-    int n, a, b;
-    const WCHAR *p;
-
-    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    if (s != e) { SendMessageW(g_edit, WM_CLEAR, 0, 0); return; }
-    p = TextLock(&h, &n);
-    if (!p) return;
-    a = b = (int)s;
-    if (a > n) a = b = n;
-    if (dir < 0) {
-        if (a > 0 && p[a - 1] == '\n') {                       /* just the line break */
-            a--;
-            if (a > 0 && p[a - 1] == '\r') a--;
-        } else {
-            while (a > 0 && WordClass(p[a - 1]) == 0) a--;     /* blanks, then one run of a kind */
-            if (a > 0 && p[a - 1] != '\n') {
-                int k = WordClass(p[a - 1]);
-                while (a > 0 && p[a - 1] != '\n' && WordClass(p[a - 1]) == k) a--;
-            }
-        }
-    } else {
-        if (b < n && p[b] == '\r') {
-            b++;
-            if (b < n && p[b] == '\n') b++;
-        } else if (b < n && p[b] == '\n') {
-            b++;
-        } else {
-            if (b < n && WordClass(p[b]) != 0) {
-                int k = WordClass(p[b]);
-                while (b < n && p[b] != '\r' && WordClass(p[b]) == k) b++;
-            }
-            while (b < n && WordClass(p[b]) == 0) b++;
-        }
-    }
-    LocalUnlock(h);
-    if (a != b) {
-        SendMessageW(g_edit, EM_SETSEL, (WPARAM)a, (LPARAM)b);
-        SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)L"");
-    }
 }
 
 /* ------------------------------------------------- selected line breaks ---- */
@@ -1084,21 +892,28 @@ static void ShotDc(HWND h, int w, int ht, int y0)
     char hdr[40];
     int n = 0, x, y;
     BYTE *buf;
-    HDC dc = GetDC(h);
+    HDC dc;
     HANDLE f;
     DWORD got;
-    if (!dc || w < 1 || ht < 1) return;
+    BOOL caretHidden;
+    if (w < 1 || ht < 1) return;
+    dc = GetDC(h);
+    if (!dc) return;
     hdr[n++] = 'P'; hdr[n++] = '6'; hdr[n++] = '\n';
     n += ShotInt(hdr + n, w); hdr[n++] = ' '; n += ShotInt(hdr + n, ht);
     hdr[n++] = '\n'; hdr[n++] = '2'; hdr[n++] = '5'; hdr[n++] = '5'; hdr[n++] = '\n';
     buf = (BYTE *)mem_alloc((size_t)w * ht * 3);
     if (!buf) { ReleaseDC(h, dc); return; }
+    /* Pixel comparisons cover text/background, as PrintWindow does. The native
+     * blinking caret may now be visible after a resize; balance its hide count. */
+    caretHidden = HideCaret(h);
     for (y = 0; y < ht; y++)
         for (x = 0; x < w; x++) {
             COLORREF c = GetPixel(dc, x, y0 + y);
             BYTE *p = buf + ((size_t)y * w + x) * 3;
             p[0] = (BYTE)(c & 255); p[1] = (BYTE)((c >> 8) & 255); p[2] = (BYTE)((c >> 16) & 255);
         }
+    if (caretHidden) ShowCaret(h);
     ReleaseDC(h, dc);
     GetTempPathW(250, path);
     wcat(path, L"mint_dc.ppm", 300);
@@ -1113,15 +928,40 @@ static void ShotDc(HWND h, int w, int ht, int y0)
 #endif
 
 /* ------------------------------------------------------------ subclass ---- */
+static int CaretMoveMessage(UINT m, WPARAM w)
+{
+    switch (m) {
+    case WM_KEYDOWN: case WM_CHAR: case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
+    case WM_CUT: case WM_PASTE: case WM_CLEAR: case WM_UNDO: case WM_TIMER:
+    case EM_SETSEL: case EM_REPLACESEL: case EM_UNDO:
+        return 1;
+    case WM_MOUSEMOVE:
+        return (w & 1) != 0;
+    }
+    return 0;
+}
+
 static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     LRESULT r;
+    int anchor = -1;
+    int wasRevealing;
+    if (CaretMoveMessage(m, w)) {
+        DWORD ss = 0, se = 0;
+        int active = EditCaretIndex();
+        SendMessageW(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se);
+        anchor = active == (int)ss ? (int)se : (int)ss;
+        if (m != WM_TIMER) g_allowTallReveal = 1;
+    }
+    if (m == EM_SCROLLCARET) g_allowTallReveal = 1;
 
     switch (m) {
 #ifdef SHOTDC
     case WM_APP + 90:
         ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
         return 0;
+    case WM_APP + 97:                                          /* hold the native caret hidden across live and full-window reference captures */
+        return w ? ShowCaret(h) : HideCaret(h);                 /* caller balances a successful hide in a finally block */
     case WM_APP + 91: {                                         /* (wiped << 16 | kept) so far, then back to zero */
         LRESULT v = (LRESULT)((g_shotWiped << 16) | g_shotKept);
         g_shotWiped = g_shotKept = 0;
@@ -1215,13 +1055,18 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         DWORD now = GetTickCount();
         if (h == szH && l == szL) return 0;
         szH = h; szL = l;
-        if (lastCost > 25 && now - lastAt < 2 * lastCost) {      /* the last re-wrap was slow and this one follows right on it (a drag): later, once, for the size it ends at (the text keeps its old wrap meanwhile) */
+        EditCaretRemember(h, g_font);
+        if (!g_inBars) { g_revealPending = 1; g_allowTallReveal = 1; }
+        if (!g_inBars && lastCost > 25 && now - lastAt < 2 * lastCost && EditCaretInView(h, LineHeight())) { /* defer expensive wrapping only while the caret fits the new viewport */
+            g_sizeDeferred = 1;
             SetTimer(h, SIZE_TIMER, 40, NULL);
             return 0;
         }
         KillTimer(h, SIZE_TIMER);
+        g_sizeDeferred = 0;
         EditPad2(h, 0);
         lastAt = GetTickCount(); lastCost = lastAt - now;
+        RevealCaret(h);
         EditScrollSoon();
         SbarSync(h);
         StubSync(h);
@@ -1230,7 +1075,9 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_TIMER:
         if (w == SIZE_TIMER) {                                  /* the deferred re-wrap, when the drag paused */
             KillTimer(h, SIZE_TIMER);
+            g_sizeDeferred = 0;
             EditPad2(h, 0);
+            RevealCaret(h);
             EditScrollSoon();
             SbarSync(h);
             StubSync(h);
@@ -1241,12 +1088,13 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_PAINT: {
         RECT ur;
         int have = !w && GetUpdateRect(h, &ur, FALSE);
-        if (have && EditPaintBuffered(h, &ur)) return 0;
+        if (have && EditPaintBuffered(h, &ur)) { FitTallCaret(h); return 0; }
         g_paintDepth++;
         r = CallWindowProcW(g_orig, h, m, w, l);
         g_paintDepth--;
         if (w) { StubPaint(h, (HDC)w, NULL); BandPaint(h, (HDC)w, NULL); }      /* (painting into a DC somebody handed over) */
         else if (have) { StubPaint(h, NULL, &ur); BandPaint(h, NULL, &ur); }
+        FitTallCaret(h);
         return r; }
     case WM_PRINTCLIENT:                                        /* PrintWindow / WM_PRINT: the whole client area into a DC */
         g_paintDepth++;
@@ -1263,17 +1111,23 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_BARS:
         g_barsPending = 0;
         UpdateBars();
+        if (g_tallCaret) FitTallCaret(h);         /* ordinary bar checks also re-layout; their temporary geometry must not place the caret */
         return 0;
     case WM_MOUSEWHEEL:
-        if (GetKeyState(VK_CONTROL) & 0x8000) {                /* ctrl+wheel = font size, one step per notch */
+        if (w & MK_CONTROL) {                                  /* ctrl+wheel = font size, one step per notch; modifiers belong to this input message */
             g_wheel += GET_WHEEL_DELTA_WPARAM(w);
             while (g_wheel >= 120)  { g_wheel -= 120; EditZoomStep(1); }
             while (g_wheel <= -120) { g_wheel += 120; EditZoomStep(-1); }
             return 0;
         }
+        g_revealPending = 0;                                  /* a deliberate scroll after resizing takes priority over the posted layout check */
+        g_allowTallReveal = 0;
+        break;
+    case WM_VSCROLL: case WM_HSCROLL:
+        if (!g_inBars && !g_revealing) { g_revealPending = 0; g_allowTallReveal = 0; }
         break;
     case WM_CHAR:
-        if (w == 0x7F) { DelWord(-1); return 0; }              /* ctrl+backspace arrives as DEL */
+        if (w == 0x7F) { EditDeleteWord(-1); return 0; }              /* ctrl+backspace arrives as DEL */
         break;
     case WM_SYSCHAR:                                            /* alt+letter: our menu bar (the default path never reaches the main window) */
         if (w != ' ' && w != VK_BACK && MenuBarMnemonic((WCHAR)w) >= 0) {
@@ -1283,7 +1137,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         break;
     case WM_KEYDOWN:
         if (w == VK_DELETE && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000)) {
-            DelWord(1);
+            EditDeleteWord(1);
             return 0;
         }
         break;
@@ -1299,8 +1153,21 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0; }
     }
 
+    wasRevealing = g_revealing;
+    if (anchor >= 0 || m == EM_SCROLLCARET || m == WM_SETFONT || m == EM_SETRECTNP || m == EM_SETTABSTOPS || m == EM_SETMARGINS)
+        g_revealing = 1;
     r = CallWindowProcW(g_orig, h, m, w, l);
+    g_revealing = wasRevealing;
     if (m == WM_SETTEXT) { g_textRev++; g_stub.n = 0; }         /* (a multiline edit sends no EN_CHANGE for WM_SETTEXT; it repaints all of itself: no selected line break block is left) */
+    if (anchor >= 0) {
+        DWORD ss = 0, se = 0;
+        Ctl(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se); /* record the new endpoint before any nested maintenance can repair the display */
+        if (m == EM_SETSEL && (int)w >= 0)
+            EditCaretHint(l >= 0 && (int)w > l ? (int)ss : (int)se);
+        else if (ss == se || (int)se == anchor) EditCaretHint((int)ss);
+        else if ((int)ss == anchor) EditCaretHint((int)se);
+    }
+    if (anchor >= 0 || m == WM_SETFOCUS || m == WM_KEYUP || m == EM_SCROLLCARET) FitTallCaret(h);
 
     switch (m) {                                                /* anything that can change the room the text needs */
     case WM_SIZE: case WM_SETFONT: case WM_SETTEXT:
@@ -1336,6 +1203,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         StubSync(h);                                            /* the blocks for the selected line breaks */
         BandSync(h);                                            /* the partly visible rows at the bottom */
     }
+    if (g_tallCaret) FitTallCaret(h);             /* native timers and other maintenance messages can park an oversized caret again */
     return r;
 }
 
@@ -1372,6 +1240,12 @@ HWND EditCreate(HWND parent)
     if (text && !SetWindowTextW(e, text)) { DestroyWindow(e); mem_free(text); return NULL; }
     g_edit = e;
     g_barsPending = 0;
+    g_revealPending = g_sizeDeferred = 0;
+    g_allowTallReveal = 1;
+    g_tallCaret = 0;
+    EditCaretInvalidate();
+    EditCaretHint(0);
+    EditCaretDisplayAdjusted(FALSE);
     SetWindowPos(e, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);        /* (the overhang of the editor goes under the status bar, see Layout) */
     g_stub.n = 0;                                  /* nothing of the old control's selected line break blocks is on this one */
     g_orig = (WNDPROC)SetWindowLongPtrW(e, GWLP_WNDPROC, (LONG_PTR)EditProc);

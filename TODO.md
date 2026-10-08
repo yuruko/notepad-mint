@@ -1,6 +1,6 @@
 # TODO - notepad mint
 
-state (2026-10-08): 1.0.6 buffers complete editor repaints, previews one line at every supported font size, reduces the executable size and avoids redundant scans and selection-print copies. the supported feature set is covered by `tools\verify.bat ui`. `NOTES.md` ("status") says per item how it was verified
+state (2026-10-08): 1.0.7 keeps the caret visible through resize/zoom layout, splits source by responsibility, fixes font/bitmap lifetime and native print-dialog find ownership, and retries failed document-statistic locks. the supported feature set is covered by `tools\verify.bat ui`. `NOTES.md` ("status") says per item how it was verified
 and what was never verified; this file is what is still open, plus the rules for whoever changes the code next. the original per-module specs of the dialogs live in git history (`TODO.md` at 78e8b0a).
 
 ## 0. hard rules (breaking any of these breaks the build or the product)
@@ -19,7 +19,7 @@ and what was never verified; this file is what is still open, plus the rules for
 - the palette `C_*` is a set of **runtime values** (`g_pal`, dark / light): never use them in static initialisers, `case` labels or constant expressions, and never cache a brush made from them across a theme switch.
 - a custom window class that handles `WM_NCCREATE` must still call `DefWindowProcW` for it (that is what stores the window text, otherwise buttons are blank).
 - keep `build.bat` producing `build\notepad-mint.exe` with **zero warnings at /W3**; keep the exe's imports to kernel32 / user32 / gdi32 only.
-- dialogs follow the `MsgDlg` pattern in `ui.c`: a struct whose first member is `DlgBase`, one window class per dialog registered once with `RegClass`, a wndproc that starts with
+- dialogs follow the `MsgDlg` pattern in `dialog.c`: a struct whose first member is `DlgBase`, one window class per dialog registered once with `RegClass`, a wndproc that starts with
   `DlgBase *b = DlgFromHwnd(h, m, l); if (!b) return DefWindowProcW(...)` and ends with `if (DlgCommon(b, m, w, l, &r)) return r;`. open with `DlgOpen(b, cls, title, cw, ch, modeless)`,
   run modal ones with `DlgRunModal(b)` (it disables every other live window of ours and re-enables them). default button id = `IDOK`, esc = `IDCANCEL`. native `COMBOBOX` / trackbar / comctl32 controls cannot be darkened: do not use them.
   native `LISTBOX` is fine but create it owner-draw (`LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY`), draw the selection with `C_ACCENT` / `C_FACE`, call `DarkScroll()` on it.

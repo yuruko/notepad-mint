@@ -128,6 +128,7 @@ static void Dither(HDC dc, const RECT *r)                    /* a 1px checkerboa
     if (!g_dither) {
         HBITMAP bm = CreateBitmap(8, 8, 1, 1, bits);
         g_dither = bm ? CreatePatternBrush(bm) : NULL;
+        if (bm) DeleteObject(bm);                           /* the brush owns a copy of the bitmap's pixels */
     }
     if (!g_dither) { FillC(dc, r, C_FACE); return; }
     SetTextColor(dc, C_FACE);

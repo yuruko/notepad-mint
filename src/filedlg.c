@@ -3,6 +3,7 @@
  * dialogs. they are windows' own and follow its light / dark mode, not the app theme (we can't theme them).
  * the encoding picker at the bottom is ours (an owner-draw list in the app's own theme). */
 #include "mp.h"
+#include "ui_internal.h"
 
 enum { ID_ENCLIST = 1201 };
 
@@ -38,7 +39,7 @@ static BOOL PickFile(HWND owner, WCHAR *path, int cap, BOOL save)
     WCHAR buf[PATH_CAP], dir[PATH_CAP];
     HWND fd;
     DWORD er = 0;
-    BOOL ok, held = FALSE;
+    BOOL ok;
 
     if (!path || cap <= 0) return FALSE;
     if (!CdLoad()) {
@@ -63,11 +64,10 @@ static BOOL PickFile(HWND owner, WCHAR *path, int cap, BOOL save)
     o.lpstrDefExt = L"txt";
     o.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
 
-    fd = FindDlgHwnd();
-    if (fd && IsWindow(fd) && IsWindowEnabled(fd)) { EnableWindow(fd, FALSE); held = TRUE; }
+    fd = DialogHoldFind();
     ok = save ? pSave(&o) : pOpen(&o);
     if (!ok) er = pCdErr();                             /* 0 = the user cancelled */
-    if (held && IsWindow(fd)) EnableWindow(fd, TRUE);
+    DialogReleaseFind(fd);
 
     if (!ok) {
         if (er) MpAsk(owner, APP_NAME, er == FNERR_BUFFERTOOSMALL ? L"the file name is too long." : L"cannot show the file dialog.",

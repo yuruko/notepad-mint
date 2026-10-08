@@ -7,12 +7,13 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME                  /* the window title is "<name>" + this (main.c AppUpdateTitle); the title strip draws the name bold and this part regular */
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.0.6"
+#define APP_VERSION  L"1.0.7"
 #define PATH_CAP     1024
 
 /* ------------------------------------------------------------- palette --
  * classic 2000-era chrome (bevels, flat menu bar, sunken fields) in one of two themes: dark (the default:
- * #161418 chrome, black editor) or light (win2000 gray chrome, white editor), both with the #9df5bd mint.
+ * #161418 chrome, black editor, #9df5bd mint) or light (win2000 gray chrome,
+ * white editor, softer #2f7d58 mint).
  * the C_* names are RUNTIME values (ThemeSet in ui.c switches them): never use them in a static initializer,
  * a case label or any constant expression, and never keep a brush made from them across a theme switch
  * (g_brFace / g_brField always hold the current theme's brushes: read them at use time). */
@@ -76,7 +77,7 @@ void   PathJoin(WCHAR *dir, const WCHAR *name, int cap);
 BOOL   IsDir(const WCHAR *path);
 BOOL   WildMatch(const WCHAR *pat, const WCHAR *name);   /* case-insensitive * and ?, "a;b" = either, "*.*" also matches "readme" */
 size_t mp_count_lf(const WCHAR *p, size_t n);        /* rt.asm */
-int    WordClass(WCHAR c);                           /* edit.c: 0 blank, 1 word char, 2 punctuation (word delete) */
+int    WordClass(WCHAR c);                           /* edit_text.c: 0 blank, 1 word char, 2 punctuation (word delete) */
 void   DefaultDocName(const SYSTEMTIME *st, WCHAR *out, int cap);   /* "mint-" + 4 base-36 chars of year + month*100 + day + seconds of the day */
 
 /* ------------------------------------------------------------ search.c -- */
@@ -155,7 +156,7 @@ HWND  UiEdit(DlgBase *b, const WCHAR *text, int x, int y, int w, int h, int id, 
 HWND  UiButton(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWORD style);
 int   MpAsk(HWND owner, const WCHAR *title, const WCHAR *msg, const WCHAR *b1, const WCHAR *b2, const WCHAR *b3, int escIdx);
 
-/* ------------------------------------------------------------ menu.c ---- */
+/* ------------------------------------------ menu.c / menu_defs.c ---- */
 #define MS_CHECK 1
 #define MS_RADIO 2
 #define MS_GRAY  4
@@ -164,9 +165,9 @@ typedef struct MenuItem { const WCHAR *label, *accel; int id; const MenuDef *sub
 struct MenuDef { const MenuItem *items; int n; };
 typedef unsigned (*MenuStateFn)(int id);
 #define BAR_BTN_W 31                                  /* the buttons at the right end of the menu bar (word wrap, then the theme button flush right; its icon is a sun in the light theme, a moon in the dark one): the width of each, 96-dpi pixels (31, not 30: an odd width has a middle pixel, where the icon's middle goes) */
-#define BAR_BTN_ICON 12                               /* ... the box of the icon inside it, 96-dpi pixels (14 at first, then a little smaller) */
+#define BAR_BTN_ICON 12                               /* ... the box of the icon inside it, 96-dpi pixels  */
 #define BAR_BTN_OPACITY_ON 60                         /* ... the word wrap button (the left one of the two) is this opaque at rest while word wrap is ON (my choice: a toggle has to show its state, and no frame / sunken look is wanted) */
-#define BAR_BTN_OPACITY 20                           /* ... and how opaque the icon is at rest, percent (50 at first, then 20; hovered: always 100) */
+#define BAR_BTN_OPACITY 20                           /* ... and how opaque the icon is at rest, percent (hovered: 100) */
 #define BAR_WRAP_ICON_DY 1                           /* ... the word wrap button's icon is drawn this many 96-dpi pixels below the middle of its button (the hover fill stays put; the theme button's icon stays centred) */
 #define BAR_TIP_DELAY 500                             /* ... the tooltip of a button (what it does + its key combo) shows once the pointer has been on it this many ms (the system's own initial delay: the double click time) */
 #define BAR_TIP_SHOW 5000                             /* ... and stays up this many ms (the system's own: ten times the delay) */
@@ -187,7 +188,7 @@ BOOL  MenuActive(void);
 void  MenuCancel(void);
 
 /* ------------------------------------------------------------ status.c -- */
-enum { SB_POS, SB_LINES, SB_BYTES, SB_EOL, SB_ENC, SB_COUNT };   /* left to right (lines before bytes: the maintainer swapped them); SB_POS takes the room that is left, SB_EOL / SB_ENC are the clickable ones */
+enum { SB_POS, SB_LINES, SB_BYTES, SB_EOL, SB_ENC, SB_COUNT };   /* left to right; SB_POS takes the remaining room; SB_EOL / SB_ENC are clickable */
 HWND  StatusCreate(HWND parent);
 int   StatusHeight(void);
 int   StatusMinWidth(void);
@@ -259,15 +260,15 @@ typedef struct DocState {
 extern DocState g_doc;
 const WCHAR *AppDocName(void);                  /* main.c: the file name, or the default name while unsaved (title, prompts, print job) */
 
-/* main.c services used by dialogs / the edit module */
-void  AppApplyPrefs(void);                      /* re-create font/brush from g_pf and repaint */
-void  AppSavePrefs(void);
+/* Application services used by dialogs and the editor. */
+void  AppApplyPrefs(void);                      /* main.c: rebuild editor/chrome fonts and repaint */
+void  AppSavePrefs(void);                       /* prefs.c: capture placement and persist preferences */
 void  AppOpenPath(const WCHAR *path);
 BOOL  AppIsDirty(void);
 void  AppUpdateTitle(void);
 void  AppUpdateStatus(void);
 
-/* -------------------------------------------------------------- edit.c --- */
+/* --------------------------- edit.c / edit_caret.c / edit_text.c --- */
 #define EDIT_PAD 8                                    /* margin left and below the text (and right of it while word wrap is on), 96-dpi pixels (no frame around the editor): a margin, not a padding: text that is scrolled out of the control's rectangle still runs to the edge of the editor (the strips are painted by BandDraw in edit.c) */
 #define SBAR_TRIM 5                                  /* the editor's scrollbars are this many 96-dpi pixels thinner than the system's: its window overhangs the visible area at the right and at the bottom by this much (the native strip's outer part is clipped away by the parent), sbar.c covers the rest */
 #define EDIT_PAD_TOP 4                               /* padding above the first row */

@@ -1,5 +1,6 @@
 /* print.c - file > page setup... and file > print... (comdlg32, loaded on first use) + plain text pagination */
 #include "mp.h"
+#include "ui_internal.h"
 
 /* the 32-bit sdk sizes (commdlg.h packs PRINTDLGW to 1 byte on x86) */
 typedef char SzPrintDlg[sizeof(PRINTDLGW) == 66 ? 1 : -1];
@@ -44,8 +45,9 @@ static void ForgetPrinter(void)
 static BOOL CdRun(HWND owner, PRINTDLGW *pd, PAGESETUPDLGW *ps)
 {
     WCHAR msg[96];
+    HWND held = DialogHoldFind();
     DWORD er = 0;
-    BOOL ok;
+    BOOL ok = FALSE;
     int tries;
     for (tries = 0; tries < 2; tries++) {
         if (pd) {
@@ -57,11 +59,13 @@ static BOOL CdRun(HWND owner, PRINTDLGW *pd, PAGESETUPDLGW *ps)
             ok = pPageDlg(ps);
             g_devMode = ps->hDevMode; g_devNames = ps->hDevNames;
         }
-        if (ok) return TRUE;
+        if (ok) break;
         er = pCdErr();
         if (er != PDERR_PRINTERNOTFOUND && er != PDERR_DNDMMISMATCH && er != PDERR_DEFAULTDIFFERENT) break;
         ForgetPrinter();
     }
+    DialogReleaseFind(held);                   /* restore only the window this call disabled, including cancellation and retries */
+    if (ok) return TRUE;
     if (!er || er == PDERR_NODEFAULTPRN || er == PDERR_NODEVICES) return FALSE;     /* cancelled / no printer (comdlg32 has said so itself) */
     wsprintfW(msg, L"cannot use the printer (error 0x%lx).", er);
     MpAsk(owner, APP_NAME, msg, L"ok", NULL, NULL, 1);

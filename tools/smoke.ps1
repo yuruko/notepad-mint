@@ -1,6 +1,6 @@
-# smoke.ps1 - start the exe with a sample file, check it stays alive and shows the right title, grab a screenshot.
+# Launch the app with isolated settings on a private desktop; capture its window.
 #   powershell -NoProfile -File tools\smoke.ps1 [-Exe <path>] [-Sample <file>] [-Shot <png>] [-Wait <seconds>]
-# needs a desktop session (a hosted windows runner has one). the screenshot is best effort: no screen => no png, not a failure.
+# Needs a desktop session. Screenshot failure is nonfatal.
 # exit code 1 = the exe died, never showed a window, or the title is wrong.
 param(
     [string]$Exe = (Join-Path $PSScriptRoot "..\build\notepad-mint.exe"),
@@ -9,33 +9,40 @@ param(
     [int]$Wait = 4
 )
 
-$Exe = (Resolve-Path $Exe).Path
-$Sample = (Resolve-Path $Sample).Path
-$p = Start-Process -FilePath $Exe -ArgumentList ('"' + $Sample + '"') -PassThru
-Start-Sleep -Seconds $Wait
-$p.Refresh()
-$alive = -not $p.HasExited
-$title = $p.MainWindowTitle
-Write-Host ("alive: {0}  title: [{1}]" -f $alive, $title)
-
-if ($alive) {
+$ErrorActionPreference = 'Stop'
+$Sample = (Resolve-Path -LiteralPath $Sample).Path
+. (Join-Path $PSScriptRoot '..\tests\ui\ui_test.ps1') -NoRun -Exe $Exe
+$result = 1
+try {
+    $app = Start-App $Sample
+    Start-Sleep -Seconds ([Math]::Max(0, $Wait))
+    $app.Proc.Refresh()
+    $alive = -not $app.Proc.HasExited
+    $title = if ($alive) { Title $app } else { '' }
+    Write-Output ('alive: {0}  title: [{1}]' -f $alive, $title)
+    if (-not $alive) { throw 'the exe exited' }
+    if ($title -cne ((Split-Path $Sample -Leaf) + ' - notepad mint')) { throw 'unexpected window title' }
     try {
-        Add-Type -AssemblyName System.Windows.Forms
-        Add-Type -AssemblyName System.Drawing
-        $s = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-        $bmp = New-Object System.Drawing.Bitmap($s.Width, $s.Height)
-        $g = [System.Drawing.Graphics]::FromImage($bmp)
-        $g.CopyFromScreen($s.Location, [System.Drawing.Point]::Empty, $s.Size)
-        $g.Dispose()
-        $bmp.Save($Shot, [System.Drawing.Imaging.ImageFormat]::Png)
-        $bmp.Dispose()
-        Write-Host ("screenshot: " + $Shot)
+        $bmp = [U]::Grab([long]$app.Main)
+        try { $bmp.Save($Shot, [System.Drawing.Imaging.ImageFormat]::Png) }
+        finally { $bmp.Dispose() }
+        Write-Output ('screenshot: ' + $Shot)
     } catch {
-        Write-Host ("no screenshot: " + $_.Exception.Message)
+        Write-Output ('no screenshot: ' + $_.Exception.Message)
     }
-    Stop-Process -Id $p.Id -Force
+    Write-Output 'smoke ok'
+    $result = 0
+} catch { Write-Output ('FAIL ' + $_.Exception.Message) }
+finally {
+    try { Stop-All } catch {}
+    Kill-Mine
+    [U]::DropDesktop()
+    $env:APPDATA = $origAppData
+    # Validate the temporary directory before removing it.
+    $cleanupPath = [IO.Path]::GetFullPath($work)
+    $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    if ((Split-Path $cleanupPath -Parent) -eq $tempParent -and (Split-Path $cleanupPath -Leaf) -match '^npm_ui_[0-9a-f]{8}$') {
+        Remove-Item -LiteralPath $cleanupPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
-
-if (-not $alive) { Write-Host "FAIL the exe exited"; exit 1 }
-if ($title -ne 'multilingual-sample.txt - notepad mint') { Write-Host "FAIL unexpected window title"; exit 1 }
-Write-Host "smoke ok"
+exit $result

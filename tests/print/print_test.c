@@ -35,9 +35,12 @@ static void *TestAlloc(size_t n);
 
 Prefs g_pf;
 HWND g_edit;
+static HWND g_find;
 static int g_pass, g_fail, g_started, g_ended, g_aborted, g_pages, g_deleted, g_asked;
 static int g_cancel, g_noDC, g_noText, g_failText;
 static int g_failAlloc, g_allocCalls, g_copyCalls, g_locked, g_spoolLocked;
+static int g_holdCalls, g_releaseCalls, g_dialogCalls, g_nativeFindEnabled, g_retryCount;
+static DWORD g_retryError, g_error, g_nativeError;
 static size_t g_allocLimit, g_allocMax;
 static const WCHAR *g_dialogText, *g_spoolText;
 static DWORD g_requested, g_response;
@@ -45,6 +48,23 @@ static WCHAR g_printed[1024];
 
 const WCHAR *AppDocName(void) { return L"print-test"; }
 void AppSavePrefs(void) {}
+
+/* The shared dialog helper's contract, exercised with a real hidden window. The
+ * intercepted native calls below verify print.c holds it throughout retries. */
+HWND DialogHoldFind(void)
+{
+    g_holdCalls++;
+    if (!g_find || !IsWindow(g_find) || !IsWindowEnabled(g_find)) return NULL;
+    EnableWindow(g_find, FALSE);
+    return g_find;
+}
+
+void DialogReleaseFind(HWND held)
+{
+    g_releaseCalls++;
+    if (held && IsWindow(held)) EnableWindow(held, TRUE);
+}
+
 int MpAsk(HWND owner, const WCHAR *title, const WCHAR *msg, const WCHAR *b1, const WCHAR *b2, const WCHAR *b3, int esc)
 {
     (void)owner; (void)title; (void)msg; (void)b1; (void)b2; (void)b3; (void)esc;
@@ -125,18 +145,32 @@ static BOOL TestTextOut(HDC dc, int x, int y, LPCWSTR text, int n)
     return TRUE;
 }
 
+static BOOL NativeDialogResult(void)
+{
+    g_dialogCalls++;
+    if (IsWindowEnabled(g_find)) g_nativeFindEnabled++;
+    g_nativeError = g_dialogCalls <= g_retryCount ? g_retryError : g_error;
+    return !g_cancel && g_dialogCalls > g_retryCount;
+}
+
 static BOOL WINAPI TestDialog(PRINTDLGW *pd)
 {
     g_requested = pd->Flags;
-    if (g_cancel) return FALSE;
+    if (!NativeDialogResult()) return FALSE;
     pd->Flags |= g_response;
     pd->nFromPage = 10; pd->nToPage = 10;
     pd->hDC = g_noDC ? NULL : CreateCompatibleDC(NULL);
     if (g_dialogText) SetWindowTextW(g_edit, g_dialogText);
     return TRUE;
 }
-static BOOL WINAPI TestPageDialog(PAGESETUPDLGW *ps) { (void)ps; return FALSE; }
-static DWORD WINAPI TestDialogError(void) { return 0; }
+static BOOL WINAPI TestPageDialog(PAGESETUPDLGW *ps)
+{
+    if (!NativeDialogResult()) return FALSE;
+    ps->rtMargin.left = 100; ps->rtMargin.top = 200;
+    ps->rtMargin.right = 300; ps->rtMargin.bottom = 400;
+    return TRUE;
+}
+static DWORD WINAPI TestDialogError(void) { return g_nativeError; }
 
 static void Check(const WCHAR *name, int ok)
 {
@@ -158,9 +192,12 @@ static void Reset(const WCHAR *text, int start, int end, DWORD response)
     g_started = g_ended = g_aborted = g_pages = g_deleted = g_asked = 0;
     g_cancel = g_noDC = g_noText = g_failText = 0;
     g_failAlloc = g_allocCalls = g_copyCalls = g_locked = g_spoolLocked = 0;
+    g_holdCalls = g_releaseCalls = g_dialogCalls = g_nativeFindEnabled = g_retryCount = 0;
+    g_retryError = g_error = g_nativeError = 0;
     g_allocLimit = g_allocMax = 0;
     g_dialogText = g_spoolText = NULL;
     g_requested = 0; g_response = response; g_printed[0] = 0;
+    EnableWindow(g_find, TRUE);
 }
 
 void start(void)
@@ -172,6 +209,9 @@ void start(void)
     g_edit = CreateWindowExW(0, L"EDIT", L"", WS_POPUP | ES_MULTILINE | ES_AUTOHSCROLL, 0, 0, 400, 300,
                            NULL, NULL, GetModuleHandleW(NULL), NULL);
     if (!g_edit) { Check(L"create hidden native edit", 0); ExitProcess(1); }
+    g_find = CreateWindowExW(0, L"EDIT", L"", WS_POPUP, 0, 0, 100, 20,
+                           NULL, NULL, GetModuleHandleW(NULL), NULL);
+    if (!g_find) { Check(L"create hidden find-dialog stand-in", 0); DestroyWindow(g_edit); ExitProcess(1); }
     g_cd = (HMODULE)1; pPrintDlg = TestDialog; pPageDlg = TestPageDialog; pCdErr = TestDialogError;
 
     Reset(L"before selected after", 7, 15, PD_SELECTION);
@@ -181,6 +221,7 @@ void start(void)
     Check(L"selected job completes and releases its dc", g_started == 1 && g_ended == 1 && !g_aborted && g_pages == 1 && g_deleted == 1 && !g_asked);
     Check(L"selection snapshot allocates only its text and terminator", !g_copyCalls && g_allocCalls == 1 && g_allocMax == 18);
     Check(L"editor text is unlocked before any spooler callback", !g_locked && !g_spoolLocked);
+    Check(L"print dialog holds find and restores it after success", !g_nativeFindEnabled && IsWindowEnabled(g_find) && g_holdCalls == 1 && g_releaseCalls == 1);
 
     large = mem_alloc(1000001u * sizeof(WCHAR));
     if (!large) { Check(L"allocate large printing fixture", 0); ExitProcess(1); }
@@ -226,6 +267,7 @@ void start(void)
     PrintDoc(NULL, 1);
     Check(L"quiet uses default printer and disables selection", (g_requested & (PD_RETURNDEFAULT | PD_NOSELECTION)) == (PD_RETURNDEFAULT | PD_NOSELECTION));
     Check(L"quiet prints the complete document", wcmp(g_printed, L"before selected after") == 0);
+    Check(L"quiet default-printer lookup holds find and restores it", !g_nativeFindEnabled && IsWindowEnabled(g_find) && g_dialogCalls == 1 && g_releaseCalls == 1);
 
     Reset(L"omit\r\nkeep\r\nthis\r\nomit", 6, 16, PD_SELECTION);
     PrintDoc(NULL, 0);
@@ -242,6 +284,44 @@ void start(void)
     Reset(L"cancel", 0, 0, 0); g_cancel = 1;
     PrintDoc(NULL, 0);
     Check(L"dialog cancellation is silent and starts no job", !g_started && !g_deleted && !g_asked);
+    Check(L"print cancellation restores find", !g_nativeFindEnabled && IsWindowEnabled(g_find) && g_holdCalls == 1 && g_releaseCalls == 1);
+
+    Reset(L"dialog error", 0, 0, 0); g_cancel = 1; g_error = 5;
+    PrintDoc(NULL, 0);
+    Check(L"print dialog errors restore find and report once", !g_nativeFindEnabled && IsWindowEnabled(g_find) && !g_started && g_asked == 1 && g_releaseCalls == 1);
+
+    Reset(L"printer changed", 0, 0, 0); g_retryCount = 1; g_retryError = PDERR_DEFAULTDIFFERENT;
+    PrintDoc(NULL, 0);
+    Check(L"printer retry keeps find held until successful return", g_dialogCalls == 2 && !g_nativeFindEnabled && IsWindowEnabled(g_find) && g_started == 1 && !g_asked && g_holdCalls == 1 && g_releaseCalls == 1);
+
+    Reset(L"printer unavailable", 0, 0, 0); g_retryCount = 2; g_retryError = PDERR_PRINTERNOTFOUND;
+    PrintDoc(NULL, 0);
+    Check(L"exhausted printer retry restores find and reports once", g_dialogCalls == 2 && !g_nativeFindEnabled && IsWindowEnabled(g_find) && !g_started && g_asked == 1 && g_releaseCalls == 1);
+
+    Reset(L"already held", 0, 0, 0); EnableWindow(g_find, FALSE);
+    PrintDoc(NULL, 0);
+    Check(L"printing preserves an already disabled find window", !g_nativeFindEnabled && !IsWindowEnabled(g_find) && g_started == 1 && g_releaseCalls == 1);
+
+    Reset(L"page setup", 0, 0, 0);
+    PageSetup(NULL);
+    Check(L"page setup holds find and restores it after success", g_dialogCalls == 1 && !g_nativeFindEnabled && IsWindowEnabled(g_find) && g_releaseCalls == 1 && !g_asked);
+    Check(L"successful page setup adopts the chosen margins", g_pf.marginL == 100 && g_pf.marginT == 200 && g_pf.marginR == 300 && g_pf.marginB == 400);
+
+    Reset(L"cancel page setup", 0, 0, 0); g_cancel = 1;
+    PageSetup(NULL);
+    Check(L"page setup cancellation restores find without changing margins", !g_nativeFindEnabled && IsWindowEnabled(g_find) && !g_asked && g_releaseCalls == 1 && g_pf.marginL == 100);
+
+    Reset(L"page setup error", 0, 0, 0); g_cancel = 1; g_error = 5;
+    PageSetup(NULL);
+    Check(L"page setup errors restore find and report once", !g_nativeFindEnabled && IsWindowEnabled(g_find) && g_asked == 1 && g_releaseCalls == 1);
+
+    Reset(L"page setup retry", 0, 0, 0); g_retryCount = 1; g_retryError = PDERR_DNDMMISMATCH;
+    PageSetup(NULL);
+    Check(L"page setup retry holds find across both native calls", g_dialogCalls == 2 && !g_nativeFindEnabled && IsWindowEnabled(g_find) && !g_asked && g_holdCalls == 1 && g_releaseCalls == 1);
+
+    Reset(L"page setup already held", 0, 0, 0); EnableWindow(g_find, FALSE);
+    PageSetup(NULL);
+    Check(L"page setup preserves an already disabled find window", !g_nativeFindEnabled && !IsWindowEnabled(g_find) && g_releaseCalls == 1 && !g_asked);
 
     Reset(L"out of memory", 0, 0, 0); g_noText = 1;
     PrintDoc(NULL, 0);
@@ -260,6 +340,7 @@ void start(void)
     Check(L"range beyond document aborts silently", g_started == 1 && g_aborted == 1 && !g_ended && !g_pages && !g_printed[0] && g_deleted == 1 && !g_asked);
 
     DestroyWindow(g_edit);
-    Check(L"printing regression suite", g_pass == 24 && g_fail == 0);
+    DestroyWindow(g_find);
+    Check(L"printing regression suite", g_pass == 37 && g_fail == 0);
     ExitProcess(g_fail ? 1 : 0);
 }

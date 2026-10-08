@@ -79,6 +79,11 @@ typedef int     (CALLBACK *FONTENUMPROCW)(const void *, const void *, DWORD, LPA
 typedef struct { LONG x, y; } POINT;
 typedef struct { LONG cx, cy; } SIZE;
 typedef struct { LONG left, top, right, bottom; } RECT;
+typedef struct {
+    DWORD cbSize, flags;
+    HWND hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+    RECT rcCaret;
+} GUITHREADINFO;
 typedef struct { DWORD dwLowDateTime, dwHighDateTime; } FILETIME;
 typedef struct { WORD wYear, wMonth, wDayOfWeek, wDay, wHour, wMinute, wSecond, wMilliseconds; } SYSTEMTIME;
 
@@ -269,6 +274,7 @@ typedef struct {
 #define WM_RBUTTONDOWN 0x0204
 #define WM_RBUTTONUP 0x0205
 #define WM_MOUSEWHEEL 0x020A
+#define MK_CONTROL 0x0008
 #define WM_CAPTURECHANGED 0x0215
 #define WM_PRINT 0x0317
 #define WM_PRINTCLIENT 0x0318
@@ -737,6 +743,8 @@ API BOOL    WINAPI EnumThreadWindows(DWORD, BOOL (CALLBACK *)(HWND, LPARAM), LPA
 API HWND    WINAPI GetActiveWindow(void);
 API DWORD   WINAPI SetClassLongW(HWND, int, LONG);              /* SetClassLongPtrW on 32-bit */
 API BOOL    WINAPI GetCaretPos(POINT *);
+API BOOL    WINAPI SetCaretPos(int, int);
+API BOOL    WINAPI GetGUIThreadInfo(DWORD, GUITHREADINFO *);
 API BOOL    WINAPI CreateCaret(HWND, HBITMAP, int, int);
 API BOOL    WINAPI ShowCaret(HWND);
 API BOOL    WINAPI HideCaret(HWND);

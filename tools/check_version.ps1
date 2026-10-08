@@ -1,4 +1,4 @@
-# check_version.ps1 - the version lives in six places and they have to agree (the about box prints APP_VERSION from mp.h).
+# check_version.ps1 - version resources, about box and installer defaults must agree (APP_VERSION is in mp.h).
 # the reference is FILEVERSION in src\notepad_mint.rc. exit 1 and a line per mismatch otherwise.
 #   check_version.ps1 [-Expect 1.2.3]     with -Expect (the release workflow passes the tag's version) the version has to be that one too
 param([string]$Expect = '')

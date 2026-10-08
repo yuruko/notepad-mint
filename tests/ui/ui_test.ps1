@@ -238,7 +238,7 @@ $EM_REPLACESEL = 0xC2; $EM_LINEFROMCHAR = 0xC9; $EM_EMPTYUNDOBUFFER = 0xCD
 $LB_SETCURSEL = 0x186; $LB_GETCURSEL = 0x188; $LB_GETCOUNT = 0x18B; $LB_FINDSTRINGEXACT = 0x1A2
 $VK_RETURN = 0x0D; $VK_ESCAPE = 0x1B; $VK_DOWN = 0x28
 $IDOK = 1; $IDCANCEL = 2                                                         # standard dialog button ids (what IsDialogMessage / the app's esc + enter use)
-$BOX_BTN2 = 102; $BOX_BTN3 = 103                                                 # MpAsk (ui.c MsgProc): the 1st button is IDOK, the 2nd 100+2, the 3rd 100+3
+$BOX_BTN2 = 102; $BOX_BTN3 = 103                                                 # MpAsk (dialog.c MsgProc): the 1st button is IDOK, the 2nd 100+2, the 3rd 100+3
 
 # ---------------------------------------------------------------------------------------- ids parsed from the sources
 function Eval-Expr([string]$e, $own, $base) {                                  # numbers, names and + / - (all the enums here need)
@@ -387,7 +387,7 @@ $script:launchN = 0
 function Start-App([string]$file = '', [string]$appdata = '') {
     if (-not $appdata) { $script:launchN++; $appdata = Join-Path $work ('appdata' + $script:launchN) }
     [void](New-Item -ItemType Directory -Force -Path $appdata)
-    $env:APPDATA = $appdata                                                      # the app reads %APPDATA%\notepad-mint\settings.ini (main.c IniLocate)
+    $env:APPDATA = $appdata                                                      # the app reads %APPDATA%\notepad-mint\settings.ini (prefs.c IniLocate)
     $argLine = ''
     if ($file) { $argLine = '"' + $file + '"' }
     $procId = [U]::Launch($exeCopy, $argLine, $work)
@@ -449,7 +449,7 @@ function Wait-Box($app, [string]$title, [int]$ms = 0) {                         
     foreach ($k in [U]::Kids($h)) { if ([U]::Cls($k) -eq 'Static') { $txt = [U]::Text($k); break } }
     return [pscustomobject]@{ H = [long]$h; Text = $txt }
 }
-function Box-Press($box, [int]$id) {                                             # buttons: 1 = first (IDOK), 102 = second, 103 = third (ui.c MsgProc)
+function Box-Press($box, [int]$id) {                                             # buttons: 1 = first (IDOK), 102 = second, 103 = third (dialog.c MsgProc)
     Press $box.H $id
     return (Gone $box.H)
 }
@@ -1140,7 +1140,7 @@ function Test-T9 {                                                              
     $lh12 = Line-Height $app
     $dlg = Open-Font $app
     Pass 'T9.1 font dialog opens (class mp_font, title "font")'
-    $defPt = [regex]::Match([IO.File]::ReadAllText((Join-Path $Src 'main.c')), 'g_pf\.pt\s*=\s*(\d+)\s*;').Groups[1].Value     # PrefsDefaults
+    $defPt = [regex]::Match([IO.File]::ReadAllText((Join-Path $Src 'prefs.c')), 'g_pf\.pt\s*=\s*(\d+)\s*;').Groups[1].Value     # PrefsDefaults
     CkEq 'T9.2 the size box starts with the default size (PrefsDefaults)' $defPt (Get-Field $dlg $IDT.ID_SIZE)
     CkChk 'T9.3 "monospaced fonts only" is on by default' $dlg $IDT.ID_MONO 1
     Set-Field $dlg $IDT.ID_SIZE '18'
@@ -1396,7 +1396,10 @@ function Test-T15 {                                                             
 }
 
 # =========================================================================================================== T16
-function Test-T16 {                                                              # dirty state by content (main.c AppIsDirty): the title's "*" and the close prompt follow it
+function Test-T16 {                                                              # dirty state by content (app_state.c AppIsDirty): the title's "*" and the close prompt follow it
+    # Own the line-ending fixture: a maintainer may edit the multilingual sample.
+    $dirtyFile = Join-Path $work 'dirty-state-lf.txt'
+    [IO.File]::WriteAllText($dirtyFile, "alpha`nbeta`nlast", (New-Object Text.UTF8Encoding($false)))
     $EM_BACK = 8                                                                 # WM_CHAR backspace: a real keystroke-like deletion (the control's own modified flag stays set)
     $app = Start-App                                                             # --- a blank unsaved document
     $name = Default-Name $app
@@ -1417,14 +1420,14 @@ function Test-T16 {                                                             
     Pst $app.Main $WM_CLOSE 0 0
     Ck 'T16.7 WM_CLOSE on it exits within 3 s with no save prompt' ($app.Proc.WaitForExit(3000)) 'still running 3 s after WM_CLOSE (a prompt?)'
 
-    $app = Start-App $sampleMulti                                                # --- a file document (lf line endings)
-    $fn = 'multilingual-sample.txt - notepad mint'
+    $app = Start-App $dirtyFile                                                # --- a file document (lf line endings)
+    $fn = 'dirty-state-lf.txt - notepad mint'
     Ck 'T16.8 a loaded file is not modified' (Wait-Title $app $fn) ('title [' + (Title $app) + ']')
     Ed-Dirty $app 'x'
     Ck 'T16.9 typing a character: modified' (Wait-Title $app ('*' + $fn)) ('title [' + (Title $app) + ']')
     [void](Snd (Get-Edit $app) $EM_UNDO 0 0)
     Ck 'T16.10 undo back to the original text: not modified' (Wait-Title $app $fn) ('title [' + (Title $app) + ']')
-    CkEdText 'T16.11 ... and the text is the file again' $app (Expected-Text $sampleMulti)
+    CkEdText 'T16.11 ... and the text is the file again' $app (Expected-Text $dirtyFile)
     Ed-Dirty $app 'x'
     [void](Wait-Title $app ('*' + $fn))
     [void](Snd (Get-Edit $app) 0x102 $EM_BACK 0)
@@ -1439,7 +1442,7 @@ function Test-T16 {                                                             
     Pst $app.Main $WM_CLOSE 0 0
     Ck 'T16.15 WM_CLOSE after an undone edit exits within 3 s with no save prompt' ($app.Proc.WaitForExit(3000)) 'still running 3 s after WM_CLOSE (a prompt?)'
 
-    $app = Start-App $sampleMulti                                                # --- the opposite: a real change still asks
+    $app = Start-App $dirtyFile                                                # --- the opposite: a real change still asks
     [void](Wait-Title $app $fn)
     Ed-Dirty $app 'x'
     [void](Wait-Title $app ('*' + $fn))
@@ -1692,7 +1695,7 @@ function Test-T19 {
     $mpH = [IO.File]::ReadAllText((Join-Path $Src 'mp.h')); $uiSrc = [IO.File]::ReadAllText((Join-Path $Src 'ui.c')); $frSrc = [IO.File]::ReadAllText((Join-Path $Src 'frame.c'))
     $allSrc = ((Get-ChildItem -LiteralPath $Src -Filter *.c | ForEach-Object { [IO.File]::ReadAllText($_.FullName) }) -join "`n")
     Ck 'T19.14 the caret is the edit control''s own inverting one (pure white on the dark theme, pure black on the light one): no source creates a caret' ($allSrc -notmatch '\bCreateCaret\s*\(') 'CreateCaret( found in src\*.c'
-    Ck 'T19.15 menu bar, popups, status bar and title strip all use the one chrome font, CHROME_PX = 11 (g_fontMenu, bold twin g_fontMenuB for the title)' (($mpH -match '#define\s+CHROME_PX\s+11\b') -and ($mpH -notmatch 'MENU_PX') -and ($uiSrc -match 'g_fontMenu\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*CHROME_PX\s*,\s*FW_NORMAL\s*\)') -and ($uiSrc -match 'g_fontMenuB\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*CHROME_PX\s*,\s*FW_BOLD\s*\)') -and ($frSrc -match 'SelectObject\(mdc,\s*g_fontMenuB\)')) 'the font sizes are not wired as expected (src\mp.h, src\ui.c, src\frame.c)'
+    Ck 'T19.15 menu bar, popups, status bar and title strip all use the one chrome font, CHROME_PX = 11 (g_fontMenu, bold twin g_fontMenuB for the title)' (($mpH -match '#define\s+CHROME_PX\s+11\b') -and ($mpH -notmatch 'MENU_PX') -and ($uiSrc -match '(?:g_fontMenu|c\.font)\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*CHROME_PX\s*,\s*FW_NORMAL\s*\)') -and ($uiSrc -match '(?:g_fontMenuB|c\.bold)\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*CHROME_PX\s*,\s*FW_BOLD\s*\)') -and ($frSrc -match 'SelectObject\(mdc,\s*g_fontMenuB\)')) 'the font sizes are not wired as expected (src\mp.h, src\ui.c, src\frame.c)'
     if ($pal) { Ck 'T19.16 the light face is #dfdee1 = rgb(223,222,225) (it was #e4e1da: 5 less red, 3 less green, 7 more blue)' (($pal['light'].face -join ',') -eq '223,222,225') ('light face is ' + ($pal['light'].face -join ',')) }
 }
 
@@ -1722,9 +1725,9 @@ function Test-T20 {
 # line in the real help window, the command itself (exit, with the unsaved prompt) is T12's
 function Test-T21 {
     $main = [IO.File]::ReadAllText((Join-Path $Src 'main.c'))
-    $menu = [IO.File]::ReadAllText((Join-Path $Src 'menu.c'))
+    $menu = [IO.File]::ReadAllText((Join-Path $Src 'menu_defs.c'))
     Ck 'T21.1 the accelerator table maps ctrl+w to file > exit' ($main -match 'FVIRTKEY\s*\|\s*FCONTROL\s*,\s*''W''\s*,\s*IDM_FILE_EXIT\s*\}') 'no { FVIRTKEY | FCONTROL, ''W'', IDM_FILE_EXIT } entry in src\main.c'
-    Ck 'T21.2 file > exit shows "ctrl+w" as its shortcut' ($menu -match 'IT\(L"e&xit",\s*L"ctrl\+w",\s*IDM_FILE_EXIT\)') 'the exit item in src\menu.c has no ctrl+w label'
+    Ck 'T21.2 file > exit shows "ctrl+w" as its shortcut' ($menu -match 'IT\(L"e&xit",\s*L"ctrl\+w",\s*IDM_FILE_EXIT\)') 'the exit item in src\menu_defs.c has no ctrl+w label'
     $app = Start-App
     Cmd $app 'IDM_HELP_TOPICS'
     $h = Wait-Win $app 'mp_help' 'help topics'
@@ -1735,7 +1738,7 @@ function Test-T21 {
     Pst $h $WM_CLOSE 0 0
     [void](Gone $h)
     Ck 'T21.5 the accelerator table maps alt+x to the theme toggle (ctrl+t no longer does) and ctrl+u to the status bar command' (($main -match 'FVIRTKEY\s*\|\s*FALT\s*,\s*''X''\s*,\s*IDM_THEME_TOGGLE\s*\}') -and ($main -notmatch 'FCONTROL\s*,\s*''T''\s*,') -and ($main -match 'FVIRTKEY\s*\|\s*FCONTROL\s*,\s*''U''\s*,\s*IDM_VIEW_STATUS\s*\}')) 'entries missing in src\main.c'
-    Ck 'T21.6 the menus show them: view > status bar "ctrl+u", view > theme > toggle "alt+x"' (($menu -match 'IT\(L"&status bar",\s*L"ctrl\+u",\s*IDM_VIEW_STATUS\)') -and ($menu -match 'IT\(L"&toggle",\s*L"alt\+x",\s*IDM_THEME_TOGGLE\)')) 'labels missing in src\menu.c'
+    Ck 'T21.6 the menus show them: view > status bar "ctrl+u", view > theme > toggle "alt+x"' (($menu -match 'IT\(L"&status bar",\s*L"ctrl\+u",\s*IDM_VIEW_STATUS\)') -and ($menu -match 'IT\(L"&toggle",\s*L"alt\+x",\s*IDM_THEME_TOGGLE\)')) 'labels missing in src\menu_defs.c'
     Cmd $app 'IDM_THEME_TOGGLE'                                                  # (the commands the two accelerators run)
     CkEq 'T21.7 the theme toggle switches dark -> light (settings.ini says theme=light)' 'light' (Ini-Val $app 'view' 'theme' 'light')
     Cmd $app 'IDM_THEME_TOGGLE'
@@ -1747,7 +1750,7 @@ function Test-T21 {
     Cmd $app 'IDM_VIEW_STATUS'
     Ck 'T21.11 ... and shows it again' (WaitFor { [U]::Visible($st) } 3000) 'still hidden 3 s after the second IDM_VIEW_STATUS'
     Ck 'T21.12 the accelerator table maps alt+z to word wrap (the command T15 / T18 run through format > word wrap)' ($main -match 'FVIRTKEY\s*\|\s*FALT\s*,\s*''Z''\s*,\s*IDM_FMT_WRAP\s*\}') 'no { FVIRTKEY | FALT, ''Z'', IDM_FMT_WRAP } entry in src\main.c'
-    Ck 'T21.13 format > word wrap shows "alt+z" as its shortcut' ($menu -match 'IT\(L"&word wrap",\s*L"alt\+z",\s*IDM_FMT_WRAP\)') 'the word wrap item in src\menu.c has no alt+z label'
+    Ck 'T21.13 format > word wrap shows "alt+z" as its shortcut' ($menu -match 'IT\(L"&word wrap",\s*L"alt\+z",\s*IDM_FMT_WRAP\)') 'the word wrap item in src\menu_defs.c has no alt+z label'
     Ck 'T21.14 the help topics list alt+z (word wrap on / off)' ($t -match 'alt\+z\s+word wrap on / off') ('help text [' + (Show $t) + ']')
 }
 
@@ -2394,19 +2397,24 @@ function Test-T25 {
     & $script:bandDirect 'T25.44 after a line was inserted above (every row moved)' $app
     [void](Snd $ed $EM_SETSEL ($st[$i] + 1) ($st[$i + 1] + 4))
     & $script:bandDirect 'T25.45 after the selection was changed into the band rows' $app
-    [void](Snd $ed $EM_SETSEL 100000 100000)                                     # (the caret out of view: nothing of it on the window)
+    [void](Snd $ed $EM_SETSEL 100000 100000)                                     # resize reveals this caret; direct captures exclude its blink, like PrintWindow
     $w0 = [U]::WRect([long]$app.Main)
     $ok = $true; $why = ''
     foreach ($dh in @(-37, 21, 53, -9, 14)) {                                    # resize steps: the window shrinks and grows
         $wc = [U]::WRect([long]$app.Main)
         [void][Nd]::Size([long]$app.Main, ($w0[2] - $w0[0]), ($wc[3] - $wc[1] + $dh))
         Start-Sleep -Milliseconds 300
-        $g = Band-Geo $app
-        $y0 = $g.Top - 2 * $g.Pitch                                              # the last two whole rows and the band
-        $dd = Ed-Direct $app $g.W ($g.H - $y0) $y0
-        $s = Ed-Shot $app
-        $r = [Bx]::DiffPpm($dd.B, $dd.Off, $dd.W, $dd.Y0, $s.Bmp, $s.Ox, $s.Oy, 0, $y0, $g.W, $g.H - $y0)
-        $s.Bmp.Dispose()
+        $caretHidden = Snd $ed (0x8000 + 97) 0 0                                 # keep both captures free of the native caret, including child-window composition
+        try {
+            $g = Band-Geo $app
+            $y0 = $g.Top - 2 * $g.Pitch                                          # the last two whole rows and the band
+            $dd = Ed-Direct $app $g.W ($g.H - $y0) $y0
+            $s = Ed-Shot $app
+            try { $r = [Bx]::DiffPpm($dd.B, $dd.Off, $dd.W, $dd.Y0, $s.Bmp, $s.Ox, $s.Oy, 0, $y0, $g.W, $g.H - $y0) }
+            finally { $s.Bmp.Dispose() }
+        } finally {
+            if ($caretHidden) { [void](Snd $ed (0x8000 + 97) 1 0) }
+        }
         if ($r[0] -ne 0) { $ok = $false; $why += ' height ' + $g.H + ': ' + $r[0] + ' px differ (first x ' + $r[1] + ' y ' + $r[2] + ' from row ' + $y0 + ');' }
     }
     Ck 'T25.46 after resizing the window five times the last rows and the band on the window are what a repaint gives (nothing stale is left in or around the band)' $ok $why
@@ -2417,9 +2425,9 @@ function Test-T25 {
 # needs real keyboard state: the table entry, the menu label and the help line are checked in the sources / the help window, the command runs here
 function Test-T26 {
     $main = [IO.File]::ReadAllText((Join-Path $Src 'main.c'))
-    $menu = [IO.File]::ReadAllText((Join-Path $Src 'menu.c'))
+    $menu = [IO.File]::ReadAllText((Join-Path $Src 'menu_defs.c'))
     Ck 'T26.1 the accelerator table maps ctrl+k to clear line' ($main -match 'FVIRTKEY\s*\|\s*FCONTROL\s*,\s*''K''\s*,\s*IDM_EDIT_CLEARLINE\s*\}') 'no { FVIRTKEY | FCONTROL, ''K'', IDM_EDIT_CLEARLINE } entry in src\main.c'
-    Ck 'T26.2 edit > clear line shows "ctrl+k" as its shortcut' ($menu -match 'IT\(L"cl&ear line",\s*L"ctrl\+k",\s*IDM_EDIT_CLEARLINE\)') 'the clear line item in src\menu.c has no ctrl+k label'
+    Ck 'T26.2 edit > clear line shows "ctrl+k" as its shortcut' ($menu -match 'IT\(L"cl&ear line",\s*L"ctrl\+k",\s*IDM_EDIT_CLEARLINE\)') 'the clear line item in src\menu_defs.c has no ctrl+k label'
     $app = Start-App
     Cmd $app 'IDM_HELP_TOPICS'
     $h = Wait-Win $app 'mp_help' 'help topics'
@@ -3109,19 +3117,27 @@ function Test-T38 {
 # ====================================================================================================== run them all
 . (Join-Path $PSScriptRoot 'font_preview_test.ps1')
 . (Join-Path $PSScriptRoot 'caret_position_test.ps1')
+. (Join-Path $PSScriptRoot 'caret_visibility_test.ps1')
+. (Join-Path $PSScriptRoot 'ui_resources_test.ps1')
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine
+    try { [CV]::Shutdown() } catch { Fail 'isolated desktop worker cleanup' $_.Exception.Message }
     [U]::DropDesktop()
     $env:APPDATA = $origAppData
+    $cleanupPath = [IO.Path]::GetFullPath($work)
+    $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    if ((Split-Path $cleanupPath -Parent) -ne $tempParent -or (Split-Path $cleanupPath -Leaf) -notmatch '^npm_ui_[0-9a-f]{8}$') {
+        throw ('refusing to remove unexpected UI-test directory: ' + $cleanupPath)
+    }
     for ($try = 0; $try -lt 4; $try++) {
         Start-Sleep -Milliseconds 300
-        Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $cleanupPath -Recurse -Force -ErrorAction SilentlyContinue
         if (-not (Test-Path -LiteralPath $work)) { break }
     }
 }

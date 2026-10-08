@@ -1,17 +1,18 @@
-notepad mint 1.0.6
+notepad mint 1.0.7
 
-- editor repaints are buffered as complete frames, keeping text visible while multilingual glyphs are drawn during resize
-- the font preview uses one line at the actual selected size, from 9 to 70 pt: "sphinx of black quartz, judge my vow. 0123456789"
-- smaller executable: 134,656 bytes, 6.7% smaller than 1.0.5, through lossless icon packing and link-time optimization
-- nearby caret movement avoids rescanning the whole document prefix; utf-8 loading reuses validation, and crlf byte sizing skips an unused newline scan
-- selection printing copies only selected text; zero-capacity path handling is guarded
+- resizing the window or changing zoom scrolls the text caret into view, including wrapped multilingual text and backward selections
+- caret visibility follows deferred wrapping and scrollbar changes while preserving document text, selection and undo
+- source reorganized into focused modules for preferences, document state, status calculations, caret geometry/text helpers, buttons, dialogs and menu definitions, with clearer ownership comments
+- fixed repeated-DPI dialog font leaks, retained valid help-window fonts, and released the scrollbar pattern bitmap
+- print and page setup dialogs now hold the modeless find window so it cannot change the document during the operation
+- button painting falls back to direct drawing when buffering resources are unavailable; document statistics retry failed text-buffer locks
 
-regression coverage includes multilingual painting, partial repaints, resource lifetime, every preview size in both themes, randomized caret/status comparisons, encoding and file failures, and selection-print allocation failures.
+Regression coverage includes actual caret geometry during resize and zoom, selection/undo preservation, rapid wrapping, repeated DPI resource ownership and native-dialog success/cancellation/error/retry paths. Smoke and GUI checks run on an isolated desktop with temporary settings.
 
 **download**
 
-- `notepad-mint-1.0.6-setup.exe`: installer and uninstaller
-- `notepad-mint-1.0.6.exe`: standalone executable
+- `notepad-mint-1.0.7-setup.exe`: installer and uninstaller
+- `notepad-mint-1.0.7.exe`: standalone executable
 - `SHA256SUMS.txt`: download checksums
 
 settings remain in `%appdata%\notepad-mint\settings.ini`.

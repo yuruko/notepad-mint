@@ -3,7 +3,7 @@ rem verify.bat - every automatic check in one go. stops at the first failure; th
 rem   tools\verify.bat          release build (zero warnings), imports, layout check, unit tests, smoke test
 rem   tools\verify.bat ui       ... and the message-driven gui tests (tests\ui\ui_test.ps1)
 rem   tools\verify.bat frame    ... and the title strip test with real mouse input (tools\frame_test.ps1: moves the mouse for a few seconds)
-rem the smoke / gui / frame tests start the exe on the real desktop (a window flashes up); they need a desktop session.
+rem gui tests use a private desktop. frame tests use the real desktop; all GUI checks need a desktop session.
 rem (every script is called by its absolute path: the current directory is not searched for commands on this setup)
 setlocal
 cd /d "%~dp0.."
@@ -54,7 +54,7 @@ powershell -NoProfile -File "%ROOT%\tests\ui\ui_test.ps1" || (echo verify: GUI T
 echo [verify] selected line breaks, partly visible rows, theme button hover, button tooltips and resize erase regression (probe build: /DSHOTDC dumps the editor's own pixels, /DMENU_NO_TRACK keeps a synthetic hover)
 cmd /c ""%ROOT%\tools\probe.bat" /DSHOTDC /DMENU_NO_TRACK" > build\verify-probe.log 2>&1
 if errorlevel 1 type build\verify-probe.log & echo verify: PROBE BUILD FAILED & exit /b 1
-powershell -NoProfile -File "%ROOT%\tests\ui\ui_test.ps1" -Exe "%ROOT%\build\probe\notepad-mint.exe" -Only T23,T25,T28,T30,T37,T38 || (echo verify: DIRECT PAINT TEST FAILED & exit /b 1)
+powershell -NoProfile -File "%ROOT%\tests\ui\ui_test.ps1" -Exe "%ROOT%\build\probe\notepad-mint.exe" -Only T23,T25,T28,T30,T37,T38,T42 || (echo verify: DIRECT PAINT TEST FAILED & exit /b 1)
 goto done
 :frame
 echo [verify] title strip test

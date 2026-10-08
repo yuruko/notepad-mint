@@ -7,12 +7,10 @@
  * aero snap and double-click-to-maximize keep working. the window menu is our popup (menu.c). */
 #include "mp.h"
 
-/* on: the title bar text uses the chrome font (CHROME_PX), like the menu bar and the status bar.
- * the first try drew two title bars: the only WM_NCCALCSIZE sent by CreateWindowExW has wParam FALSE, FrameNcCalc handed
- * that one to DefWindowProc untouched, and nothing recalculated the frame before the first resize. fixed by FrameNcCalc
- * treating both forms and mp_main forcing one more recalculation (SWP_FRAMECHANGED) right after the window is created.
- * verified with tools\frame_test.ps1 (hit tests, maximize / restore, double click, drag, aero snap, minimize, close).
- * build with /DFRAME_CUSTOM=0 (tools\probe.bat) to get the native caption back: windows then draws it in the system font. */
+/* The caption font follows the menu/status chrome. Both WM_NCCALCSIZE forms
+ * must remove the native caption, including the first call during creation.
+ * main.c also forces SWP_FRAMECHANGED before showing the window.
+ * Define FRAME_CUSTOM=0 for a native caption; frame services then fall through. */
 #ifndef FRAME_CUSTOM
 #define FRAME_CUSTOM 1
 #endif
