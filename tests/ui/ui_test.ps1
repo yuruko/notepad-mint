@@ -3118,12 +3118,13 @@ function Test-T38 {
 . (Join-Path $PSScriptRoot 'font_preview_test.ps1')
 . (Join-Path $PSScriptRoot 'caret_position_test.ps1')
 . (Join-Path $PSScriptRoot 'caret_visibility_test.ps1')
+. (Join-Path $PSScriptRoot 'caret_scroll_test.ps1')
 . (Join-Path $PSScriptRoot 'ui_resources_test.ps1')
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine

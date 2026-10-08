@@ -386,6 +386,8 @@ typedef struct {
 #define VK_MENU 0x12
 #define VK_ESCAPE 0x1B
 #define VK_SPACE 0x20
+#define VK_PRIOR 0x21
+#define VK_NEXT 0x22
 #define VK_END 0x23
 #define VK_HOME 0x24
 #define VK_LEFT 0x25

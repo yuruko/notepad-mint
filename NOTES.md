@@ -1,5 +1,15 @@
 # notepad mint
 
+## 1.0.8 keyboard navigation after scrolling (2026-10-08)
+
+Mouse-wheel and scrollbar scrolling preserve EDIT's logical cursor and selection, but its offscreen display caret can make subsequent vertical navigation resolve to a different line. T43 reproduces this on the installed 1.0.7 executable: 129 checks pass and 28 fail, including up/down, page navigation, Shift selections, combined horizontal/vertical scrolling and oversized carets.
+
+- Before an arrow, home/end or page navigation key is passed to EDIT, an offscreen caret is revealed with native `EM_SCROLLCARET`. The control then performs the requested movement from the unchanged logical selection. The implementation does not reset the selection or touch the document buffer or undo history. Ctrl+up/down retain their native behavior without revealing the caret.
+- T43 compares post-scroll navigation with native in-view navigation and independently checks one-line up/down movement. It covers wheel scrolling in both directions, scrollbar scrolling, plain and wrapped multilingual text, both selection orientations with Shift, both scroll axes, maximum-font tiny viewports, actual OS caret visibility and preservation of text, modified state and undo. Keyboard modifiers are set only on the harness's isolated desktop with balanced state restoration.
+- All version resources, the manifest, about box and installer defaults now identify 1.0.8. Release downloads include the standalone executable, NSIS installer and SHA-256 checksums.
+
+Final validation: `tools\verify.bat ui` passes 457 unit, 38 printing, 1,012 normal GUI and 179 probe GUI checks (1,686 total, zero failures, nine expected skips). All 157 T43 checks pass. The release build has zero warnings, approved imports and clean SDK validation, including the two added navigation constants. The executable is 138,752 bytes and the local NSIS installer is 160,260 bytes. The maintainer's modified multilingual sample was preserved byte-for-byte and excluded from the release commit. Baseline and final logs are under `build\caret-scroll-107-final.log` and `build\verify108.log` (not committed).
+
 ## 1.0.7 caret visibility and application audit (2026-10-08)
 
 The audit covered every application module: document conversion and safe saves, native editor layout/painting/text commands, dirty state and statistics, search and assembly routines, settings/recent files, menus/frame/status/scrollbars, buttons/dialogs/fonts, printing, resources, test harnesses and release packaging. Existing data-preservation behavior remains covered by the complete regression suite.

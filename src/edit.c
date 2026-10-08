@@ -1140,6 +1140,15 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
             EditDeleteWord(1);
             return 0;
         }
+        if (w >= VK_PRIOR && w <= VK_DOWN &&
+            !((w == VK_UP || w == VK_DOWN) && (GetKeyState(VK_CONTROL) & 0x8000)) &&
+            !EditCaretInView(h, LineHeight())) {
+            /* EDIT navigates vertically from its display caret. Manual scrolling
+             * can park that caret offscreen: reveal the unchanged logical
+             * selection before asking the native control to move it. Ctrl+up /
+             * down do not move the logical caret; retain their native behavior. */
+            SendMessageW(h, EM_SCROLLCARET, 0, 0);
+        }
         break;
     case WM_CONTEXTMENU: {
         int x = GET_X_LPARAM(l), y = GET_Y_LPARAM(l);

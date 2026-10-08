@@ -1,6 +1,6 @@
 # TODO - notepad mint
 
-state (2026-10-08): 1.0.7 keeps the caret visible through resize/zoom layout, splits source by responsibility, fixes font/bitmap lifetime and native print-dialog find ownership, and retries failed document-statistic locks. the supported feature set is covered by `tools\verify.bat ui`. `NOTES.md` ("status") says per item how it was verified
+state (2026-10-08): 1.0.8 restores the saved caret view before keyboard navigation after manual scrolling, preserving selection anchors and native undo. the supported feature set is covered by `tools\verify.bat ui`. `NOTES.md` ("status") says per item how it was verified
 and what was never verified; this file is what is still open, plus the rules for whoever changes the code next. the original per-module specs of the dialogs live in git history (`TODO.md` at 78e8b0a).
 
 ## 0. hard rules (breaking any of these breaks the build or the product)

@@ -24,6 +24,9 @@ public static class CV {
     [DllImport("user32.dll")] static extern bool AttachThreadInput(uint own, uint target, bool attach);
     [DllImport("user32.dll")] static extern IntPtr SetActiveWindow(IntPtr h);
     [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr h);
+    [DllImport("user32.dll")] static extern bool GetKeyboardState(byte[] keys);
+    [DllImport("user32.dll")] static extern bool SetKeyboardState(byte[] keys);
+    [DllImport("user32.dll")] static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
     static AutoResetEvent request = new AutoResetEvent(false), finished = new AutoResetEvent(false);
     static Thread worker;
     static Action action;
@@ -79,6 +82,27 @@ public static class CV {
         int[] result = null;
         OnWorker(delegate() { result = ReadSnapshot(tid, edit, trim); });
         return result;
+    }
+    public static void Key(uint tid, long edit, int key, bool shift, bool control) {
+        OnWorker(delegate() {
+            uint own = GetCurrentThreadId();
+            if (!AttachThreadInput(own, tid, true)) throw new Exception("cannot attach to the isolated app's input queue");
+            byte[] previous = new byte[256], keys = new byte[256];
+            bool saved = false;
+            try {
+                if (!GetKeyboardState(previous)) throw new Exception("cannot read isolated keyboard state");
+                saved = true;
+                keys[0x10] = shift ? (byte)0x80 : (byte)0;
+                keys[0x11] = control ? (byte)0x80 : (byte)0;
+                if (!SetKeyboardState(keys)) throw new Exception("cannot set isolated keyboard state");
+                IntPtr result;
+                if (SendMessageTimeoutW(new IntPtr(edit), 0x100, new IntPtr(key), IntPtr.Zero, 2, 8000, out result) == IntPtr.Zero)
+                    throw new Exception("isolated navigation key timed out");
+            } finally {
+                if (saved) SetKeyboardState(previous);
+                AttachThreadInput(own, tid, false);
+            }
+        });
     }
     public static int[] Format(long edit) {
         R r = new R(); IntPtr result;
