@@ -1,5 +1,21 @@
 # notepad mint
 
+## 1.0.4 audit (2026-10-08)
+
+The audit covered file I/O, encoding conversion, editor replacement and dirty state, search/replace, assembly routines, settings/recent files, printing, and release packaging. Fixed reproducible failure modes rather than claiming that every possible feature or environment is covered.
+
+- `doc.c`: same-directory temporary writes, checked writes and flushes, replacement with backup/rollback, explicit incomplete-read errors, conversion-loss checks and bounded sizes. Failure injection covers read, partial write, flush, replacement, rollback and recovery-file retention; metadata and alternate streams have roundtrip checks.
+- `edit.c` / `main.c`: a memory-limited private-desktop test reproduced 1.0.3 losing a 2,228,224-character document when word wrap was toggled. T36 verifies the original window, text and selection survive, and a later toggle succeeds. Failed text access and loading cannot commit an empty save or new document identity.
+- `search.c` / `find.c`: whole-word search, Unicode boundaries and linear forward/reverse KMP; 20,000 randomized reference comparisons, long patterns, protected-page tails and T34 verify matching/replacement/undo/preferences. Supplementary Unicode units conservatively count as word characters, including emoji.
+- `rt.asm`: SSE2 line counts skip empty masks and sum matching lanes in fixed work. `tests\bench\build.bat` retains the old implementation for reproducible comparisons: dense newline counting improved about 9x; adversarial 256-unit prefix searches about 19-29x. Ordinary missing-pattern and sparse-line scans also improved in local runs; timings are workload-dependent.
+- `main.c`: .LOG append/undo/save (T33), external size/time-change confirmation and cancel (T35), cached dirty comparisons, bounded settings retries, and whole-section recent-file reads/writes (T31). [WritePrivateProfileSectionW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-writeprivateprofilesectionw) prevents readers seeing partially shifted keys. Simultaneous history additions can still replace one another because the read-modify-write sequence is not locked across processes.
+- `print.c`: selection printing and checked TextOutW errors. `tests\print\build.bat` exercises real pagination and native edit selection with intercepted dialogs/spooler; it sends no printer output. Physical printers and PDF drivers remain unverified.
+- release: version 1.0.4 in every resource/installer/about location, exact-tag checkout on manual dispatch, warning/size/import/layout/unit/print gates, SHA-256 download checksums. Find (dark) and replace (light) were inspected in private-desktop screenshots.
+
+Current executable: 144,384 bytes. Remaining architectural limits include native single-level undo and horizontal-scroll range, synchronous loading/printing, dialog DPI behavior, no tabs or session recovery. Embedded NUL-to-space and majority-EOL normalization preserve the existing tested contract.
+
+Release validation: `tools\verify.bat ui` passed 454 unit checks (one locale-specific skip), 505 normal GUI checks (five private-desktop/probe-only skips), 105 direct-paint checks and 15 printing checks. SDK validation covered 34 structs, 263 fields, 385 constants and 193 API declarations. Debug and release builds had zero warnings; the installer built successfully. A silent local upgrade from 1.0.3 to 1.0.4 was verified by executable hash, version resource and uninstall registration, with settings unchanged. Logs and inspection screenshots are under `build\audit-*` (not committed).
+
 free replacement for notepad.exe: dark (default) or light, a mint accent (a softer green in light), no ai / sign-in / telemetry. plain text only.
 written in raw c + **32-bit x86** masm. no crt, no libs, no windows.h (every win32 decl is in `src/w32.h`).
 exe imports only kernel32/user32/gdi32; dwmapi/uxtheme (dark frame, scrollbar themes), shell32 (drag & drop, the about link) and

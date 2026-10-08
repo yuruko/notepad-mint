@@ -7,7 +7,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME                  /* the window title is "<name>" + this (main.c AppUpdateTitle); the title strip draws the name bold and this part regular */
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.0.3"
+#define APP_VERSION  L"1.0.4"
 #define PATH_CAP     1024
 
 /* ------------------------------------------------------------- palette --
@@ -84,10 +84,14 @@ void   DefaultDocName(const SYSTEMTIME *st, WCHAR *out, int cap);   /* "mint-" +
  * down (up = 0): the first match starting at or after `from`. up: the last match ending at or before `from`.
  * returns the match start or -1 (also for m <= 0). no wrap-around: the caller retries from the other end. */
 int    FindInText(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int up, int matchCase);
-/* replace every match of pat with `with` in one pass. returns a mem_alloc'd, nul terminated result
+/* wholeWord checks adjacent units in the complete document; valid surrogate pairs are never split. */
+int    FindInTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int up, int matchCase, int wholeWord);
+/* replace every match of pat with `with` in two passes (size, then fill). returns a mem_alloc'd, nul terminated result
  * (*outLen chars, *count replacements) or NULL when out of memory. zero matches => a copy and *count = 0. */
 WCHAR *ReplaceAllText(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase,
                       int *outLen, int *count);
+WCHAR *ReplaceAllTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase,
+                        int wholeWord, int *outLen, int *count);
 #ifdef DBGLOG
 void   Dbg(const WCHAR *tag, INT_PTR a, INT_PTR b);  /* debug builds: append to build\dbg.log */
 #define DBG(t, a, b) Dbg(t, (INT_PTR)(a), (INT_PTR)(b))
@@ -241,7 +245,7 @@ typedef struct Prefs {
     int      wrap, statusbar;
     int      tab;                               /* tab size in columns: 2, 4 or 8 (saved) */
     int      winx, winy, winw, winh, maximized;
-    int      matchCase, wrapAround;
+    int      matchCase, wrapAround, wholeWord;
     int      marginL, marginT, marginR, marginB;      /* page setup, 1/1000 inch */
 } Prefs;
 extern Prefs g_pf;
@@ -273,7 +277,7 @@ void   EditApplyFont(void);                     /* font from g_pf (face, g_pf.cu
 void   EditApplyColors(void);                   /* bg brush from g_pf.bg, repaint */
 HBRUSH EditBrush(void);
 void   FontResolve(WCHAR *face);                /* swaps a missing face for consolas / lucida console / courier new */
-void   EditSetDocText(const WCHAR *t);          /* load a document: resets undo + modified flag */
+BOOL   EditSetDocText(const WCHAR *t);          /* load a document: resets undo + modified flag on success */
 WCHAR *EditGetDocText(int *len);                /* heap copy (CRLF text), caller mem_free()s */
 BOOL   EditHasSel(void);
 void   EditApplyTabs(void);                     /* tab stops every g_pf.tab columns, in the control and in what edit.c draws itself */

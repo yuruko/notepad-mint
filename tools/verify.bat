@@ -36,6 +36,12 @@ cmd /c ""%ROOT%\tests\unit\build.bat"" > build\verify-unit.log 2>&1
 if errorlevel 1 type build\verify-unit.log & echo verify: UNIT TESTS FAILED & exit /b 1
 findstr /b /c:"unit:" build\verify-unit.log
 
+echo [verify] print tests (no printer output)
+cmd /c ""%ROOT%\tests\print\build.bat"" > build\verify-print.log 2>&1
+if errorlevel 1 type build\verify-print.log & echo verify: PRINT TESTS FAILED & exit /b 1
+findstr /r /c:"warning [A-Z][A-Z]*[0-9][0-9]*" build\verify-print.log && (echo verify: PRINT TEST BUILD PRINTED WARNINGS & exit /b 1)
+findstr /c:"PASS printing regression suite" build\verify-print.log
+
 echo [verify] smoke test
 powershell -NoProfile -File "%ROOT%\tools\smoke.ps1" -Wait 3 || (echo verify: SMOKE TEST FAILED & exit /b 1)
 

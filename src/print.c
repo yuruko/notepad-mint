@@ -331,7 +331,9 @@ static int PrintJob(HDC dc, const WCHAR *text, int n, int copies, int from, int 
                 if (!ok) er = GetLastError();               /* read at once: nothing below may overwrite it */
             }
             for (row = 0; ok && got > 0; ) {
-                if (out && k > 0) TextOutW(dc, box.left, box.top + row * lh, s, k);
+                if (out && k > 0 && !TextOutW(dc, box.left, box.top + row * lh, s, k)) {
+                    er = GetLastError(); ok = FALSE; break;
+                }
                 if (++row >= rows) break;
                 got = RowNext(&r, &s, &k);
                 if (got < 0) ok = FALSE;
@@ -362,15 +364,18 @@ void PrintDoc(HWND owner, int quiet)
     PRINTDLGW pd;
     HCURSOR cur;
     WCHAR *text;
+    DWORD selStart = 0, selEnd = 0;
     int n = 0, from = 1, to = 0x7FFFFFFF, ok;
 
     if (!CdLoad(owner)) return;
+    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
     memset(&pd, 0, sizeof pd);
     pd.lStructSize = sizeof pd;
     pd.hwndOwner = owner;
     /* no "print to file" box: PrintJob never sets DOCINFO.lpszOutput, so a ticked box would still print on the printer
      * (the pdf / xps printers ask for their file name themselves) */
-    pd.Flags = (quiet ? PD_RETURNDEFAULT : 0) | PD_RETURNDC | PD_NOSELECTION | PD_USEDEVMODECOPIESANDCOLLATE | PD_HIDEPRINTTOFILE | PD_DISABLEPRINTTOFILE;
+    pd.Flags = (quiet ? PD_RETURNDEFAULT : 0) | PD_RETURNDC | PD_USEDEVMODECOPIESANDCOLLATE | PD_HIDEPRINTTOFILE | PD_DISABLEPRINTTOFILE;
+    if (quiet || selStart == selEnd) pd.Flags |= PD_NOSELECTION;
     pd.nFromPage = 1;
     pd.nToPage = 1;
     pd.nMinPage = 1;
@@ -381,6 +386,13 @@ void PrintDoc(HWND owner, int quiet)
 
     cur = SetCursor(LoadCursorW(NULL, IDC_WAIT));
     text = EditGetDocText(&n);
+    if (text && (pd.Flags & PD_SELECTION)) {
+        if (selStart > (DWORD)n) selStart = (DWORD)n;
+        if (selEnd > (DWORD)n) selEnd = (DWORD)n;
+        n = (int)(selEnd - selStart);
+        memmove(text, text + selStart, (size_t)n * sizeof(WCHAR));
+        text[n] = 0;
+    }
     /* with PD_USEDEVMODECOPIESANDCOLLATE the driver makes the copies and nCopies comes back 1; more => repeat the document */
     ok = pd.hDC && text ? PrintJob(pd.hDC, text, n, pd.nCopies > 1 ? pd.nCopies : 1, from, to) : 0;
     SetCursor(cur);

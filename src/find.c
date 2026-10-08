@@ -1,7 +1,7 @@
 /* find.c - find / replace (one modeless dialog, two modes) and go to line. every search goes through search.c */
 #include "mp.h"
 
-enum { ID_WHAT = 1001, ID_CASE, ID_WRAP, ID_UP, ID_DOWN, ID_WITH, ID_REPLACE, ID_REPLACEALL };
+enum { ID_WHAT = 1001, ID_CASE, ID_WRAP, ID_UP, ID_DOWN, ID_WITH, ID_REPLACE, ID_REPLACEALL, ID_WORD };
 #define ID_LINE 1051
 
 typedef struct { DlgBase b; int rep; } FindSt;
@@ -61,8 +61,8 @@ static void Search(HWND owner, int up)
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
     t = EditLockText(&hl, &n);
     if (t) {
-        at = FindInText(t, n, g_findWhat, m, (int)(up ? s : e), up, g_pf.matchCase);
-        if (at < 0 && g_pf.wrapAround) at = FindInText(t, n, g_findWhat, m, up ? n : 0, up, g_pf.matchCase);
+        at = FindInTextEx(t, n, g_findWhat, m, (int)(up ? s : e), up, g_pf.matchCase, g_pf.wholeWord);
+        if (at < 0 && g_pf.wrapAround) at = FindInTextEx(t, n, g_findWhat, m, up ? n : 0, up, g_pf.matchCase, g_pf.wholeWord);
     }
     EditUnlockText(hl);
     if (at < 0) { NotFound(owner); return; }
@@ -87,7 +87,8 @@ static void Replace(HWND owner)
     const WCHAR *t;
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
     t = EditLockText(&hl, &n);
-    if (t && (int)(e - s) == m && (int)e <= n) hit = FindInText(t + s, m, g_findWhat, m, 0, 0, g_pf.matchCase) == 0;
+    if (t && (int)(e - s) == m && (int)e <= n)
+        hit = FindInTextEx(t, n, g_findWhat, m, (int)s, 0, g_pf.matchCase, g_pf.wholeWord) == (int)s;
     EditUnlockText(hl);
     if (hit) {
         SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)g_findWith);
@@ -107,11 +108,11 @@ static void ReplaceAll(HWND owner)
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
     t = EditLockText(&hl, &n);
     if (t) {
-        found = FindInText(t, n, g_findWhat, m, 0, 0, g_pf.matchCase) >= 0;     /* ReplaceAllText copies the whole text even for zero matches */
+        found = FindInTextEx(t, n, g_findWhat, m, 0, 0, g_pf.matchCase, g_pf.wholeWord) >= 0; /* avoid copying the whole text for zero matches */
         if (found) {
-            out = ReplaceAllText(t, n, g_findWhat, m, g_findWith, wn, g_pf.matchCase, &len, &cnt);
+            out = ReplaceAllTextEx(t, n, g_findWhat, m, g_findWith, wn, g_pf.matchCase, g_pf.wholeWord, &len, &cnt);
             if ((int)s > n) s = (DWORD)n;
-            for (i = 0; (p = FindInText(t, (int)s, g_findWhat, m, i, 0, g_pf.matchCase)) >= 0; i = p + m) k++;   /* before the caret */
+            for (i = 0; (p = FindInTextEx(t, n, g_findWhat, m, i, 0, g_pf.matchCase, g_pf.wholeWord)) >= 0 && p + m <= (int)s; i = p + m) k++; /* full document boundaries, matches before the caret */
         }
     }
     EditUnlockText(hl);
@@ -137,7 +138,7 @@ static void Flag(HWND h, int id, int *v)
     if (c) *v = SendMessageW(c, BM_GETCHECK, 0, 0) == BST_CHECKED;
 }
 
-/* the dialog's texts and options -> the remembered state (main saves match case / wrap around) */
+/* the dialog's texts and options -> the remembered state (main saves the search options) */
 static void Sync(HWND h)
 {
     HWND c;
@@ -145,6 +146,7 @@ static void Sync(HWND h)
     if ((c = GetDlgItem(h, ID_WITH)) != NULL) GetWindowTextW(c, g_findWith, 256);
     Flag(h, ID_CASE, &g_pf.matchCase);
     Flag(h, ID_WRAP, &g_pf.wrapAround);
+    Flag(h, ID_WORD, &g_pf.wholeWord);
     Flag(h, ID_UP, &g_findUp);
 }
 
@@ -194,6 +196,7 @@ static void FindLayout(DlgBase *b, int rep)
     }
     Opt(h, L"match case", 12, 66 + dy, 150, ID_CASE, BS_AUTOCHECKBOX, g_pf.matchCase);
     Opt(h, L"wrap around", 12, 90 + dy, 150, ID_WRAP, BS_AUTOCHECKBOX, g_pf.wrapAround);
+    Opt(h, L"whole word", 12, 114 + dy, 150, ID_WORD, BS_AUTOCHECKBOX, g_pf.wholeWord);
     Group(b, L"direction", 176, 50 + dy, 128, 52);
     Opt(h, L"up", 188, 70 + dy, 46, ID_UP, BS_AUTORADIOBUTTON | WS_GROUP, g_findUp);
     Opt(h, L"down", 240, 70 + dy, 58, ID_DOWN, BS_AUTORADIOBUTTON, !g_findUp);
@@ -304,7 +307,7 @@ void FindDlgShow(int replaceMode)
         if (h) { g_switching = 1; DestroyWindow(h); g_switching = 0; }
         DlgBaseInit(&g_fd.b, g_hwnd);
         g_fd.rep = rep;
-        h = DlgOpen(&g_fd.b, L"mp_find", rep ? L"replace" : L"find", 410, rep ? 154 : 122, 1);
+        h = DlgOpen(&g_fd.b, L"mp_find", rep ? L"replace" : L"find", 410, rep ? 178 : 146, 1);
         if (!h) return;
         PlaceAgain(h);
         ShowWindow(h, SW_SHOW);

@@ -240,16 +240,20 @@ void EditClearLine(void)
 }
 
 /* ------------------------------------------------------------ text i/o ---- */
-void EditSetDocText(const WCHAR *t)
+BOOL EditSetDocText(const WCHAR *t)
 {
+    BOOL ok;
     SendMessageW(g_edit, WM_SETREDRAW, FALSE, 0);
-    SetWindowTextW(g_edit, t ? t : L"");
-    SendMessageW(g_edit, EM_SETSEL, 0, 0);
-    SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);
-    SendMessageW(g_edit, EM_EMPTYUNDOBUFFER, 0, 0);
-    SendMessageW(g_edit, EM_SETMODIFY, FALSE, 0);
+    ok = SetWindowTextW(g_edit, t ? t : L"");
+    if (ok) {
+        SendMessageW(g_edit, EM_SETSEL, 0, 0);
+        SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);
+        SendMessageW(g_edit, EM_EMPTYUNDOBUFFER, 0, 0);
+        SendMessageW(g_edit, EM_SETMODIFY, FALSE, 0);
+    }
     SendMessageW(g_edit, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(g_edit, NULL, TRUE);
+    return ok;
 }
 
 WCHAR *EditGetDocText(int *len)
@@ -258,7 +262,7 @@ WCHAR *EditGetDocText(int *len)
     WCHAR *buf = (WCHAR *)mem_alloc(((size_t)n + 1) * sizeof(WCHAR));
     if (!buf) return NULL;
     got = GetWindowTextW(g_edit, buf, n + 1);
-    if (got < 0) got = 0;
+    if (got != n) { mem_free(buf); return NULL; }
     buf[got] = 0;
     if (len) *len = got;
     return buf;
@@ -1183,6 +1187,7 @@ HWND EditCreate(HWND parent)
         RECT rc;
         POINT a, b;
         text = EditGetDocText(NULL);
+        if (!text) return NULL;
         SendMessageW(old, EM_GETSEL, (WPARAM)&s, (LPARAM)&en);
         mod = (int)SendMessageW(old, EM_GETMODIFY, 0, 0);
         ex = GetWindowLongPtrW(old, GWL_EXSTYLE) & RTL_BITS;
@@ -1196,7 +1201,11 @@ HWND EditCreate(HWND parent)
 
     e = CreateWindowExW((DWORD)ex, L"EDIT", NULL, st, x, y, w, h, parent, (HMENU)(ULONG_PTR)IDC_EDIT, g_hinst, NULL);
     if (!e) { mem_free(text); return NULL; }
+    SendMessageW(e, EM_LIMITTEXT, 0, 0);
+    /* Populate the hidden native control before committing any global state. */
+    if (text && !SetWindowTextW(e, text)) { DestroyWindow(e); mem_free(text); return NULL; }
     g_edit = e;
+    g_barsPending = 0;
     SetWindowPos(e, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);        /* (the overhang of the editor goes under the status bar, see Layout) */
     g_stub.n = 0;                                  /* nothing of the old control's selected line break blocks is on this one */
     g_orig = (WNDPROC)SetWindowLongPtrW(e, GWLP_WNDPROC, (LONG_PTR)EditProc);
@@ -1207,7 +1216,6 @@ HWND EditCreate(HWND parent)
 
     if (text) {
         SendMessageW(e, WM_SETREDRAW, FALSE, 0);
-        SetWindowTextW(e, text);
         SendMessageW(e, EM_SETSEL, s, en);
         SendMessageW(e, EM_SCROLLCARET, 0, 0);
         SendMessageW(e, EM_EMPTYUNDOBUFFER, 0, 0);

@@ -57,11 +57,21 @@ static int IniGet(const WCHAR *sec, const WCHAR *key, int def)
 /* WritePrivateProfileStringW fails while something else (an antivirus scan, a backup tool) has the file open for a moment: try again a few times */
 static void IniPutStr(const WCHAR *sec, const WCHAR *key, const WCHAR *v)
 {
+    static DWORD retryAfter;
+    WCHAR current[PATH_CAP];
     int n;
+    DWORD er;
+    if (retryAfter && (LONG)(GetTickCount() - retryAfter) < 0) return;
+    retryAfter = 0;
+    GetPrivateProfileStringW(sec, key, L"", current, COUNTOF(current), g_ini);
+    if (v && wcmp(current, v) == 0) return;
     for (n = 0; n < 8; n++) {
         if (WritePrivateProfileStringW(sec, key, v, g_ini)) return;
-        Sleep(25);
+        er = GetLastError();
+        if (er != 32 && er != 33) break;
+        if (n < 7) Sleep(25);
     }
+    retryAfter = GetTickCount() + 1000;            /* one unavailable file must not stall for every settings key */
 }
 
 static void IniPutInt(const WCHAR *sec, const WCHAR *key, int v)
@@ -86,28 +96,42 @@ static void IniEnsure(void)
  * before it changes it and when it is activated, so windows opened side by side share one list */
 static WCHAR g_recent[RECENT_MAX][PATH_CAP];
 static int   g_nRecent;
+#define RECENT_SECTION_CAP (RECENT_MAX * (PATH_CAP + 4) + 1)
 
 static void RecentLoad(void)
 {
-    WCHAR key[8], p[PATH_CAP];
-    int i;
+    WCHAR section[RECENT_SECTION_CAP], *p;
+    int i, k;
+    DWORD n = GetPrivateProfileSectionW(L"recent", section, COUNTOF(section), g_ini);
     g_nRecent = 0;
-    for (i = 1; i <= RECENT_MAX; i++) {
-        wsprintfW(key, L"%d", i);
-        GetPrivateProfileStringW(L"recent", key, L"", p, PATH_CAP, g_ini);
-        if (p[0]) wcopy(g_recent[g_nRecent++], p, PATH_CAP);
+    if (n < COUNTOF(section) - 2) for (i = 1; i <= RECENT_MAX; i++) {
+        for (p = section; *p; p += wlen(p) + 1) {
+            if (p[0] != '0' + i || p[1] != '=' || !p[2]) continue;
+            for (k = 0; k < g_nRecent; k++) if (wcmpi(g_recent[k], p + 2) == 0) break;
+            if (k == g_nRecent) wcopy(g_recent[g_nRecent++], p + 2, PATH_CAP);
+            break;
+        }
     }
     MenuSetRecent((const WCHAR (*)[PATH_CAP])g_recent, g_nRecent);
 }
 
 static void RecentStore(void)
 {
-    WCHAR key[8];
+    WCHAR section[RECENT_SECTION_CAP] = { 0 }, *p = section;
     int i;
     IniEnsure();
-    for (i = 1; i <= RECENT_MAX; i++) {
-        wsprintfW(key, L"%d", i);
-        IniPutStr(L"recent", key, i <= g_nRecent ? g_recent[i - 1] : NULL);
+    for (i = 0; i < g_nRecent; i++) {
+        *p++ = (WCHAR)('1' + i); *p++ = '=';
+        wcopy(p, g_recent[i], PATH_CAP);
+        p += wlen(p) + 1;
+    }
+    /* One atomic section write prevents other windows observing a half-shifted list. */
+    for (i = 0; i < 8; i++) {
+        DWORD er;
+        if (WritePrivateProfileSectionW(L"recent", section, g_ini)) break;
+        er = GetLastError();
+        if (er != 32 && er != 33) break;
+        if (i < 7) Sleep(25);
     }
     MenuSetRecent((const WCHAR (*)[PATH_CAP])g_recent, g_nRecent);
 }
@@ -169,6 +193,7 @@ static void PrefsLoad(void)
     g_pf.maximized = IniGet(L"window", L"maximized", 0) != 0;
     g_pf.matchCase  = IniGet(L"find", L"matchcase", 0) != 0;
     g_pf.wrapAround = IniGet(L"find", L"wraparound", 1) != 0;
+    g_pf.wholeWord  = IniGet(L"find", L"wholeword", 0) != 0;
     g_pf.marginL = IniGet(L"page", L"left", g_pf.marginL);
     g_pf.marginT = IniGet(L"page", L"top", g_pf.marginT);
     g_pf.marginR = IniGet(L"page", L"right", g_pf.marginR);
@@ -208,6 +233,7 @@ void AppSavePrefs(void)
     IniPutInt(L"window", L"maximized", g_pf.maximized);
     IniPutInt(L"find", L"matchcase", g_pf.matchCase);
     IniPutInt(L"find", L"wraparound", g_pf.wrapAround);
+    IniPutInt(L"find", L"wholeword", g_pf.wholeWord);
     IniPutInt(L"page", L"left", g_pf.marginL);
     IniPutInt(L"page", L"top", g_pf.marginT);
     IniPutInt(L"page", L"right", g_pf.marginR);
@@ -248,6 +274,7 @@ static void FileError(DWORD er, const WCHAR *path, BOOL saving)
  * "save changes?". the clean state is kept as length + two 32-bit hashes (no 64-bit math, nothing to copy for big files);
  * a content compare only happens when the flag is set and the length is back to the clean one */
 static struct { int n; DWORD h1, h2; int enc, eol; } g_clean;
+static struct { DWORD rev; int valid, changed; } g_dirtyCache;
 
 static void HashText(const WCHAR *t, int n, DWORD *a, DWORD *b)
 {
@@ -266,6 +293,8 @@ static void CleanMark(void)                         /* the document as it is now
     void *h = NULL;
     int n = 0;
     const WCHAR *p = EditLockText(&h, &n);
+    g_dirtyCache.valid = 0;
+    if (!p) { EditUnlockText(h); g_clean.n = -1; return; }
     HashText(p ? p : L"", p ? n : 0, &g_clean.h1, &g_clean.h2);
     EditUnlockText(h);
     g_clean.n = p ? n : 0;
@@ -282,11 +311,15 @@ static BOOL TextChanged(void)
     DWORD a, b;
     BOOL same;
     if (!SendMessageW(g_edit, EM_GETMODIFY, 0, 0)) return FALSE;     /* untouched since the last load / save */
+    if (g_clean.n < 0) return TRUE;                              /* unavailable baseline: never discard edits */
     if (GetWindowTextLengthW(g_edit) != g_clean.n) return TRUE;      /* another length: certainly changed (cheap) */
+    if (g_dirtyCache.valid && g_dirtyCache.rev == g_textRev) return g_dirtyCache.changed;
     p = EditLockText(&h, &n);
-    HashText(p ? p : L"", p ? n : 0, &a, &b);
+    if (!p) { EditUnlockText(h); return TRUE; }
+    HashText(p, n, &a, &b);
     EditUnlockText(h);
     same = (a == g_clean.h1 && b == g_clean.h2);
+    g_dirtyCache.rev = g_textRev; g_dirtyCache.valid = 1; g_dirtyCache.changed = !same;
     if (same) SendMessageW(g_edit, EM_SETMODIFY, FALSE, 0);          /* back to the clean text: the control's own flag follows */
     return !same;
 }
@@ -445,22 +478,58 @@ static void NewWindow(const WCHAR *file)
     }
 }
 
+static void AppendLogStamp(void);
+
+typedef struct { __int64 size; FILETIME time; int valid; } FileStamp;
+static FileStamp g_diskStamp;
+
+static FileStamp DiskStamp(const WCHAR *path)
+{
+    FileStamp s = { 0 };
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f != INVALID_HANDLE_VALUE) {
+        s.valid = GetFileSizeEx(f, &s.size) && GetFileTime(f, NULL, NULL, &s.time);
+        CloseHandle(f);
+    }
+    return s;
+}
+
+static BOOL ConfirmOverwrite(const WCHAR *path)
+{
+    FileStamp s;
+    if (!g_diskStamp.valid || !g_doc.path[0] || wcmpi(path, g_doc.path) != 0) return TRUE;
+    s = DiskStamp(path);
+    if (s.valid && s.size == g_diskStamp.size &&
+        s.time.dwLowDateTime == g_diskStamp.time.dwLowDateTime &&
+        s.time.dwHighDateTime == g_diskStamp.time.dwHighDateTime) return TRUE;
+    return MpAsk(g_hwnd, APP_NAME,
+                 L"this file has changed outside notepad mint or is no longer available.\n\n"
+                 L"overwrite it with the text in this window?",
+                 L"overwrite", L"cancel", NULL, 2) == 1;
+}
+
 /* load `path` into the edit control. force = -1 detects the encoding */
-static BOOL OpenDoc(const WCHAR *path, int force)
+static BOOL OpenDoc(const WCHAR *path, int force, BOOL logEntry)
 {
     WCHAR *t;
-    int len, enc, eol;
+    int len, enc, eol, logFile;
+    FileStamp stamp = DiskStamp(path);
     DWORD er = DocRead(path, &t, &len, &enc, &eol, force);
     if (er) { FileError(er, path, FALSE); return FALSE; }
-    EditSetDocText(t);
+    if (!EditSetDocText(t)) { mem_free(t); FileError(ERR_NOMEM, path, FALSE); return FALSE; }
+    /* classic .LOG files get a new entry each time they are opened for editing. */
+    logFile = len >= 4 && t[0] == '.' && t[1] == 'L' && t[2] == 'O' && t[3] == 'G';
     mem_free(t);
     wcopy(g_doc.path, path, PATH_CAP);
     g_doc.enc = enc;
     g_doc.eol = eol;
+    g_diskStamp = stamp;
     CleanMark();
+    RecentAdd(g_doc.path);
+    if (logFile && logEntry) AppendLogStamp();
     AppUpdateTitle();
     AppUpdateStatus();
-    RecentAdd(g_doc.path);
     return TRUE;
 }
 
@@ -469,11 +538,13 @@ static BOOL WriteDoc(const WCHAR *path, int enc, int eol)
 {
     void *h = NULL;
     int len = 0;
-    const WCHAR *t = EditLockText(&h, &len);                 /* the control's own text, not a copy (locked only while it is written: the question below runs messages) */
+    const WCHAR *t;
     BOOL lossy = FALSE;
     DWORD er;
 
-    er = DocWrite(path, t ? t : L"", t ? len : 0, enc, eol, &lossy);
+    if (!ConfirmOverwrite(path)) return FALSE;
+    t = EditLockText(&h, &len);                   /* never pump dialog messages while the edit buffer is locked */
+    er = t ? DocWrite(path, t, len, enc, eol, &lossy) : ERR_NOMEM;
     EditUnlockText(h);
     if (er == ERR_LOSSY) {
         if (MpAsk(g_hwnd, APP_NAME,
@@ -483,17 +554,18 @@ static BOOL WriteDoc(const WCHAR *path, int enc, int eol)
                   L"ok", L"cancel", NULL, 2) != 1) return FALSE;
         lossy = TRUE;
         t = EditLockText(&h, &len);
-        er = DocWrite(path, t ? t : L"", t ? len : 0, enc, eol, &lossy);
+        er = t ? DocWrite(path, t, len, enc, eol, &lossy) : ERR_NOMEM;
         EditUnlockText(h);
     }
     if (er) { FileError(er, path, TRUE); return FALSE; }
     wcopy(g_doc.path, path, PATH_CAP);
     g_doc.enc = enc;
     g_doc.eol = eol;
+    g_diskStamp = DiskStamp(path);
     CleanMark();                                     /* what is on disk is the new clean state */
+    RecentAdd(g_doc.path);
     AppUpdateTitle();
     AppUpdateStatus();
-    RecentAdd(g_doc.path);
     return TRUE;
 }
 
@@ -526,8 +598,9 @@ static BOOL Confirm(void)
 static void FileNew(void)
 {
     if (!Confirm()) return;
-    EditSetDocText(L"");
+    if (!EditSetDocText(L"")) { Say(L"not enough memory available to complete this operation."); return; }
     g_doc.path[0] = 0;
+    g_diskStamp.valid = 0;
     NewDocName();                                            /* every new document gets its own default name */
     g_doc.enc = ENC_UTF8;
     g_doc.eol = EOL_CRLF;
@@ -542,12 +615,12 @@ static void FileOpen(void)
     if (!Confirm()) return;
     wcopy(path, g_doc.path, PATH_CAP);
     if (!FileDlgOpen(g_hwnd, path, PATH_CAP)) return;
-    OpenDoc(path, -1);
+    OpenDoc(path, -1, TRUE);
 }
 
 void AppOpenPath(const WCHAR *path)
 {
-    if (Confirm()) OpenDoc(path, -1);
+    if (Confirm()) OpenDoc(path, -1, TRUE);
 }
 
 /* the file named on the command line. like notepad: "foo" falls back to "foo.txt", a missing file can be created */
@@ -558,16 +631,17 @@ static void OpenCmdFile(const WCHAR *arg)
     BOOL dot = FALSE;
     int r;
 
-    if (!GetFullPathNameW(arg, PATH_CAP, full, NULL)) wcopy(full, arg, PATH_CAP);
+    r = (int)GetFullPathNameW(arg, PATH_CAP, full, NULL);
+    if (!r || r >= PATH_CAP) { FileError(r >= PATH_CAP ? 206 : GetLastError(), arg, FALSE); return; }
     if (IsDir(full)) return;
-    if (GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES) { OpenDoc(full, -1); return; }
+    if (GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES) { OpenDoc(full, -1, TRUE); return; }
 
-    for (nm = PathName(full); *nm; nm++) if (*nm == '.') dot = TRUE;
+    for (nm = PathName(arg); *nm; nm++) if (*nm == '.') dot = TRUE;
     if (!dot) {
         WCHAR t[PATH_CAP];
         wcopy(t, full, PATH_CAP);
         wcat(t, L".txt", PATH_CAP);
-        if (GetFileAttributesW(t) != INVALID_FILE_ATTRIBUTES) { OpenDoc(t, -1); return; }
+        if (GetFileAttributesW(t) != INVALID_FILE_ATTRIBUTES) { OpenDoc(t, -1, TRUE); return; }
     }
 
     wcopy(msg, L"cannot find the ", COUNTOF(msg));
@@ -575,10 +649,11 @@ static void OpenCmdFile(const WCHAR *arg)
     wcat(msg, L" file.\n\ndo you want to create a new file?", COUNTOF(msg));
     r = MpAsk(g_hwnd, APP_NAME, msg, L"yes", L"no", L"cancel", 3);
     if (r == 1) {
-        HANDLE f = CreateFileW(full, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        HANDLE f = CreateFileW(full, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
         if (f == INVALID_HANDLE_VALUE) { FileError(GetLastError(), full, TRUE); return; }
         CloseHandle(f);
         wcopy(g_doc.path, full, PATH_CAP);
+        g_diskStamp = DiskStamp(full);
         AppUpdateTitle();
         AppUpdateStatus();
     } else if (r == 3) {
@@ -587,22 +662,42 @@ static void OpenCmdFile(const WCHAR *arg)
 }
 
 /* ====================================================== edit commands ==== */
-static void InsertTimeDate(void)
+static void FormatTimeDate(WCHAR *b)
 {
     SYSTEMTIME st;
-    WCHAR b[160];
     int n;
+    b[0] = 0;
     GetLocalTime(&st);
     n = GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, b, 64);
-    if (n > 0) b[n - 1] = ' '; else n = 1;
+    if (n > 0) b[n - 1] = ' '; else { b[0] = ' '; n = 1; }
     GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, b + n, 64);
+}
+
+static void InsertTimeDate(void)
+{
+    WCHAR b[160] = { 0 };
+    FormatTimeDate(b);
+    EditInsert(b);
+}
+
+static void AppendLogStamp(void)
+{
+    WCHAR b[168] = L"\r\n";
+    int end = GetWindowTextLengthW(g_edit);
+    FormatTimeDate(b + 2);
+    wcat(b, L"\r\n", COUNTOF(b));
+    SendMessageW(g_edit, EM_SETSEL, (WPARAM)end, (LPARAM)end);
     EditInsert(b);
 }
 
 static void ToggleWrap(void)
 {
     g_pf.wrap = !g_pf.wrap;
-    EditCreate(g_hwnd);                             /* a native edit can't switch wrapping live: rebuild it */
+    if (!EditCreate(g_hwnd)) {                      /* keep the original control and preference on failure */
+        g_pf.wrap = !g_pf.wrap;
+        Say(L"not enough memory available to complete this operation.");
+        return;
+    }
     Layout();
     if (g_bar) InvalidateRect(g_bar, NULL, FALSE);  /* the word wrap button of the menu bar shows the state */
     AppUpdateTitle();                               /* reloading the text raised the modified flag for a moment */
@@ -634,7 +729,7 @@ static void Reopen(void)
     if (AppIsDirty() &&
         MpAsk(g_hwnd, APP_NAME, L"reopening the file will discard your unsaved changes.\n\ndo you want to continue?",
               L"yes", L"no", NULL, 2) != 1) return;
-    OpenDoc(g_doc.path, e);
+    OpenDoc(g_doc.path, e, TRUE);
 }
 
 /* our top-level windows on this thread (the main window, a modeless find dialog): frame colours + a full repaint */
@@ -750,7 +845,7 @@ static void Cmd(int id)
             RecentLoad();
             if (id - IDM_RECENT_BASE < g_nRecent) {
                 wcopy(p, g_recent[id - IDM_RECENT_BASE], PATH_CAP);
-                if (Confirm() && !OpenDoc(p, -1)) RecentRemove(p);                  /* (a file that is gone leaves the list) */
+                if (Confirm() && !OpenDoc(p, -1, TRUE)) RecentRemove(p);            /* (a file that is gone leaves the list) */
             }
         } else if (id >= IDM_UCC_BASE && id < IDM_UCC_BASE + 17) {
             WCHAR s[2];
@@ -1176,8 +1271,7 @@ int mp_main(void)
         while (*f == ' ') f++;
         if (*f == '"') { f++; for (n = 0; f[n] && f[n] != '"'; n++) ; arg[(f - arg) + n] = 0; }
         if (*f && GetFileAttributesW(f) != INVALID_FILE_ATTRIBUTES) {
-            OpenDoc(f, -1);
-            PrintDoc(g_hwnd, 1);
+            if (OpenDoc(f, -1, FALSE)) PrintDoc(g_hwnd, 1);
         }
         return 0;
     }

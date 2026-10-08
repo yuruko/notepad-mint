@@ -170,40 +170,41 @@ __chkstk endp
 
 ; ---------------------------------------------------------------------------
 ; size_t mp_count_lf(const WCHAR *p, size_t n)
-; number of 0x000a code units in p[0..n). 8 words per step via pcmpeqw+pmovmskb.
-; (no popcnt: it isn't in baseline x86 - mask bits are counted with a clear-lowest-bit loop)
+; number of 0x000a code units in p[0..n). 8 words per step, bounded unaligned reads.
+; pcmpeqw produces -1 words; shift to 1 and psadbw sums each four-word half.
+; Count work is independent of newline density, using only baseline SSE2 (no popcnt).
 ; ---------------------------------------------------------------------------
 _mp_count_lf proc
-    push    esi
-    push    edi
-    mov     ecx, [esp + 12]         ; p
-    mov     edx, [esp + 16]         ; n
+    mov     ecx, [esp + 4]          ; p
+    mov     edx, [esp + 8]          ; n
+    xor     eax, eax
+    cmp     edx, 8
+    jb      cl_tail
     mov     eax, 0Ah
     movd    xmm0, eax
     pshuflw xmm0, xmm0, 0           ; 0x000a in the low 4 words
     pshufd  xmm0, xmm0, 0           ; ... and in all 8
-    xor     eax, eax                ; running count (counts mask bits: 2 per match, until cl_tail)
-    cmp     edx, 8
-    jb      cl_tail
+    pxor    xmm2, xmm2              ; zero for horizontal byte sums
+    pxor    xmm3, xmm3              ; two 32-bit counters, at lanes 0 and 2
 cl_vec:
     movdqu  xmm1, xmmword ptr [ecx]
     pcmpeqw xmm1, xmm0              ; 0xffff where the word is 0x000a
-    pmovmskb esi, xmm1              ; 2 mask bits per word
-    test    esi, esi
-    jz      cl_next
-cl_bits:
-    lea     edi, [esi - 1]
-    and     esi, edi                ; clear the lowest set bit
-    inc     eax
-    test    esi, esi
-    jnz     cl_bits
+    pmovmskb eax, xmm1
+    test    eax, eax
+    jz      cl_next                 ; common long text lines need no horizontal sum
+    psrlw   xmm1, 15                ; one byte equal to 1 per matching word
+    psadbw  xmm1, xmm2              ; sum the low / high groups of four words
+    paddd   xmm3, xmm1              ; each half stays below 2^31 for any 32-bit n
 cl_next:
     add     ecx, 16
     sub     edx, 8
     cmp     edx, 8
     jae     cl_vec
+    movdqa  xmm1, xmm3
+    psrldq  xmm1, 8
+    paddd   xmm3, xmm1
+    movd    eax, xmm3               ; combine the two counters; retain ecx for the tail
 cl_tail:
-    shr     eax, 1                  ; mask bits -> matches
     test    edx, edx
     jz      cl_done
 cl_scalar:
@@ -215,8 +216,6 @@ cl_next2:
     dec     edx
     jnz     cl_scalar
 cl_done:
-    pop     edi
-    pop     esi
     ret
 _mp_count_lf endp
 

@@ -1,6 +1,6 @@
 # TODO - notepad mint
 
-state (2026-10-06): feature complete. every menu item works, the build is clean and the checks in `tools\verify.bat ui` pass. `NOTES.md` ("status") says per item how it was verified
+state (2026-10-08): 1.0.4 adds safer file handling, whole-word search, log entries, selection printing and measured optimizations. the supported feature set is covered by `tools\verify.bat ui`. `NOTES.md` ("status") says per item how it was verified
 and what was never verified; this file is what is still open, plus the rules for whoever changes the code next. the original per-module specs of the dialogs live in git history (`TODO.md` at 78e8b0a).
 
 ## 0. hard rules (breaking any of these breaks the build or the product)
@@ -37,7 +37,7 @@ and what was never verified; this file is what is still open, plus the rules for
 
 ## 2. open items (none blocks the build)
 
-0. **release pipeline** (`.github/workflows/release.yml`, tag `v*`): check the first tagged run on windows-latest (msvc x86 via `ilammy/msvc-dev-cmd`, NSIS via chocolatey); the installer itself was built and its size checked locally but never run (it asks for admin). add a license file if the project is to be redistributed (the icon is derived from microsoft's notepad icon).
+0. **release pipeline** (`.github/workflows/release.yml`, tag `v*`): releases 1.0.0 through 1.0.3 ran successfully on windows-latest. version 1.0.4 verifies the exact release tag, warnings, executable size and sdk layouts as well as tests and imports. no license decision yet (the icon is derived from microsoft's notepad icon).
 1. **the parked ci workflow never ran.** every script it calls was run locally, but its yaml is unproven (and the smoke step is `continue-on-error`): if it is ever turned on, expect to fix it on the first windows-latest run.
 2. **big files are slow to open** because of the stock edit control, not our code: setting the text makes the control build its line index and measure every line (about 44 us per line, ~0.65 s per mb: 20 mb = 13 s,
    50 mb = 31 s, the window shows "not responding" meanwhile). profiled: `DocRead` takes 62 ms for 20 mb, the bar logic ~0 ms, and `WM_SETTEXT` and `EM_SETHANDLE` cost the same.
@@ -47,7 +47,6 @@ and what was never verified; this file is what is still open, plus the rules for
 5. ime composition in the edit is untested (no ime available to drive it here).
 6. the custom radio buttons are both tab stops (native: only the checked one); arrow keys already move and select.
 7. windows 11 snap layouts flyout on the maximize button is not available: the strip's buttons are `HTCLIENT` (own mouse handling) so they can't answer `HTMAXBUTTON`.
-8. `notepad foo.` on the command line still falls back to `foo.txt`; the open / save dialogs no longer do (`OpenCmdFile` in `main.c`).
 9. `tools\layout_check` checks argument byte counts of the api prototypes, not their argument types.
 10. no license decision yet (the icon derives from microsoft's notepad icon, see `README.md`).
 11. **the light face `#dfdee1` is a guess** (it was `#e4e1da`; on request 5 less red, 3 less green, 7 more blue). the maintainer said the light app background was too dark and had to match the status bar; title strip, menu bar, status bar and dialogs already shared one colour, so that colour was lightened.
@@ -73,4 +72,4 @@ and what was never verified; this file is what is still open, plus the rules for
 - [x] every menu item does what notepad's does (plus the extras in `README.md`): driven by `tests\ui`, see `NOTES.md`
 - [x] `NOTES.md` / `README.md` updated
 - [x] ci: switched off on purpose (only the cloud agent needs it); the local equivalent is `tools\verify.bat ui`, all green
-- [ ] a pr description that says, per item, how it was verified: the table in `NOTES.md` ("status") is that list; `main` was not pushed (nothing was force-pushed)
+- [x] release changes and validation recorded in `RELEASE_NOTES.md` and the 1.0.4 audit in `NOTES.md`

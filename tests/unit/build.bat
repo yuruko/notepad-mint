@@ -19,7 +19,7 @@ call "%VCVARS%" >nul
 if not exist build\tests mkdir build\tests
 del /q build\tests\*.obj build\tests\unit.exe 2>nul
 
-set "CFLAGS=/nologo /c /std:c17 /GS- /Zl /Gy /Gw /W3 /utf-8 /O2 /Isrc /Fobuild\tests\\"
+set "CFLAGS=/nologo /c /std:c17 /GS- /Zl /Gy /Gw /W3 /utf-8 /O2 /DDOC_IO_TEST /Isrc /Fobuild\tests\\"
 set "LFLAGS=/NOLOGO /MACHINE:X86 /SUBSYSTEM:CONSOLE,6.01 /ENTRY:start /NODEFAULTLIB /INCREMENTAL:NO /MANIFEST:NO /SAFESEH:NO /LARGEADDRESSAWARE /OPT:REF /DEBUG:NONE"
 
 echo [unit] asm

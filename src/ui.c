@@ -445,7 +445,7 @@ static LRESULT CALLBACK BtnProc(HWND h, UINT m, WPARAM w, LPARAM l)
         InvalidateRect(h, NULL, FALSE);
         return 0;
     case BM_GETSTATE:
-        return (s->check ? 3 : 0) | (s->down ? 4 : 0) | (s->focus ? 8 : 0);
+        return (s->check ? BST_CHECKED : BST_UNCHECKED) | (s->down ? 4 : 0) | (s->focus ? 8 : 0);
     case BM_SETSTYLE:
         t = (int)(w & BS_TYPEMASK);
         if (t == BS_PUSHBUTTON || t == BS_DEFPUSHBUTTON) {

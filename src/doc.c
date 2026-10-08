@@ -7,6 +7,63 @@
 #include "mp.h"
 
 #define WC_NO_BEST_FIT_CHARS 0x00000400
+#define WC_ERR_INVALID_CHARS 0x00000080
+#define DOC_MAX_CHARS 0x3FFFFFFE
+
+/* Faults exercise real file cleanup in the unit build; production calls Win32 directly. */
+#ifdef DOC_IO_TEST
+static int g_ioFault, g_ioCalls;
+void DocTestFault(int fault) { g_ioFault = fault; g_ioCalls = 0; }
+static BOOL DocReadFile(HANDLE f, LPVOID p, DWORD n, DWORD *rd, void *overlap)
+{
+    if (g_ioFault == 1) { *rd = 0; SetLastError(30); return FALSE; }
+    if (g_ioFault == 2) {
+        if (g_ioCalls++) { *rd = 0; return TRUE; }
+        if (n > 1) n = 1;
+    }
+    return ReadFile(f, p, n, rd, overlap);
+}
+static BOOL DocWriteFile(HANDLE f, LPCVOID p, DWORD n, DWORD *wr, void *overlap)
+{
+    if (g_ioFault == 3) {
+        WriteFile(f, p, n ? 1 : 0, wr, overlap);
+        SetLastError(29); return FALSE;
+    }
+    if (g_ioFault == 4) { *wr = 0; SetLastError(0); return TRUE; }
+    return WriteFile(f, p, n, wr, overlap);
+}
+static BOOL DocFlushFile(HANDLE f)
+{
+    if (g_ioFault == 5) { SetLastError(29); return FALSE; }
+    return FlushFileBuffers(f);
+}
+static BOOL DocReplaceFile(LPCWSTR path, LPCWSTR temp, LPCWSTR backup)
+{
+    if (g_ioFault == 6) { SetLastError(5); return FALSE; }
+    if (g_ioFault == 7 || g_ioFault == 8) {
+        if (!DeleteFileW(backup) || !MoveFileExW(path, backup, MOVEFILE_WRITE_THROUGH)) return FALSE;
+        if (g_ioFault == 8) {
+            HANDLE other = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+            DWORD written;
+            if (other != INVALID_HANDLE_VALUE) { WriteFile(other, "raced", 5, &written, NULL); CloseHandle(other); }
+        }
+        SetLastError(1177); return FALSE;
+    }
+    if (g_ioFault == 9) { SetLastError(0); return FALSE; }
+    return ReplaceFileW(path, temp, backup, 0, NULL, NULL);
+}
+static BOOL DocMoveFile(LPCWSTR from, LPCWSTR to)
+{
+    if (g_ioFault == 10) { SetLastError(0); return FALSE; }
+    return MoveFileExW(from, to, MOVEFILE_WRITE_THROUGH);
+}
+#else
+#define DocReadFile ReadFile
+#define DocWriteFile WriteFile
+#define DocFlushFile FlushFileBuffers
+#define DocReplaceFile(path, temp, backup) ReplaceFileW(path, temp, backup, 0, NULL, NULL)
+#define DocMoveFile(from, to) MoveFileExW(from, to, MOVEFILE_WRITE_THROUGH)
+#endif
 
 const WCHAR *const g_encName[ENC_COUNT] = { L"utf-8", L"utf-8 with bom", L"utf-16 le", L"utf-16 be", L"ansi" };
 const WCHAR *const g_eolName[EOL_COUNT] = { L"windows (crlf)", L"unix (lf)", L"macintosh (cr)" };
@@ -106,6 +163,7 @@ void EncShort(int enc, WCHAR *out, int cap)
     const CpInfo *c;
     WCHAR buf[24];
     int i, n = 0;
+    if (cap <= 0) return;
     if (enc >= 0 && enc < ENC_COUNT) { wcopy(out, g_encShort[enc], cap); return; }
     c = CpFind(enc);
     if (c) {
@@ -121,6 +179,7 @@ int EncListCount(void) { return ENC_COUNT + (int)NCP; }
 
 int EncListGet(int i, WCHAR *label, int cap)
 {
+    if (i < 0) i = 0;
     if (i < ENC_COUNT) {
         wcopy(label, i == ENC_ANSI ? L"ansi  system default code page" : g_encName[i], cap);
         return i;
@@ -137,7 +196,7 @@ int EncListGet(int i, WCHAR *label, int cap)
 static UINT CpOf(int enc)
 {
     if (enc == ENC_UTF8 || enc == ENC_UTF8BOM) return CP_UTF8;
-    if (enc == ENC_ANSI) return CP_ACP;
+    if (enc == ENC_ANSI) return GetACP();
     return (UINT)enc;
 }
 
@@ -207,12 +266,16 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
     f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (f == INVALID_HANDLE_VALUE) return GetLastError();
     if (!GetFileSizeEx(f, &sz)) { DWORD er = GetLastError(); CloseHandle(f); return er; }
-    if (sz > 0x30000000) { CloseHandle(f); return ERR_TOO_BIG; }
+    if (sz < 0 || sz > 0x30000000) { CloseHandle(f); return ERR_TOO_BIG; }
     n = (size_t)sz;
     buf = (BYTE *)mem_alloc(n + 4);
     if (!buf) { CloseHandle(f); return ERR_NOMEM; }
     for (got = 0; got < n; got += rd) {
-        if (!ReadFile(f, buf + got, (DWORD)(n - got), &rd, NULL) || rd == 0) break;
+        if (!DocReadFile(f, buf + got, (DWORD)(n - got), &rd, NULL)) {
+            DWORD er = GetLastError();
+            CloseHandle(f); mem_free(buf); return er ? er : 30; /* ERROR_READ_FAULT */
+        }
+        if (!rd || rd > n - got) { CloseHandle(f); mem_free(buf); return 38; } /* ERROR_HANDLE_EOF: never expose a truncated document */
     }
     CloseHandle(f);
     n = got;
@@ -242,6 +305,7 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
 
     /* 2. to utf-16 */
     if (e == ENC_UTF16LE || e == ENC_UTF16BE) {
+        if ((n - off) & 1) { mem_free(buf); return ERR_LOSSY; }
         wn = (int)((n - off) / 2);
         w = (WCHAR *)mem_alloc(((size_t)wn + 1) * sizeof(WCHAR));
         if (w) {
@@ -252,12 +316,14 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
     } else {
         UINT cp = CpOf(e);
         int src = (int)(n - off);
+        if (cp == CP_UTF8 && !Utf8Valid(buf + off, n - off)) { mem_free(buf); return ERR_LOSSY; }
         w = (WCHAR *)mem_alloc(((size_t)src + 1) * sizeof(WCHAR));  /* one conversion, no size query: no code page makes more characters than it has bytes */
         wn = (w && src) ? MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, w, src) : 0;
         if (w && src && !wn && GetLastError() == 122) {              /* (ERROR_INSUFFICIENT_BUFFER: one that does: ask for the size) */
             wn = MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, NULL, 0);
             mem_free(w);
             if (!wn) { mem_free(buf); return ERR_BADCP; }
+            if (wn > DOC_MAX_CHARS) { mem_free(buf); return ERR_TOO_BIG; }
             w = (WCHAR *)mem_alloc(((size_t)wn + 1) * sizeof(WCHAR));
             if (w) wn = MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, w, wn);
         }
@@ -284,6 +350,7 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
         out = w; outn = (size_t)wn;                                   /* already clean */
     } else {
         outn = (size_t)wn + nLF + nCR;
+        if (outn > DOC_MAX_CHARS) { mem_free(w); return ERR_TOO_BIG; }
         out = (WCHAR *)mem_alloc((outn + 1) * sizeof(WCHAR));
         if (!out) { mem_free(w); return ERR_NOMEM; }
         {
@@ -335,6 +402,7 @@ static WCHAR *EolConvert(const WCHAR *t, int len, int eol, int *outLen, int *own
         }
     }
     total = (size_t)len - consumed + breaks * el;
+    if (total > DOC_MAX_CHARS) { *outLen = -1; return NULL; }
     if (t && eol == EOL_CRLF && consumed == breaks * 2) { *outLen = len; *owned = 0; return (WCHAR *)t; }
     *owned = 1;
     out = (WCHAR *)mem_alloc((total + 1) * sizeof(WCHAR));
@@ -361,7 +429,9 @@ static WCHAR *EolConvert(const WCHAR *t, int len, int eol, int *outLen, int *own
  * (a lossy '?' is still one byte) */
 DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol)
 {
-    size_t breaks = len > 0 ? mp_count_lf(text, (size_t)len) : 0;
+    size_t breaks;
+    if (!text || len <= 0) return 0;
+    breaks = mp_count_lf(text, (size_t)len);
     size_t cut = (eol == EOL_CRLF) ? 0 : breaks;
     if (len < 0) len = 0;
     if (enc == ENC_UTF16LE || enc == ENC_UTF16BE) return (DWORD)(((size_t)len - cut) * 2);
@@ -369,7 +439,7 @@ DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol)
         UINT cp = CpOf(enc);
         DWORD fl = CpHasDefaultChar(cp) ? WC_NO_BEST_FIT_CHARS : 0;
         size_t need = len ? (size_t)WideCharToMultiByte(cp, fl, text, len, NULL, 0, NULL, NULL) : 0;
-        return (DWORD)(need - cut);
+        return need >= cut ? (DWORD)(need - cut) : 0; /* an unavailable converter reports zero, not an unsigned wraparound */
     }
 }
 
@@ -380,20 +450,111 @@ DWORD DocEncodedSize(const WCHAR *text, int len, int enc, int eol)
     return bom + DocBodySize(text, len, enc, eol);
 }
 
+/* Reserve a sibling with CREATE_NEW: no truncation, predictable-name overwrite or cross-volume move.
+ * The directory, rather than the complete target name, leaves room for maximum-length file names. */
+static HANDLE SaveSibling(const WCHAR *full, WCHAR *out, const WCHAR *extension)
+{
+    static DWORD serial;
+    const WCHAR *name = PathName(full);
+    size_t prefix = (size_t)(name - full);
+    HANDLE f;
+    DWORD er;
+    int attempt;
+    memcpy(out, full, prefix * sizeof(WCHAR));
+    for (attempt = 0; attempt < 100; attempt++) {
+        wsprintfW(out + prefix, L".mint-%08x-%08x-%08x.%s", GetCurrentThreadId(), GetTickCount(), ++serial, extension);
+        f = CreateFileW(out, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (f != INVALID_HANDLE_VALUE) return f;
+        er = GetLastError();
+        if (er != 80 && er != 183) return INVALID_HANDLE_VALUE; /* only a name collision may be retried */
+    }
+    SetLastError(80);
+    return INVALID_HANDLE_VALUE;
+}
+
+/* Write and flush a complete sibling before replacing the destination. ReplaceFile preserves its ACL,
+ * creation time and named streams. Its documented partial-rename errors require a backup name: without
+ * one, ERROR_UNABLE_TO_MOVE_REPLACEMENT can remove the original. Keep recovery data if rollback fails. */
+static DWORD SaveBytes(const WCHAR *path, const BYTE *out, size_t on)
+{
+    WCHAR full[PATH_CAP], temp[PATH_CAP + 64], backup[PATH_CAP + 64];
+    HANDLE f = INVALID_HANDLE_VALUE, guard = INVALID_HANDLE_VALUE;
+    DWORD size, attrs, er = 0, wr, basic;
+    size_t done;
+    BOOL existed, haveTemp = FALSE, haveBackup = FALSE;
+
+    size = GetFullPathNameW(path, PATH_CAP, full, NULL);
+    if (!size) return GetLastError();
+    if (size >= PATH_CAP) return 206; /* ERROR_FILENAME_EXCED_RANGE */
+    attrs = GetFileAttributesW(full);
+    existed = attrs != INVALID_FILE_ATTRIBUTES;
+    if (!existed) {
+        er = GetLastError();
+        if (er != ERROR_FILE_NOT_FOUND) return er;
+    } else {
+        if (attrs & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_DIRECTORY)) return 5;
+        /* Respect write permissions and existing readers that forbid writes/deletion. */
+        guard = CreateFileW(full, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE,
+                            NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (guard == INVALID_HANDLE_VALUE) return GetLastError();
+    }
+    er = 0;
+    f = SaveSibling(full, temp, L"tmp");
+    if (f == INVALID_HANDLE_VALUE) { er = GetLastError(); goto finish; }
+    haveTemp = TRUE;
+    for (done = 0; done < on; done += wr) {
+        if (!DocWriteFile(f, out + done, (DWORD)(on - done), &wr, NULL)) { er = GetLastError(); if (!er) er = 29; goto finish; }
+        if (!wr || wr > on - done) { er = 29; goto finish; }
+    }
+    if (!DocFlushFile(f)) { er = GetLastError(); if (!er) er = 29; goto finish; }
+    if (!CloseHandle(f)) { er = GetLastError(); f = INVALID_HANDLE_VALUE; goto finish; }
+    f = INVALID_HANDLE_VALUE;
+    if (existed) {
+        basic = attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED);
+        if (!SetFileAttributesW(temp, basic ? basic : FILE_ATTRIBUTE_NORMAL)) { er = GetLastError(); goto finish; }
+        f = SaveSibling(full, backup, L"bak");
+        if (f == INVALID_HANDLE_VALUE) { er = GetLastError(); goto finish; }
+        haveBackup = TRUE;
+        if (!CloseHandle(f)) { er = GetLastError(); f = INVALID_HANDLE_VALUE; goto finish; }
+        f = INVALID_HANDLE_VALUE;
+        if (!DocReplaceFile(full, temp, backup)) {
+            er = GetLastError();
+            if (!er) er = 29;
+            if (er == 1177) {
+                /* The old file was moved to backup. Never overwrite a new file created by another process. */
+                if (!MoveFileExW(backup, full, MOVEFILE_WRITE_THROUGH)) haveBackup = FALSE;
+            }
+            goto finish;
+        }
+    } else if (!DocMoveFile(temp, full)) {
+        er = GetLastError();
+        if (!er) er = 29;
+        goto finish;
+    }
+    haveTemp = FALSE;
+finish:
+    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+    if (guard != INVALID_HANDLE_VALUE) CloseHandle(guard);
+    if (haveTemp) DeleteFileW(temp);
+    if (haveBackup) DeleteFileW(backup);
+    return er;
+}
+
 /* *lossy: in = "allowed to lose characters", out = "characters were (or would be) lost" */
 DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, BOOL *lossy)
 {
     WCHAR *w;
     BYTE *out = NULL;
-    size_t on = 0, done;
+    size_t on = 0;
     int wn = 0, k, own = 0;
     BOOL allow = lossy ? *lossy : FALSE, used = FALSE;
-    HANDLE f;
-    DWORD wr;
+    DWORD er;
 
     if (lossy) *lossy = FALSE;
+    if (!text && len > 0) return ERR_BADCP;
+    if (len > DOC_MAX_CHARS) return ERR_TOO_BIG;
     w = EolConvert(text, len < 0 ? 0 : len, eol, &wn, &own);
-    if (!w) return ERR_NOMEM;
+    if (!w) return wn < 0 ? ERR_TOO_BIG : ERR_NOMEM;
 
     if (enc == ENC_UTF16LE || enc == ENC_UTF16BE) {
         on = 2 + (size_t)wn * 2;
@@ -404,29 +565,50 @@ DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, 
             for (k = 0; k < wn; k++)
                 o[1 + k] = (enc == ENC_UTF16LE) ? w[k] : (WCHAR)((w[k] << 8) | (w[k] >> 8));
         }
-    } else if (CpOf(enc) == CP_UTF8) {                        /* utf-8 loses nothing: one conversion, into the worst case of 3 bytes per unit */
+    } else if (CpOf(enc) == CP_UTF8) {                        /* one conversion, into the worst case of 3 bytes per unit */
         size_t bom = (enc == ENC_UTF8BOM) ? 3 : 0;
         int need = 0;
+        if (wn > 0x2AAAAAAA) { if (own) mem_free(w); return ERR_TOO_BIG; }
         out = (BYTE *)mem_alloc(bom + (size_t)wn * 3 + 1);
         if (out) {
             if (bom) { out[0] = 0xEF; out[1] = 0xBB; out[2] = 0xBF; }
-            need = wn ? WideCharToMultiByte(CP_UTF8, 0, w, wn, (LPSTR)(out + bom), wn * 3, NULL, NULL) : 0;
+            need = wn ? WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, wn, (LPSTR)(out + bom), wn * 3, NULL, NULL) : 0;
+            if (wn && !need && GetLastError() == ERR_LOSSY) {
+                used = TRUE;
+                if (lossy) *lossy = TRUE;
+                if (!allow) { mem_free(out); if (own) mem_free(w); return ERR_LOSSY; }
+                need = WideCharToMultiByte(CP_UTF8, 0, w, wn, (LPSTR)(out + bom), wn * 3, NULL, NULL);
+            }
             if (wn && !need) { mem_free(out); if (own) mem_free(w); return ERR_BADCP; }
             on = bom + (size_t)need;
         }
     } else {
         UINT cp = CpOf(enc);
-        size_t bom = 0;
         BOOL probe = CpHasDefaultChar(cp);
         DWORD fl = probe ? WC_NO_BEST_FIT_CHARS : 0;      /* no best-fit guessing: anything not 1:1 becomes '?' + flags loss */
         int need = wn ? WideCharToMultiByte(cp, fl, w, wn, NULL, 0, NULL, NULL) : 0;
 
         if (wn && !need) { if (own) mem_free(w); return ERR_BADCP; }
-        on = bom + (size_t)need;
+        on = (size_t)need;
         out = (BYTE *)mem_alloc(on + 1);
         if (out) {
-            if (bom) { out[0] = 0xEF; out[1] = 0xBB; out[2] = 0xBF; }
-            if (need) WideCharToMultiByte(cp, fl, w, wn, (LPSTR)(out + bom), need, NULL, probe ? &used : NULL);
+            if (need && WideCharToMultiByte(cp, fl, w, wn, (LPSTR)out, need, NULL, probe ? &used : NULL) != need) {
+                mem_free(out); if (own) mem_free(w); return ERR_BADCP;
+            }
+            if (need && !probe) {
+                /* Stateful code pages cannot report a default character. Verify the complete round trip
+                 * instead of silently losing an emoji (or accepting a best-fit substitution). */
+                int backLen = MultiByteToWideChar(cp, 0, (LPCSTR)out, need, NULL, 0);
+                WCHAR *back;
+                if (!backLen || backLen > DOC_MAX_CHARS) { mem_free(out); if (own) mem_free(w); return ERR_BADCP; }
+                back = (WCHAR *)mem_alloc((size_t)backLen * sizeof(WCHAR));
+                if (!back) { mem_free(out); if (own) mem_free(w); return ERR_NOMEM; }
+                if (MultiByteToWideChar(cp, 0, (LPCSTR)out, need, back, backLen) != backLen) {
+                    mem_free(back); mem_free(out); if (own) mem_free(w); return ERR_BADCP;
+                }
+                used = backLen != wn || memcmp(back, w, (size_t)wn * sizeof(WCHAR)) != 0;
+                mem_free(back);
+            }
         }
     }
     if (own) mem_free(w);
@@ -436,17 +618,7 @@ DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, 
         if (!allow) { mem_free(out); return ERR_LOSSY; }
     }
 
-    f = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (f == INVALID_HANDLE_VALUE) { DWORD er = GetLastError(); mem_free(out); return er; }
-    for (done = 0; done < on; done += wr) {
-        if (!WriteFile(f, out + done, (DWORD)(on - done), &wr, NULL) || wr == 0) {
-            DWORD er = GetLastError();
-            CloseHandle(f);
-            mem_free(out);
-            return er ? er : 29;
-        }
-    }
-    CloseHandle(f);
+    er = SaveBytes(path, out, on);
     mem_free(out);
-    return 0;
+    return er;
 }

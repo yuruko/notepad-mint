@@ -8,7 +8,7 @@ Unicode true
 SetCompressor /SOLID lzma
 
 !ifndef VERSION
-  !define VERSION "1.0.3"
+  !define VERSION "1.0.4"
 !endif
 !ifndef EXE_PATH
   !error "EXE_PATH is not set (the built notepad-mint.exe)"
@@ -66,8 +66,15 @@ FunctionEnd
 Section "${APP_NAME}" SecApp
   SectionIn RO
   SetOutPath "$INSTDIR"
+  ClearErrors
   File "${EXE_PATH}"
+  IfErrors 0 +3
+    SetErrorLevel 1
+    Abort
   WriteUninstaller "$INSTDIR\uninstall.exe"
+  IfErrors 0 +3
+    SetErrorLevel 1
+    Abort
   CreateShortcut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}"
   WriteRegStr HKLM "Software\${APP_NAME}" "InstallDir" "$INSTDIR"
   WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "${APP_NAME}"

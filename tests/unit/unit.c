@@ -16,6 +16,15 @@ API BOOL   WINAPI RemoveDirectoryW(LPCWSTR);
 API BOOL   WINAPI IsValidCodePage(UINT);
 API UINT   WINAPI GetACP(void);
 API DWORD  WINAPI GetCurrentProcessId(void);
+API HANDLE WINAPI FindFirstFileW(LPCWSTR, WIN32_FIND_DATAW *);
+API BOOL   WINAPI FindNextFileW(HANDLE, WIN32_FIND_DATAW *);
+API BOOL   WINAPI FindClose(HANDLE);
+API BOOL   WINAPI GetFileTime(HANDLE, FILETIME *, FILETIME *, FILETIME *);
+API BOOL   WINAPI SetFileTime(HANDLE, const FILETIME *, const FILETIME *, const FILETIME *);
+
+#ifdef DOC_IO_TEST
+void DocTestFault(int fault);
+#endif
 
 #define LIT(s)  s, (int)(sizeof(s) - 1)                         /* a byte string literal + its length (embedded nuls ok) */
 #define WLIT(s) s, (int)(sizeof(s) / sizeof(WCHAR) - 1)         /* the same for an L"" literal or a WCHAR array */
@@ -1129,6 +1138,198 @@ static void TestDocBig(void)
     mem_free(t);
 }
 
+static int SaveArtifacts(void)
+{
+    WCHAR pattern[PATH_CAP];
+    WIN32_FIND_DATAW data;
+    HANDLE f;
+    int n = 0;
+    wcopy(pattern, g_dir, PATH_CAP);
+    PathJoin(pattern, L".mint-*", PATH_CAP);
+    f = FindFirstFileW(pattern, &data);
+    if (f != INVALID_HANDLE_VALUE) {
+        do { n++; } while (FindNextFileW(f, &data));
+        FindClose(f);
+    }
+    return n;
+}
+
+static void KeptOriginal(void)
+{
+    int n;
+    BYTE *b = FileGet(g_file, &n);
+    WantBytes(L"original bytes", b, n, LIT("original"));
+    mem_free(b);
+    Want(SaveArtifacts() == 0, L"a temporary or backup file was leaked", 0, 0);
+}
+
+static void TestDocSafety(void)
+{
+    static const struct { const char *bytes; int n, enc; } invalid[] = {
+        { "\xef\xbb\xbf\xc0\xaf", 5, -1 },
+        { "\xef\xbb\xbf\xe2\x82", 5, -1 },
+        { "\xf4\x90\x80\x80", 4, ENC_UTF8 },
+        { "\xff\xfe" "a", 3, -1 },
+        { "\xfe\xff\0", 3, -1 },
+        { "a\0b", 3, ENC_UTF16LE }
+    };
+    static const WCHAR unpaired[] = { 0xD83D, 'x', 0 };
+    WCHAR *t, name[128], stream[PATH_CAP];
+    FILETIME created = { 0x12340000, 0x01D00000 }, after = { 0, 0 };
+    DWORD er, attrs;
+    HANDLE f;
+    int i, n, enc, eol;
+    BOOL lossy;
+    BYTE *b;
+
+    Group(L"doc.c failed reads and durable saves");
+    for (i = 0; i < COUNTOF(invalid); i++) {
+        Want(FilePut(g_file, invalid[i].bytes, invalid[i].n), L"cannot create invalid input", 0, 0);
+        er = DocRead(g_file, &t, &n, &enc, &eol, invalid[i].enc);
+        Want(er == ERR_LOSSY && !t && n == 0, L"expected failed decode with no partial text, error %d", (int)er, 0);
+        mem_free(t);
+        wsprintfW(name, L"malformed explicit unicode input %d never becomes a clean partial document", i);
+        Done(name);
+    }
+#ifdef DOC_IO_TEST
+    for (i = 1; i <= 2; i++) {
+        Want(FilePut(g_file, LIT("original")), L"cannot create original", 0, 0);
+        DocTestFault(i);
+        er = DocRead(g_file, &t, &n, &enc, &eol, -1);
+        DocTestFault(0);
+        Want(er == (DWORD)(i == 1 ? 30 : 38) && !t && n == 0, L"read fault returned %d or partial text", (int)er, 0);
+        mem_free(t);
+        KeptOriginal();
+        Done(i == 1 ? L"failed ReadFile returns its error and no text" : L"unexpected EOF after a partial read returns an error and no text");
+    }
+    for (i = 3; i <= 7; i++) {
+        Want(FilePut(g_file, LIT("original")), L"cannot create original", 0, 0);
+        DocTestFault(i);
+        er = DocWrite(g_file, WLIT(L"replacement"), ENC_UTF8, EOL_CRLF, NULL);
+        DocTestFault(0);
+        Want(er != 0, L"injected save fault %d reported success", i, 0);
+        KeptOriginal();
+        wsprintfW(name, L"save fault %d (write, zero write, flush, replace, partial rename) preserves original and cleans siblings", i);
+        Done(name);
+    }
+    DeleteFileW(g_missing);
+    DocTestFault(5);
+    er = DocWrite(g_missing, WLIT(L"replacement"), ENC_UTF8, EOL_CRLF, NULL);
+    DocTestFault(0);
+    Want(er != 0 && GetFileAttributesW(g_missing) == INVALID_FILE_ATTRIBUTES, L"failed first save exposed a partial file", 0, 0);
+    Want(SaveArtifacts() == 0, L"failed first save leaked a sibling", 0, 0);
+    Done(L"failed flush on a new file never publishes it");
+
+    DocTestFault(10);
+    er = DocWrite(g_missing, WLIT(L"replacement"), ENC_UTF8, EOL_CRLF, NULL);
+    DocTestFault(0);
+    Want(er != 0 && GetFileAttributesW(g_missing) == INVALID_FILE_ATTRIBUTES, L"failed publication with stale error zero reported success", 0, 0);
+    Want(SaveArtifacts() == 0, L"failed publication leaked a sibling", 0, 0);
+    Done(L"failed publication remains a failure when last error is zero");
+    DocTestFault(9);
+    er = DocWrite(g_file, WLIT(L"replacement"), ENC_UTF8, EOL_CRLF, NULL);
+    DocTestFault(0);
+    Want(er != 0, L"failed replacement with stale error zero reported success", 0, 0);
+    KeptOriginal();
+    Done(L"failed replacement remains a failure when last error is zero");
+
+    DocTestFault(8);
+    er = DocWrite(g_file, WLIT(L"replacement"), ENC_UTF8, EOL_CRLF, NULL);
+    DocTestFault(0);
+    Want(er == 1177, L"partial replacement should return original error: %d", (int)er, 0);
+    b = FileGet(g_file, &n);
+    WantBytes(L"concurrent new file", b, n, LIT("raced"));
+    mem_free(b);
+    Want(SaveArtifacts() == 1, L"expected exactly one retained backup", 0, 0);
+    {
+        WIN32_FIND_DATAW data;
+        wcopy(stream, g_dir, PATH_CAP); PathJoin(stream, L".mint-*.bak", PATH_CAP);
+        f = FindFirstFileW(stream, &data);
+        Want(f != INVALID_HANDLE_VALUE, L"only recovery copy was deleted", 0, 0);
+        if (f != INVALID_HANDLE_VALUE) {
+            FindClose(f);
+            wcopy(stream, g_dir, PATH_CAP); PathJoin(stream, data.cFileName, PATH_CAP);
+            b = FileGet(stream, &n);
+            WantBytes(L"retained recovery copy", b, n, LIT("original"));
+            mem_free(b);
+            DeleteFileW(stream);
+        }
+    }
+    Done(L"failed rollback retains original backup and never overwrites a concurrent file");
+#endif
+    Want(FilePut(g_file, LIT("original")), L"cannot create original", 0, 0);
+    Want(SetFileAttributesW(g_file, FILE_ATTRIBUTE_READONLY), L"cannot set read-only attribute", 0, 0);
+    er = DocWrite(g_file, WLIT(L"replacement"), ENC_UTF8, EOL_CRLF, NULL);
+    Want(er == 5, L"read-only save should fail with access denied: %d", (int)er, 0);
+    Want((GetFileAttributesW(g_file) & FILE_ATTRIBUTE_READONLY) != 0, L"read-only attribute cleared", 0, 0);
+    SetFileAttributesW(g_file, FILE_ATTRIBUTE_NORMAL);
+    KeptOriginal();
+    Done(L"read-only save keeps contents and protection");
+
+    f = CreateFileW(g_file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    Want(f != INVALID_HANDLE_VALUE, L"cannot hold a reader", 0, 0);
+    er = DocWrite(g_file, WLIT(L"replacement"), ENC_UTF8, EOL_CRLF, NULL);
+    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+    Want(er != 0, L"save bypassed a reader that forbids writes/deletion", 0, 0);
+    KeptOriginal();
+    Done(L"sharing violation preserves the original file");
+
+    f = CreateFileW(g_file, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    Want(f != INVALID_HANDLE_VALUE && SetFileTime(f, &created, NULL, NULL), L"cannot set creation time", 0, 0);
+    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+    attrs = FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+    Want(SetFileAttributesW(g_file, attrs), L"cannot set original attributes", 0, 0);
+    er = DocWrite(g_file, WLIT(L"replacement"), ENC_UTF8, EOL_CRLF, NULL);
+    Want(er == 0, L"save returned %d", (int)er, 0);
+    Want((GetFileAttributesW(g_file) & attrs) == attrs, L"original attributes were lost", 0, 0);
+    SetFileAttributesW(g_file, FILE_ATTRIBUTE_NORMAL);
+    f = CreateFileW(g_file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    Want(f != INVALID_HANDLE_VALUE && GetFileTime(f, &after, NULL, NULL), L"cannot read creation time", 0, 0);
+    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+    Want(after.dwLowDateTime == created.dwLowDateTime && after.dwHighDateTime == created.dwHighDateTime, L"creation time changed", 0, 0);
+    b = FileGet(g_file, &n);
+    WantBytes(L"saved bytes", b, n, LIT("replacement"));
+    mem_free(b);
+    Want(SaveArtifacts() == 0, L"successful save leaked a sibling", 0, 0);
+    Done(L"successful replacement preserves attributes and creation time");
+
+    wcopy(stream, g_file, PATH_CAP); wcat(stream, L":mint-test", PATH_CAP);
+    if (FilePut(stream, LIT("metadata"))) {
+        er = DocWrite(g_file, WLIT(L"next"), ENC_UTF8, EOL_CRLF, NULL);
+        Want(er == 0, L"save returned %d", (int)er, 0);
+        b = FileGet(stream, &n);
+        WantBytes(L"named stream", b, n, LIT("metadata"));
+        mem_free(b);
+        DeleteFileW(stream);
+        Done(L"replacement retains existing named data streams");
+    } else Skip(L"replacement retains existing named data streams", L"filesystem has no named streams");
+
+    if (IsValidCodePage(50220)) {
+        Want(FilePut(g_file, LIT("original")), L"cannot create original", 0, 0);
+        lossy = FALSE;
+        er = DocWrite(g_file, g_emoji, 2, 50220, EOL_CRLF, &lossy);
+        Want(er == ERR_LOSSY && lossy, L"iso-2022-jp silently lost an emoji: error %d", (int)er, 0);
+        KeptOriginal();
+        Done(L"iso-2022-jp round-trip check rejects silent character loss");
+        lossy = TRUE;
+        er = DocWrite(g_file, g_emoji, 2, 50220, EOL_CRLF, &lossy);
+        Want(er == 0 && lossy, L"confirmed iso-2022-jp conversion returned %d", (int)er, 0);
+        Done(L"confirmed iso-2022-jp character loss is reported");
+        RoundTrip(L"iso-2022-jp still saves representable Japanese losslessly", WLIT(L"\u65e5\u672c\r\nabc"), 50220, EOL_CRLF, 50220, 50220);
+    }
+    Want(FilePut(g_file, LIT("original")), L"cannot create original", 0, 0);
+    lossy = FALSE;
+    er = DocWrite(g_file, unpaired, 2, ENC_UTF8, EOL_CRLF, &lossy);
+    Want(er == ERR_LOSSY && lossy, L"unpaired surrogate was silently replaced: %d", (int)er, 0);
+    KeptOriginal();
+    Done(L"utf-8 save requires permission to replace an unpaired surrogate");
+    Int(L"unavailable code page size never underflows on a line ending", (int)DocBodySize(L"a\r\n", 3, 12345, EOL_LF), 0);
+    Int(L"null text size is zero", (int)DocBodySize(NULL, 1, ENC_UTF8, EOL_LF), 0);
+    Int(L"oversized save rejected before dereferencing text", (int)DocWrite(g_file, L"x", 0x7FFFFFFF, ENC_UTF8, EOL_LF, NULL), ERR_TOO_BIG);
+    KeptOriginal();
+    Done(L"bounds validation leaves destination untouched");
+}
+
 static void TestDoc(void)
 {
     if (!TempDir()) {
@@ -1150,11 +1351,14 @@ static void TestDoc(void)
     TestDocSize();
     TestDocBodySize();
     TestDocBig();
+    TestDocSafety();
     DeleteFileW(g_file);
     RemoveDirectoryW(g_dir);
 }
 
 /* ---------------------------------------------------------------- entry -- */
+#include "search_extra.c"
+
 void start(void)
 {
     WCHAR b[160];
@@ -1169,6 +1373,7 @@ void start(void)
     TestRt();
     TestFind();
     TestReplace();
+    TestSearchExtra();
     TestEncList();
     TestDoc();
     wsprintfW(b, L"\r\nunit: %d passed, %d failed, %d skipped\r\n", g_pass, g_fail, g_skip);

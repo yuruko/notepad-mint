@@ -13,7 +13,7 @@ from the [latest release](https://github.com/yuruko/notepad-mint/releases/latest
 - `notepad-mint-<version>-setup.exe`: the installer (installs to `program files (x86)\notepad-mint`; start menu shortcut, optional desktop shortcut, uninstaller in *installed apps*; your settings are left alone when you uninstall)
 - `notepad-mint-<version>.exe`: the standalone exe, nothing to install: put it anywhere and run it
 
-one 32-bit exe (about 140 kb) runs on 32-bit windows, 64-bit windows and windows on arm. settings are in `%appdata%\notepad-mint\settings.ini`.
+one 32-bit exe (about 145 kb) runs on 32-bit windows, 64-bit windows and windows on arm. settings are in `%appdata%\notepad-mint\settings.ini`.
 
 ## what it does
 
@@ -25,6 +25,10 @@ one 32-bit exe (about 140 kb) runs on 32-bit windows, 64-bit windows and windows
   - **word wrap**: alt+z, or the button left of the theme button; hover either button for a moment and a tooltip says what it does and its key combo;
   - **tab size**: format > tab size: 2, 4 or 8 columns (4 by default), remembered, also used when printing;
   - **recent files**: file > recent keeps the last 9 files you opened or saved (newest first, press 1-9), shared by all open windows; "clear list" at the bottom empties it;
+  - **whole-word search**: find, previous / next, replace and replace all share the same word boundaries; remembers the option alongside match case and wrap around;
+  - **log files**: opening text beginning with `.LOG` appends the local time and date at the end, ready to type the next entry; one undo removes the entry;
+  - **safer saves**: writes and flushes a temporary file before replacing the original, detects lossy legacy encoding conversions, and asks before overwriting a file whose size or modification time changed outside the app;
+  - **selection printing**: select text before opening print to enable printing just that selection;
   - **text runs to the edge**: an 8 px margin around the text (4 px on top), but text that is scrolled out of it runs to the very edge of the editor, no blank frame; the row that is only partly in view at the bottom is drawn, cut off at the edge;
   - **status bar**: compact (`12:5`, `5 L`, `124 B`, `crlf`, `utf8 bom`), the lines, bytes and line ending panels grow and shrink with their text, never cut off; with a selection it shows the lines and bytes selected (`162:54 [5 L 54 B]`); click the line ending / encoding panels to change them;
   - **zoom**: ctrl+plus / ctrl+minus / ctrl+0, ctrl + mouse wheel (9-70 pt);
@@ -37,13 +41,14 @@ one 32-bit exe (about 140 kb) runs on 32-bit windows, 64-bit windows and windows
 
 ## small, fast, clean
 
-- **small**: the whole editor is one 139 kb exe (it was 210 kb before the cleanup; the hard limit for this project is 300 kb). the biggest saving was the 256 px icon, 65 kb of png turned into a 14 kb palette png with an ordered dither (`tools/shrink_icon.py`), then a size-optimised build (`/O1`). what is left is about 71 kb of code, 19 kb of text and tables, 34 kb of resources (the icon, the manifest, the version info) and a few kb of import data. no crt, no libraries, no third-party code: the imports are kernel32 / user32 / gdi32 and nothing else (checked on every build by `tools/check_imports.ps1`).
+- **small**: the whole editor is one 144,384 byte exe (it was 210 kb before the cleanup; the hard limit for this project is 300 kb). the biggest saving was the 256 px icon, 65 kb of png turned into a 14 kb palette png with an ordered dither (`tools/shrink_icon.py`), then a size-optimised build (`/O1`). no crt, no libraries, no third-party code: the imports are kernel32 / user32 / gdi32 and nothing else (checked on every build by `tools/check_imports.ps1`).
 - **fast**: it uses the stock windows edit control, so typing and scrolling are as quick as notepad's, and big files open quickly:
   - opening converts the file once (no size query pass) and gives back what multi-byte text did not need; saving converts utf-8 in one pass, writes straight from the editor's own buffer (no 40 mb copy of a 20 mb file) and skips the line-ending rewrite when the text already is crlf;
   - the status bar caches the caret's line / column per keystroke instead of rescanning the text several times, and on a text over a million characters the line / byte counts follow when typing pauses instead of on every key;
-  - find ignores non-ascii text without a call into windows per character, `memcmp` compares a dword at a time, `memmove` copies dwords backwards too, and `mp_count_lf` (line counting) is sse2 assembly;
+  - find / replace uses linear-time KMP matching, including backwards searches; `memcmp` compares a dword at a time, `memmove` copies dwords backwards too, and `mp_count_lf` (line counting) is sse2 assembly;
+  - dirty-state comparisons are cached until the text changes, and settings skip unchanged values and bound retries when their file is locked;
   - everything the window draws itself (the rows that are only partly in view, the scrolled-out text in the margin) is drawn off screen and put on in one blit, so a resize or a scroll does not flicker.
-- **clean**: zero warnings at `/W3`; `tools/layout_check` proves every struct, constant and function in the hand-written `src/w32.h` against the real windows sdk (the header was pruned of 111 declarations nothing used); an audit found no unused function, and the notes that only described how the code used to be are gone; 399 unit tests (encodings, line endings, find / replace, paths, the assembly routines) and about 450 gui checks that drive the real exe on a private desktop (nothing shows on your screen) all pass: `tools\verify.bat ui`.
+- **clean**: zero warnings at `/W3`; `tools/layout_check` proves every struct, constant and function in the hand-written `src/w32.h` against the real windows sdk (the header was pruned of 111 declarations nothing used); an audit found no unused function, and the notes that only described how the code used to be are gone; 454 unit checks (including randomized search cases and file failure injection), 15 print checks and over 500 gui checks that drive the real exe on a private desktop (nothing shows on your screen) all pass: `tools\verify.bat ui`.
 
 ## status
 
@@ -52,7 +57,7 @@ replace, go to, clear line), format (word wrap, font, tab size, line ending, enc
 are our own dark / light dialogs; open, save as, print and page setup are the native windows dialogs (they follow windows' own dark / light mode, not the app theme). the encoding and line ending of a file are set from the
 format menu or the status bar, not in the save as dialog.
 
-how each part was verified, and what is still open, is in `NOTES.md` (status) and `TODO.md`.
+how each part was verified, and what is still open, is in `NOTES.md` (status) and `TODO.md`. the native editor has one undo level and loads large files synchronously. tabs, session recovery and custom print headers are not implemented. whole-word boundaries conservatively treat supplementary unicode characters (including emoji) as word characters; embedded nul characters are converted to spaces on load, and mixed line endings are normalized to the majority style.
 
 ## build
 
@@ -68,6 +73,8 @@ needs visual studio's c++ build tools (x86 target) and the windows sdk (python 3
     tools\installer.bat [version]    build\notepad-mint-<version>.exe (standalone) + build\notepad-mint-<version>-setup.exe (NSIS installer)
 
 needs [NSIS 3](https://nsis.sourceforge.io/) (`makensis` on the path, in program files, or the portable zip unpacked to `build\nsis-3.10`); the installer script is `installer\notepad-mint.nsi`.
+
+release downloads include `SHA256SUMS.txt`. the manual release workflow requires an existing tag and checks out that exact tag before building.
 
 the release pipeline is `.github/workflows/release.yml`: push a tag `v1.2.3` (keep the version in step with `FILEVERSION` in `src/notepad_mint.rc`) and github builds the exe, checks its imports, runs the unit tests, builds the installer and publishes a release with both files.
 

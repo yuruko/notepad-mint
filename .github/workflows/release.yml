@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "tag to build and publish (v1.2.3); created on the current commit when it does not exist"
+        description: "existing tag to build and publish (v1.2.3)"
         required: true
 
 permissions:
@@ -21,15 +21,24 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
 
       - name: version
         id: ver
         shell: pwsh
+        env:
+          REQUESTED_TAG: ${{ github.event.inputs.tag }}
         run: |
-          $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { '${{ github.event.inputs.tag }}' } else { $env:GITHUB_REF_NAME }
+          $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $env:REQUESTED_TAG } else { $env:GITHUB_REF_NAME }
           if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw "tag '$tag' is not v<major>.<minor>.<patch>" }
+          $version = $Matches[1]
+          $tagCommit = git rev-parse "refs/tags/$tag^{commit}"
+          if ($LASTEXITCODE -ne 0) { throw "tag '$tag' does not exist" }
+          if ($tagCommit -ne (git rev-parse HEAD)) { throw 'checkout does not match the release tag' }
           "tag=$tag" >> $env:GITHUB_OUTPUT
-          "version=$($Matches[1])" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
 
       # the tag, the version resource, the about box (mp.h) and the installer must all say the same version
       - name: version strings
@@ -43,8 +52,16 @@ jobs:
           arch: x86
 
       - name: build (release)
+        shell: pwsh
+        run: |
+          cmd /c build.bat 2>&1 | Tee-Object build-release.log
+          if ($LASTEXITCODE -ne 0) { throw 'release build failed' }
+          if (Select-String -Path build-release.log -Pattern 'warning [A-Z]+[0-9]+') { throw 'release build has warnings' }
+          if ((Get-Item build/notepad-mint.exe).Length -ge 300000) { throw 'executable exceeds size limit' }
+
+      - name: win32 sdk layout
         shell: cmd
-        run: build.bat
+        run: tools\layout_check\check.bat
 
       # the project promises an exe that links kernel32 / user32 / gdi32 only
       - name: imports
@@ -54,6 +71,10 @@ jobs:
       - name: unit tests
         shell: cmd
         run: tests\unit\build.bat
+
+      - name: print tests
+        shell: cmd
+        run: tests\print\build.bat
 
       - name: nsis
         shell: pwsh
@@ -74,10 +95,13 @@ jobs:
           $tag = '${{ steps.ver.outputs.tag }}'
           $v = '${{ steps.ver.outputs.version }}'
           $files = @("build/notepad-mint-$v.exe", "build/notepad-mint-$v-setup.exe")
+          $sums = foreach ($file in $files) { ((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()) + '  ' + (Split-Path $file -Leaf) }
+          $sums | Set-Content "build/SHA256SUMS.txt" -Encoding ascii
+          $files += 'build/SHA256SUMS.txt'
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag @files --clobber
           } else {
-            gh release create $tag @files --title "notepad mint $v" --notes-file RELEASE_NOTES.md --target $env:GITHUB_SHA
+            gh release create $tag @files --verify-tag --title "notepad mint $v" --notes-file RELEASE_NOTES.md
           }
           if ($LASTEXITCODE -ne 0) { throw "publishing the release failed" }

@@ -983,8 +983,6 @@ function Test-T7 {                                                              
     $bytes = [byte[]]@(0x63, 0x61, 0x66, 0xE9, 0x20, 0x61, 0x75, 0x20, 0x6C, 0x61, 0x69, 0x74, 0x0D, 0x0A, 0x6E, 0x61, 0xEF, 0x76, 0x65, 0x0D, 0x0A)   # "caf<e acute> au lait", "na<i diaeresis>ve" in windows-1252
     [IO.File]::WriteAllBytes($f, $bytes)
     $exp1252 = [regex]::Replace([Text.Encoding]::GetEncoding(1252).GetString($bytes), "\r\n|\r|\n", "`r`n")
-    $fffd = [string][char]0xFFFD
-    $expU8 = 'caf' + $fffd + " au lait`r`nna" + $fffd + "ve`r`n"
     Ck 'T7.0 (sanity) the test file is not valid utf-8' ($true -eq $(try { (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes) | Out-Null; $false } catch { $true })) 'the bytes decode as utf-8'
 
     $app = Start-App $f
@@ -1012,14 +1010,18 @@ function Test-T7 {                                                              
     CkEq 'T7.9 the dialog now preselects windows-1252' 1252 (Snd $lb 0x199 (Snd $lb $LB_GETCURSEL) 0)
     [void](Snd $lb $LB_SETCURSEL ([U]::ListFind($lb, $IDM.ENC_UTF8)) 0)
     Press $dlg $IDOK
-    CkEdText 'T7.10 reopened as utf-8: the invalid bytes show as U+FFFD' $app $expU8 3000
+    $box = Wait-Box $app $AppName
+    Ck 'T7.10 invalid utf-8 is rejected with an open error' ($box.Text -like 'cannot open*') $box.Text
+    [void](Box-Press $box $IDOK)
+    CkEdText 'T7.10a failed decode preserves the previous document' $app $exp1252
+    CkBytes 'T7.10b failed decode preserves the file on disk' $bytes $f
 
     Cmd $app 'IDM_ENC_REOPEN'
     $dlg = Wait-Win $app 'mp_enc' 'reopen with encoding'
     Press $dlg $IDCANCEL
     Ck 'T7.11 cancel closes the dialog' (Gone $dlg) 'the dialog is still visible'
     Start-Sleep -Milliseconds 250
-    CkText 'T7.12 ... and the text is unchanged' $expU8 (Ed-Text $app)
+    CkText 'T7.12 ... and the text is unchanged' $exp1252 (Ed-Text $app)
 
     Ed-Dirty $app 'zz'                                                           # a modified document: reopening asks first
     $dirtyText = Ed-Text $app
@@ -1213,7 +1215,7 @@ function Test-T10 {                                                             
             Ck ($s[0] + 'e the help window has one child, the text (no button)') ($kids.Count -eq 1 -and [U]::Cls($kids[0]) -eq 'Edit') ('children: ' + (($kids | ForEach-Object { [U]::Cls($_) }) -join ', '))
             $cr = [U]::CRect($h); $er = [U]::WRect($kids[0])
             Ck ($s[0] + 'f ... and it is as big as the client area') ($er[2] - $er[0] -ge $cr[2] - $cr[0] -and $er[3] - $er[1] -ge $cr[3] - $cr[1]) ('edit ' + ($er -join ',') + ' client ' + ($cr -join ','))
-            Ck ($s[0] + 'g ... and no line of the text is broken by hand mid sentence (every text line is a title, a key row or a whole paragraph)') (-not ($t -split "`r`n" | Where-Object { $_ -ne '' -and $_ -notmatch '^(  \S|[a-z][a-z ]*$|notepad mint - |(status bar|font|theme|files|menus): )' })) 'a line that is none of those'
+            Ck ($s[0] + 'g ... and no line of the text is broken by hand mid sentence (every text line is a title, a key row or a whole paragraph)') (-not ($t -split "`r`n" | Where-Object { $_ -ne '' -and $_ -notmatch '^(  \S|[a-z][a-z ]*$|notepad mint - |[a-z][a-z ]*: )' })) 'a line that is none of those'
         }
         Pst $h $WM_CLOSE 0 0
         Ck ($s[0] + 'c it closes on WM_CLOSE (esc / cancel)') (Gone $h) 'the window is still visible'
@@ -2791,12 +2793,178 @@ function Test-T32 {
     Ck 'T32.6 back to 4 columns' $ok ('tab reaches ' + (TabW $b) + ' px, wanted ' + $w4)
 }
 
+# =========================================================================================================== T33
+# Classic .LOG entries are appended, undoable and only reach disk on save.
+function Test-T33 {
+    $path = Join-Path $work 'journal.txt'
+    $original = ".LOG`nentry"
+    $normalized = ".LOG`r`nentry"
+    [IO.File]::WriteAllText($path, $original)
+    $app = Start-App $path
+    Ck 'T33.1 opening .LOG marks the appended entry modified' (Wait-Title $app '*journal.txt - notepad mint') (Title $app)
+    $stamped = Ed-Text $app
+    Ck 'T33.2 timestamp follows the original text and ends in a new line' ($stamped.StartsWith($normalized + "`r`n") -and $stamped.EndsWith("`r`n") -and $stamped.Length -gt $normalized.Length + 8) (Show $stamped)
+    CkSel 'T33.3 caret is after the new entry' $app $stamped.Length $stamped.Length
+    CkText 'T33.4 opening a log does not write the file' $original ([IO.File]::ReadAllText($path))
+    Cmd $app 'IDM_EDIT_UNDO'
+    CkEdText 'T33.5 one undo restores the exact original text' $app $normalized
+    Ck 'T33.6 undo restores the clean title' (Wait-Title $app 'journal.txt - notepad mint') (Title $app)
+    Cmd $app 'IDM_EDIT_UNDO'
+    CkEdText 'T33.7 native redo restores the complete timestamp' $app $stamped
+    Cmd $app 'IDM_FILE_SAVE'
+    Ck 'T33.8 save records the timestamp and clears modified state' (Wait-Title $app 'journal.txt - notepad mint') (Title $app)
+    CkText 'T33.9 save preserves the original LF line endings' ($stamped.Replace("`r`n", "`n")) ([IO.File]::ReadAllText($path))
+    Stop-App $app
+    $lower = Join-Path $work 'lowercase-log.txt'
+    [IO.File]::WriteAllText($lower, '.log')
+    $app = Start-App $lower
+    [void](Wait-Title $app 'lowercase-log.txt - notepad mint')
+    CkEdText 'T33.10 the marker is case sensitive' $app '.log'
+}
+
+# =========================================================================================================== T35
+# A save cannot silently overwrite changes made by another program.
+function Test-T35 {
+    $path = Join-Path $work 'conflict.txt'
+    [IO.File]::WriteAllText($path, 'original')
+    $app = Start-App $path
+    [void](Wait-Title $app 'conflict.txt - notepad mint')
+    [void](Snd (Get-Edit $app) $EM_SETSEL 0 -1)
+    Ed-Dirty $app 'my edits'
+    [IO.File]::WriteAllText($path, 'external changes')
+    Cmd $app 'IDM_FILE_SAVE'
+    $box = Wait-Box $app $AppName
+    Ck 'T35.1 external edits trigger an overwrite warning' ($box.Text -like '*changed outside*') $box.Text
+    [void](Box-Press $box 102)
+    CkText 'T35.2 cancel preserves the external file' 'external changes' ([IO.File]::ReadAllText($path))
+    CkEdText 'T35.3 cancel retains the unsaved editor text' $app 'my edits'
+    Ck 'T35.4 cancel retains modified state' (Wait-Title $app '*conflict.txt - notepad mint') (Title $app)
+    Cmd $app 'IDM_FILE_SAVE'
+    $box = Wait-Box $app $AppName
+    [void](Box-Press $box 1)
+    Ck 'T35.5 explicit overwrite succeeds and clears modified state' (Wait-Title $app 'conflict.txt - notepad mint') (Title $app)
+    CkText 'T35.6 explicit overwrite writes the editor text' 'my edits' ([IO.File]::ReadAllText($path))
+    [void](Snd (Get-Edit $app) $EM_SETSEL 8 8)
+    Ed-Dirty $app '!'
+    Cmd $app 'IDM_FILE_SAVE'
+    Ck 'T35.7 the next normal save uses the refreshed file stamp' (Wait-Title $app 'conflict.txt - notepad mint') (Title $app)
+    CkText 'T35.8 the next save writes without another warning' 'my edits!' ([IO.File]::ReadAllText($path))
+    [IO.File]::Delete($path)
+    Cmd $app 'IDM_FILE_SAVE'
+    $box = Wait-Box $app $AppName
+    Ck 'T35.9 deleting the file externally also requires confirmation' ($box.Text -like '*no longer available*') $box.Text
+    [void](Box-Press $box 102)
+    Ck 'T35.10 cancel does not recreate a deleted file' (-not [IO.File]::Exists($path)) 'file recreated'
+}
+
+# =========================================================================================================== T36
+# Limit only the isolated test process to force text-copy allocation failure during word-wrap recreation.
+function Test-T36 {
+    $app = Start-App
+    $text = 'alpha beta gamma ' * 131072
+    Reset-Doc $app $text
+    $ed = Get-Edit $app
+    [void](Snd $ed $EM_SETSEL 17 23)
+    $flags = [Reflection.BindingFlags]'NonPublic,Static'
+    $job = ([U].GetField('job', $flags)).GetValue($null)
+    $extType = [U].GetNestedType('JEXT', 'NonPublic')
+    $basicType = [U].GetNestedType('JBASIC', 'NonPublic')
+    $setJob = [U].GetMethod('SetInformationJobObject', $flags)
+    $ext = [Activator]::CreateInstance($extType)
+    $basic = [Activator]::CreateInstance($basicType)
+    $basic.flags = 0x2100
+    $ext.basic = $basic
+    $app.Proc.Refresh()
+    $ext.procMem = [IntPtr]($app.Proc.PrivateMemorySize64 + 524288)
+    $size = [Runtime.InteropServices.Marshal]::SizeOf($ext)
+    $applied = $setJob.Invoke($null, @($job, [int]9, $ext, [int]$size))
+    Ck 'T36.1 process memory limit is applied' $applied 'SetInformationJobObject failed'
+    try {
+        Cmd $app 'IDM_FMT_WRAP'
+        Start-Sleep -Milliseconds 1200
+    } finally {
+        $basic.flags = 0x2000
+        $ext.basic = $basic
+        $ext.procMem = [IntPtr]::Zero
+        $cleared = $setJob.Invoke($null, @($job, [int]9, $ext, [int]$size))
+        Ck 'T36.1b process memory limit is removed' $cleared 'SetInformationJobObject failed'
+    }
+    $box = Wait-Box $app $AppName
+    Ck 'T36.2 failed wrap reports memory exhaustion' ($box.Text -like '*not enough memory*') $box.Text
+    [void](Box-Press $box 1)
+    Ck 'T36.3 failed wrap keeps the original editor window' ((Get-Edit $app) -eq $ed) 'editor replaced'
+    CkEdText 'T36.4 failed wrap preserves every character' $app $text
+    CkSel 'T36.5 failed wrap preserves selection' $app 17 23
+    Cmd $app 'IDM_FMT_WRAP'
+    Ck 'T36.6 wrapping succeeds after memory is available again' ([bool](WaitFor { (Get-Edit $app) -ne $ed } 12000)) 'editor not replaced'
+    CkEdText 'T36.7 successful retry also preserves the text' $app $text 12000
+}
+
+# =========================================================================================================== T34
+function Test-T34 {                                                             # whole-word find / replace, complete-document boundaries and persistence
+    $app = Start-App
+    $ed = Get-Edit $app
+    $original = 'scatter cat cat_1 cat2 CAT cat' + (Chars 0x0301)
+    Reset-Doc $app $original
+    Cmd $app 'IDM_EDIT_FIND'
+    $dlg = Wait-Win $app 'mp_find' 'find'
+    CkChk 'T34.1 whole word defaults off' $dlg $IDF.ID_WORD 0
+    Set-Field $dlg $IDF.ID_WHAT 'cat'
+    Press $dlg $IDF.ID_WORD
+    CkChk 'T34.2 whole word toggles on' $dlg $IDF.ID_WORD 1
+    Press $dlg $IDOK
+    CkSel 'T34.3 whole word skips an embedded prefix' $app 8 11
+    Press $dlg $IDOK
+    CkSel 'T34.4 whole word skips underscore and numeric suffixes' $app 23 26
+    Press $dlg $IDOK
+    CkSel 'T34.5 whole word skips a combining-mark suffix and wraps' $app 8 11
+    Press $dlg $IDF.ID_UP
+    CkChk 'T34.6 reverse direction selected' $dlg $IDF.ID_UP 1
+    Press $dlg $IDOK
+    CkSel 'T34.7 reverse wrap uses whole-word boundaries' $app 23 26
+    Press $dlg $IDCANCEL
+    [void](Gone $dlg)
+    Cmd $app 'IDM_EDIT_REPLACE'
+    $dlg = Wait-Win $app 'mp_find' 'replace'
+    CkChk 'T34.8 replace remembers whole word' $dlg $IDF.ID_WORD 1
+    Set-Field $dlg $IDF.ID_WHAT 'cat'
+    Set-Field $dlg $IDF.ID_WITH 'fox'
+    Press $dlg $IDF.ID_DOWN
+    CkChk 'T34.9 forward direction selected' $dlg $IDF.ID_DOWN 1
+    [void](Snd $ed $EM_SETSEL 1 4)
+    Press $dlg $IDF.ID_REPLACE
+    CkSel 'T34.10 replacing an embedded selection only finds the next whole word' $app 8 11
+    CkText 'T34.11 embedded selection was not replaced' $original (Ed-Text $app)
+    Press $dlg $IDF.ID_REPLACEALL
+    $expected = 'scatter fox cat_1 cat2 fox cat' + (Chars 0x0301)
+    CkEdText 'T34.12 replace all changes only complete words' $app $expected
+    [void](Snd $ed $EM_UNDO)
+    CkEdText 'T34.13 one undo restores whole-word replace all' $app $original
+    Reset-Doc $app 'cat2 cat'
+    Set-Field $dlg $IDF.ID_WITH 'x'
+    [void](Snd $ed $EM_SETSEL 3 3)
+    Press $dlg $IDF.ID_REPLACEALL
+    CkEdText 'T34.14 caret inside cat2 does not turn its prefix into a match' $app 'cat2 x'
+    CkSel 'T34.15 caret counting uses document boundary beyond the caret' $app 3 3
+    Press $dlg $IDCANCEL
+    [void](Gone $dlg)
+    $ad = $app.AppData
+    Stop-App $app
+    CkEq 'T34.16 whole word is saved' '1' (Ini-Val $app 'find' 'wholeword' '1')
+    $app = Start-App '' $ad
+    Cmd $app 'IDM_EDIT_FIND'
+    $dlg = Wait-Win $app 'mp_find' 'find'
+    CkChk 'T34.17 a new process loads whole word' $dlg $IDF.ID_WORD 1
+    Press $dlg $IDCANCEL
+    [void](Gone $dlg)
+}
+
 # ====================================================================================================== run them all
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine
