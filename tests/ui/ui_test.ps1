@@ -1330,8 +1330,8 @@ function Test-T12 {                                                             
 }
 
 # =========================================================================================================== T13
-function Expected-Name([DateTime]$t) {                                           # DocNameClock + DefaultDocName (util.c): "mint-" + base 36 of (days since 2000-01-01, year mod 100) * 45 + (seconds since midnight) / 1920
-    $days = ([DateTime]::new(2000 + ($t.Year % 100), $t.Month, $t.Day) - [DateTime]::new(2000, 1, 1)).Days
+function Expected-Name([DateTime]$t) {                                           # DocNameClock + DefaultDocName (util.c): "mint-" + base 36 of (days since 2026-01-01, 100 year cycle) * 45 + (seconds since midnight) / 1920
+    $days = ([DateTime]::new(2026 + (($t.Year + 10000 - 2026) % 100), $t.Month, $t.Day) - [DateTime]::new(2026, 1, 1)).Days
     $v = $days * 45 + [int][Math]::Floor(($t.Hour * 3600 + $t.Minute * 60 + $t.Second) / 1920)
     $d = '0123456789abcdefghijklmnopqrstuvwxyz'
     $s = ''
@@ -1351,7 +1351,7 @@ function Test-T13 {                                                             
     Ck 'T13.1 an unsaved document is called "mint-" + 4 characters from 0-9 a-z (title "mint-XXXX - notepad mint")' ($name -ne $null) ('title [' + (Title $app) + ']')
     $cands = @()                                                                 # the app computed the name some time between just before the launch and the first title
     for ($t = $t0.AddSeconds(-1); $t -le $t1.AddSeconds(1); $t = $t.AddSeconds(1)) { $cands += (Expected-Name $t) }
-    Ck 'T13.2 ... with no name handed out before it is the clock: base 36 of days since 2000-01-01 * 45 + seconds since midnight / 1920 (local time, +-1 s)' ($cands -contains $name) ('name ' + $name + ', the formula gives ' + (($cands | Select-Object -Unique) -join ' '))
+    Ck 'T13.2 ... with no name handed out before it is the clock: base 36 of days since 2026-01-01 * 45 + seconds since midnight / 1920 (local time, +-1 s)' ($cands -contains $name) ('name ' + $name + ', the formula gives ' + (($cands | Select-Object -Unique) -join ' '))
     $script:iniLast = $null
     [void](WaitFor { $ri = Read-Ini $app.Ini; if ($ri.ContainsKey('name')) { $script:iniLast = $ri['name']['last'] }; $script:iniLast } 3000)
     CkEq 'T13.2b ... and settings.ini [name] last holds its number' ([string](Name-Value $name)) ([string]$script:iniLast)

@@ -258,29 +258,31 @@ static void TestDocName(void)
     unsigned prev, v;
     int y, m, d, i, bad, gaps, back;
 
-    Group(L"util.c default document name (mint- + 4 base-36 chars, 45 steps a day from 2000-01-01)");
-    NameAt(L"midnight, 1 january 2000 = 0000", 2000, 1, 1, 0, 0, 0, L"mint-0000");
-    NameAt(L"00:31:59 is still the first step", 2000, 1, 1, 0, 31, 59, L"mint-0000");
-    NameAt(L"00:32:00 is the next one", 2000, 1, 1, 0, 32, 0, L"mint-0001");
-    NameAt(L"the last second of 1 january 2000 = step 44", 2000, 1, 1, 23, 59, 59, L"mint-0018");
-    NameAt(L"2 january 2000 = 45", 2000, 1, 2, 0, 0, 0, L"mint-0019");
-    NameAt(L"1 march 2000 (2000 is a leap year) = 60 days", 2000, 3, 1, 0, 0, 0, L"mint-0230");
-    NameAt(L"29 february 2024 06:00", 2024, 2, 29, 6, 0, 0, L"mint-8ifk");
-    NameAt(L"1 march 2024", 2024, 3, 1, 0, 0, 0, L"mint-8igi");
-    NameAt(L"9 october 2026 noon", 2026, 10, 9, 12, 0, 0, L"mint-9fj4");
-    NameAt(L"the last second of 2099 = 1643624", 2099, 12, 31, 23, 59, 59, L"mint-z888");
-    NameAt(L"2100 starts again at 0000 (only the last two digits of the year count)", 2100, 1, 1, 0, 0, 0, L"mint-0000");
-    NameAt(L"2126 = 2026", 2126, 10, 9, 12, 0, 0, L"mint-9fj4");
+    Group(L"util.c default document name (mint- + 4 base-36 chars, 45 steps a day from 2026-01-01)");
+    NameAt(L"midnight, 1 january 2026 = 0000", 2026, 1, 1, 0, 0, 0, L"mint-0000");
+    NameAt(L"00:31:59 is still the first step", 2026, 1, 1, 0, 31, 59, L"mint-0000");
+    NameAt(L"00:32:00 is the next one", 2026, 1, 1, 0, 32, 0, L"mint-0001");
+    NameAt(L"the last second of 1 january 2026 = step 44", 2026, 1, 1, 23, 59, 59, L"mint-0018");
+    NameAt(L"2 january 2026 = 45", 2026, 1, 2, 0, 0, 0, L"mint-0019");
+    NameAt(L"9 october 2026 noon", 2026, 10, 9, 12, 0, 0, L"mint-09rv");
+    NameAt(L"29 february 2028 06:00 (leap year)", 2028, 2, 29, 6, 0, 0, L"mint-0rek");
+    NameAt(L"1 march 2028", 2028, 3, 1, 0, 0, 0, L"mint-0rfi");
+    NameAt(L"28 february 2100 noon", 2100, 2, 28, 12, 0, 0, L"mint-q4i4");
+    NameAt(L"1 march 2100 comes right after 28 february (2100 is no leap year)", 2100, 3, 1, 0, 0, 0, L"mint-q4ir");
+    NameAt(L"the last second of 2125 = 1643579", 2125, 12, 31, 23, 59, 59, L"mint-z86z");
+    NameAt(L"2126 starts again at 0000 (a 100 year cycle)", 2126, 1, 1, 0, 0, 0, L"mint-0000");
+    NameAt(L"a clock before 2026 counts as the end of the cycle", 2025, 12, 31, 23, 59, 59, L"mint-z86z");
+    NameAt(L"2226 = 2026", 2226, 10, 9, 12, 0, 0, L"mint-09rv");
 
     memset(&st, 0, sizeof st);
     bad = 0; gaps = 0; back = 0; prev = 0;
-    for (y = 2000; y < 2100; y++)
+    for (y = 2026; y < 2126; y++)
         for (m = 1; m <= 12; m++)
             for (d = 1; d <= DaysIn(y, m); d++) {
                 st.wYear = (WORD)y; st.wMonth = (WORD)m; st.wDay = (WORD)d;
                 st.wHour = 0; st.wMinute = 0; st.wSecond = 0;
                 v = DocNameClock(&st);
-                if (!(y == 2000 && m == 1 && d == 1) && v != prev + 1) gaps++;
+                if (!(y == 2026 && m == 1 && d == 1) && v != prev + 1) gaps++;
                 st.wHour = 23; st.wMinute = 59; st.wSecond = 59;
                 prev = DocNameClock(&st);
                 if (prev != v + DOCNAME_STEPS - 1) back++;
@@ -305,7 +307,8 @@ static void TestDocName(void)
     Int(L"last name ahead (many documents): one more", (int)DocNameNext(100, 150), 151);
     Int(L"ahead by just under a year: one more", (int)DocNameNext(100, 99 + DOCNAME_AHEAD), (int)(100 + DOCNAME_AHEAD));
     Int(L"ahead by more than a year (stale): the clock", (int)DocNameNext(100, 100 + DOCNAME_AHEAD), 100);
-    Int(L"a new century (last = end of 2099): the clock", (int)DocNameNext(5, 1643624u), 5);
+    Int(L"a new cycle (last = end of 2125): the clock", (int)DocNameNext(5, 1643579u), 5);
+    Int(L"a counter from the 2000-based names of 1.0.10 (far ahead): the clock", (int)DocNameNext(12667, 440032u), 12667);
 
     memset(b, 0x55, sizeof b);
     DefaultDocName(0, b, 9);
@@ -1337,6 +1340,66 @@ static void TestDoc(void)
 /* ---------------------------------------------------------------- entry -- */
 #include "search_extra.c"
 
+/* ------------------------------------------------------------- assoc.c -- */
+/* AssocRegisterUser against a throwaway key: HKEY_CURRENT_USER is redirected (RegOverridePredefKey, this process only) to
+ * HKCU\Software\notepad-mint-unit-test, which is deleted afterwards. the real file associations of this pc are never touched */
+static void TestAssoc(void)
+{
+    typedef LONG (WINAPI *CreateFn)(void *, LPCWSTR, DWORD, LPWSTR, DWORD, DWORD, void *, void **, DWORD *);
+    typedef LONG (WINAPI *OverrideFn)(void *, void *);
+    typedef LONG (WINAPI *GetFn)(void *, LPCWSTR, LPCWSTR, DWORD, DWORD *, void *, DWORD *);
+    typedef LONG (WINAPI *TreeFn)(void *, LPCWSTR);
+    typedef LONG (WINAPI *CloseFn)(void *);
+    void *const hkcu = (void *)(ULONG_PTR)0x80000001;
+    HMODULE m = LoadLibraryW(L"advapi32.dll");
+    CreateFn create = m ? (CreateFn)GetProcAddress(m, "RegCreateKeyExW") : NULL;
+    OverrideFn over = m ? (OverrideFn)GetProcAddress(m, "RegOverridePredefKey") : NULL;
+    GetFn get = m ? (GetFn)GetProcAddress(m, "RegGetValueW") : NULL;
+    TreeFn tree = m ? (TreeFn)GetProcAddress(m, "RegDeleteTreeW") : NULL;
+    CloseFn close = m ? (CloseFn)GetProcAddress(m, "RegCloseKey") : NULL;
+    void *k = NULL;
+    WCHAR v[300];
+    DWORD cb, type;
+    int i, bad = 0;
+
+    Group(L"assoc.c per-user registration (throwaway key)");
+    if (!create || !over || !get || !tree || !close || create(hkcu, L"Software\\notepad-mint-unit-test", 0, NULL, 0, 0xF003F, NULL, &k, NULL)) {
+        Result(L"throwaway registry key", L"advapi32 or RegCreateKeyExW failed");
+        return;
+    }
+    over(hkcu, k);
+    Want(AssocRegisterUser(L"C:\\a dir\\notepad-mint.exe"), L"AssocRegisterUser failed", 0, 0);
+    Done(L"registers without an error");
+    cb = sizeof v; v[0] = 0;
+    get(hkcu, L"Software\\Classes\\" ASSOC_PROGID L"\\shell\\open\\command", NULL, 2, NULL, v, &cb);
+    Str(L"open command: the exe quoted, then \"%1\"", v, L"\"C:\\a dir\\notepad-mint.exe\" \"%1\"");
+    cb = sizeof v; v[0] = 0; type = 0;
+    get(hkcu, L"Software\\Classes\\" ASSOC_PROGID L"\\DefaultIcon", NULL, 0x0000FFFF | 0x10000000, &type, v, &cb);   /* RRF_RT_ANY | RRF_NOEXPAND */
+    Want(type == 2 && wcmp(v, L"%SystemRoot%\\system32\\imageres.dll,-102") == 0, L"icon type %d", (int)type, 0);
+    Done(L"the file icon is windows' text icon, as REG_EXPAND_SZ");
+    cb = sizeof v; v[0] = 0;
+    get(hkcu, L"Software\\RegisteredApplications", ASSOC_REGAPP, 2, NULL, v, &cb);
+    Str(L"RegisteredApplications points at the capabilities", v, ASSOC_CAPS);
+    for (i = 0; i < ASSOC_EXT_COUNT; i++) {
+        WCHAR key[96];
+        wcopy(key, L"Software\\Classes\\", 96); wcat(key, g_assocExt[i], 96); wcat(key, L"\\OpenWithProgids", 96);
+        cb = sizeof v; if (get(hkcu, key, ASSOC_PROGID, 2, NULL, v, &cb)) bad++;
+        cb = sizeof v; v[0] = 0;
+        if (get(hkcu, ASSOC_CAPS L"\\FileAssociations", g_assocExt[i], 2, NULL, v, &cb) || wcmp(v, ASSOC_PROGID)) bad++;
+        cb = sizeof v; if (get(hkcu, L"Software\\Classes\\Applications\\notepad-mint.exe\\SupportedTypes", g_assocExt[i], 2, NULL, v, &cb)) bad++;
+    }
+    Int(L"every extension: an open-with entry, a capability and a supported type", bad, 0);
+    cb = sizeof v; v[0] = 0;
+    get(hkcu, L"Software\\Classes\\.txt", NULL, 2, NULL, v, &cb);
+    Str(L"the extension's own default is not set (only the user picks it)", v, L"");
+    over(hkcu, NULL);
+    close(k);
+    tree(hkcu, L"Software\\notepad-mint-unit-test");
+    cb = sizeof v;
+    Want(get(hkcu, L"Software\\notepad-mint-unit-test", NULL, 0x0000FFFF, NULL, v, &cb) != 0, L"throwaway key still there", 0, 0);
+    Done(L"the throwaway key is gone again");
+}
+
 void start(void)
 {
     WCHAR b[160];
@@ -1350,6 +1413,7 @@ void start(void)
     TestFind();
     TestReplace();
     TestSearchExtra();
+    TestAssoc();
     TestEncList();
     TestDoc();
     wsprintfW(b, L"\r\nunit: %d passed, %d failed, %d skipped\r\n", g_pass, g_fail, g_skip);

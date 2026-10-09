@@ -456,6 +456,34 @@ static const WCHAR g_ucc[17] = {
     0x206E, 0x206F, 0x206B, 0x206A, 0x206D, 0x206C, 0x001E, 0x001F
 };
 
+/* help > set as default text editor (assoc.c): notepad mint becomes a choice for the plain text extensions, then windows' default apps settings
+ * open on it. windows lets only the user pick a default, so the last click is theirs. an installed copy was registered for all users by its
+ * installer: then only the page opens (one entry in settings, not two) */
+static void SetDefaultEditor(void)
+{
+    typedef HINSTANCE (WINAPI *ShellExecFn)(HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, int);
+    typedef void (WINAPI *ChangeFn)(LONG, UINT, const void *, const void *);
+    WCHAR exe[PATH_CAP];
+    HMODULE sh;
+    BOOL machine;
+    DWORD n = GetModuleFileNameW(NULL, exe, PATH_CAP);
+    if (!n || n >= PATH_CAP) return;
+    machine = AssocMachineHas(exe);
+    if (!machine && !AssocRegisterUser(exe)) {
+        Say(L"windows didn't let notepad mint register itself for text files.");
+        return;
+    }
+    sh = LoadLibraryW(L"shell32.dll");
+    if (!sh) return;
+    {
+        ChangeFn ch = (ChangeFn)GetProcAddress(sh, "SHChangeNotify");
+        ShellExecFn ex = (ShellExecFn)GetProcAddress(sh, "ShellExecuteW");
+        if (ch && !machine) ch(0x08000000, 0, NULL, NULL);      /* SHCNE_ASSOCCHANGED: explorer reads the new choices */
+        if (ex) ex(g_hwnd, L"open", machine ? L"ms-settings:defaultapps?registeredAppMachine=" ASSOC_REGAPP
+                                            : L"ms-settings:defaultapps?registeredAppUser=" ASSOC_REGAPP, NULL, NULL, SW_SHOWNORMAL);
+    }
+}
+
 static void Cmd(int id)
 {
     EditDirKeyCancel();                                      /* an accelerator ate the key after ctrl+shift (ctrl+shift+n ...): no reading order on the key release */
@@ -533,6 +561,7 @@ static void Cmd(int id)
 
     case IDM_HELP_TOPICS:   HelpDlg(g_hwnd); break;
     case IDM_HELP_ABOUT:    AboutDlg(g_hwnd); break;
+    case IDM_HELP_DEFAULT:  SetDefaultEditor(); break;
 
     case IDM_SYS_RESTORE: case IDM_SYS_MOVE: case IDM_SYS_SIZE:
     case IDM_SYS_MIN: case IDM_SYS_MAX: case IDM_SYS_CLOSE:

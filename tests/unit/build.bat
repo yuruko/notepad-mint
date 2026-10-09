@@ -25,7 +25,7 @@ set "LFLAGS=/NOLOGO /MACHINE:X86 /SUBSYSTEM:CONSOLE,6.01 /ENTRY:start /NODEFAULT
 echo [unit] asm
 ml /nologo /c /Fobuild\tests\rt.obj src\rt.asm || exit /b 1
 echo [unit] c
-cl %CFLAGS% src\util.c src\doc.c src\search.c tests\unit\unit.c || exit /b 1
+cl %CFLAGS% src\util.c src\doc.c src\search.c src\assoc.c tests\unit\unit.c || exit /b 1
 echo [unit] link
 link %LFLAGS% /OUT:build\tests\unit.exe build\tests\*.obj kernel32.lib user32.lib gdi32.lib || exit /b 1
 echo [unit] built build\tests\unit.exe

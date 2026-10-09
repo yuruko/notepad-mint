@@ -117,17 +117,22 @@ int wtoi(const WCHAR *s)
 }
 
 /* the default name of an unsaved document: "mint-" + four characters from 0-9 a-z (base 36, zero padded) of a number that only grows.
- * DocNameClock = the local date and time as DOCNAME_STEPS steps a day (45: one every 32 minutes) counted from midnight on 1 january 2000
- * (= 0000). only the last two digits of the year count, so 2100 starts at 0000 again: a century is at most 36525 days * 45 = 1643625 steps,
- * below 36^4 = 1679616, so it always fits four characters (today's names start with 9, the first character steps every 2.8 years). */
+ * DocNameClock = the local date and time as DOCNAME_STEPS steps a day (45: one every 32 minutes) counted from midnight on 1 january
+ * DOCNAME_EPOCH (2026 = 0000). it starts over every 100 years (2126 is 0000 again; a year before 2026 counts as the end of the cycle): 100 years
+ * from 2026 are 36524 days (2100 is no leap year) * 45 = 1643580 steps, below 36^4 = 1679616, so it always fits four characters
+ * (the first character steps every 2.8 years) */
+static unsigned Leaps(unsigned y) { return y / 4u - y / 100u + y / 400u; }     /* leap years in 1 .. y */
+
 unsigned DocNameClock(const SYSTEMTIME *st)
 {
     static const WORD before[12] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
-    unsigned y = st->wYear % 100u, m = st->wMonth, d = st->wDay, sec;
+    unsigned y = DOCNAME_EPOCH + ((unsigned)st->wYear + 100u * 100u - DOCNAME_EPOCH) % 100u, m = st->wMonth, d = st->wDay, sec, days;
     if (m < 1 || m > 12) m = 1;
     if (d < 1 || d > 31) d = 1;
     sec = ((unsigned)st->wHour * 3600u + (unsigned)st->wMinute * 60u + (unsigned)st->wSecond) % 86400u;
-    return (y * 365u + (y + 3u) / 4u + before[m - 1] + (m > 2 && y % 4u == 0) + d - 1u) * DOCNAME_STEPS + sec / (86400u / DOCNAME_STEPS);
+    days = (y - DOCNAME_EPOCH) * 365u + Leaps(y - 1u) - Leaps(DOCNAME_EPOCH - 1u) + before[m - 1] + d - 1u +
+           (m > 2 && y % 4u == 0 && (y % 100u != 0 || y % 400u == 0));
+    return days * DOCNAME_STEPS + sec / (86400u / DOCNAME_STEPS);
 }
 
 /* the next name: one more than the last one handed out while that is ahead of the clock (several documents within 32 minutes, or the clock

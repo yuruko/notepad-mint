@@ -139,6 +139,7 @@ static const MenuItem miView[] = {
 };
 static const MenuItem miHelp[] = {
     IT(L"&help topics",        L"f1", IDM_HELP_TOPICS),
+    IT(L"set as &default text editor...", NULL, IDM_HELP_DEFAULT),
     SEP,
     IT(L"&about notepad mint", NULL, IDM_HELP_ABOUT),
 };

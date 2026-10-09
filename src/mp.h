@@ -7,7 +7,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME                  /* the window title is "<name>" + this (main.c AppUpdateTitle); the title strip draws the name bold and this part regular */
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.0.10"
+#define APP_VERSION  L"1.0.11"
 #define PATH_CAP     1024
 
 /* ------------------------------------------------------------- palette --
@@ -52,7 +52,7 @@ enum {
     IDM_ENC_UTF8 = 321, IDM_ENC_UTF8BOM, IDM_ENC_UTF16LE, IDM_ENC_UTF16BE, IDM_ENC_ANSI, IDM_ENC_OTHER, IDM_ENC_REOPEN,
     IDM_RTL = 340, IDM_DIR_LTR = 341, IDM_DIR_RTL = 342, IDM_UCC_BASE = 350,                /* IDM_UCC_BASE + n inserts unicode control char n (0..16) */
     IDM_VIEW_STATUS = 401, IDM_ZOOM_IN, IDM_ZOOM_OUT, IDM_ZOOM_RESET, IDM_THEME_DARK, IDM_THEME_LIGHT, IDM_THEME_TOGGLE,
-    IDM_HELP_TOPICS = 501, IDM_HELP_ABOUT,
+    IDM_HELP_TOPICS = 501, IDM_HELP_ABOUT, IDM_HELP_DEFAULT,
     IDM_RECENT_BASE = 700, IDM_RECENT_NONE = 710, IDM_RECENT_CLEAR = 711,     /* file > recent: IDM_RECENT_BASE + n opens the n-th remembered file (0..RECENT_MAX - 1); NONE is the grayed placeholder of an empty list; CLEAR (the last item, after a separator) empties the list */
     IDM_SYS_RESTORE = 601, IDM_SYS_MOVE, IDM_SYS_SIZE, IDM_SYS_MIN, IDM_SYS_MAX, IDM_SYS_CLOSE   /* title bar menu */
 };
@@ -76,12 +76,22 @@ BOOL   IsDir(const WCHAR *path);
 size_t mp_count_lf(const WCHAR *p, size_t n);        /* rt.asm */
 size_t mp_find3(const WCHAR *p, size_t n, unsigned a, unsigned b, unsigned c);   /* rt.asm: index of the first unit that is a, b or c (n if none) */
 int    WordClass(WCHAR c);                           /* edit_text.c: 0 blank, 1 word char, 2 punctuation (word delete) */
+#define DOCNAME_EPOCH 2026u                          /* default names: mint-0000 = midnight on 1 january of this year (100 year cycle) */
 #define DOCNAME_STEPS 45u                            /* default names: steps a day (one every 32 minutes) */
 #define DOCNAME_AHEAD (DOCNAME_STEPS * 366u)         /* the counter may run ahead of the clock by up to a year */
 #define DOCNAME_NONE  0xFFFFFFFFu                    /* no name handed out yet */
-unsigned DocNameClock(const SYSTEMTIME *st);         /* local date/time -> steps since 2000-01-01 00:00 (year mod 100) */
+unsigned DocNameClock(const SYSTEMTIME *st);         /* local date/time -> steps since DOCNAME_EPOCH-01-01 00:00 (100 year cycle) */
 unsigned DocNameNext(unsigned clock, unsigned last); /* last + 1 while that is ahead of the clock (by at most DOCNAME_AHEAD), else the clock */
 void   DefaultDocName(unsigned v, WCHAR *out, int cap);   /* "mint-" + 4 base-36 chars of v (zero padded) */
+
+/* ------------------------------------------------------------- assoc.c -- */
+#define ASSOC_PROGID    L"notepad-mint.text"
+#define ASSOC_REGAPP    L"notepad-mint"                  /* the RegisteredApplications name: ms-settings:defaultapps?registeredAppUser=notepad-mint */
+#define ASSOC_CAPS      L"Software\\notepad mint\\Capabilities"
+#define ASSOC_EXT_COUNT 10
+extern const WCHAR *const g_assocExt[ASSOC_EXT_COUNT];   /* .txt .log .ini .cfg .conf .md .csv .nfo .diz .text (the installer has the same list) */
+BOOL   AssocRegisterUser(const WCHAR *exe);          /* this exe as a choice for those extensions, for the current user */
+BOOL   AssocMachineHas(const WCHAR *exe);            /* the installer registered this exe for all users */
 
 /* ------------------------------------------------------------ search.c -- */
 /* pure text search (no ui, unit tested): pattern pat[0..m) in t[0..n) (neither needs a terminator).
