@@ -1,15 +1,17 @@
-notepad mint 1.0.8
+notepad mint 1.0.9
 
-- mouse-wheel and scrollbar scrolling keep the cursor and selection at their original text positions
-- pressing an arrow, home/end or page up/down after scrolling returns the view to the saved cursor before moving it; up/down move from the original line
-- shift+arrow keeps the original selection anchor, and ctrl+up/down retain their native behavior without revealing the cursor
+- default font size is 10 pt
+- the font dialog's preset grid is 6 columns by 4 rows, 8 to 48 pt, with half steps from 8 to 13.5 pt
+- the font dialog size box accepts 7 to 100 pt, including one decimal digit (for example 8.5)
+- sizes are stored in tenths of a point; an older settings.ini size is converted on load
+- ctrl+plus / ctrl+minus / ctrl+wheel still step between 8 and 48 pt
 
-Regression coverage drives the real editor on an isolated desktop, including scrolling in both directions, wrapped multilingual text, backward selections, cursor visibility and undo preservation.
+Regression coverage: the font dialog, preset grid, typed decimal sizes, the zoom ladder and the saved size are checked on the real editor.
 
 **download**
 
-- `notepad-mint-1.0.8-setup.exe`: installer and uninstaller
-- `notepad-mint-1.0.8.exe`: standalone executable
+- `notepad-mint-1.0.9-setup.exe`: installer and uninstaller
+- `notepad-mint-1.0.9.exe`: standalone executable
 - `SHA256SUMS.txt`: download checksums
 
 settings remain in `%appdata%\notepad-mint\settings.ini`.

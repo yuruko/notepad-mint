@@ -240,7 +240,7 @@ void EditApplyFont(void)
 {
     LOGFONTW lf;
     HFONT nf, old = g_font;
-    int px = MulDiv(g_pf.cur, g_dpi, 72);
+    int px = MulDiv(g_pf.cur, g_dpi, 720);
     if (px < 1) px = 1;
     memset(&lf, 0, sizeof lf);
     lf.lfHeight = -px;
@@ -280,9 +280,9 @@ void EditApplyColors(void)
 }
 
 /* ctrl+plus / ctrl+minus / ctrl+wheel change the font size itself (not a percentage): one step along this ladder.
- * 1pt steps while text is small, bigger jumps further up. the range is FONT_MIN..FONT_MAX */
-static const int g_ladder[] = { 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 24, 26, 28, 30, 32, 34, 36,
-                                40, 44, 48, 54, 60, 66, 70 };
+ * 1pt steps while text is small, bigger jumps further up. the ladder is 8..48: a size typed in the font dialog may be 7..100 pt, and ctrl+minus takes it down to the next ladder step */
+static const int g_ladder[] = { 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 220, 240, 260, 280, 300, 320, 340, 360,
+                                400, 440, 480 };     /* tenths of a point */
 
 static int Ladder(int cur, int dir)            /* the next size in that direction, or cur if there is none */
 {

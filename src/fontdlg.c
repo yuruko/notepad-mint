@@ -1,4 +1,4 @@
-/* fontdlg.c - the font dialog: family (optionally monospaced only), size 9..70, bold / italic, live preview.
+/* fontdlg.c - the font dialog: family (optionally monospaced only), size 7..100, bold / italic, live preview.
  * the editor colours come from the theme (view > theme), so there are no colour settings here */
 #include "mp.h"
 
@@ -22,7 +22,7 @@ static FontEnt *g_fonts;                            /* every family, sorted with
 static int      g_nfonts, g_capfonts;               /* whole process: measuring hundreds of fonts is slow */
 static int      g_monoOnly = 1;                     /* the filter's last explicit setting */
 
-static const int g_sizes[15] = { 9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 48, 70 };
+static const int g_sizes[24] = { 80, 85, 90, 95, 100, 105,  110, 115, 120, 125, 130, 135,  140, 160, 180, 200, 220, 240,  260, 280, 320, 360, 400, 480 };     /* tenths of a point, 6 per row */
 static const WCHAR g_sample[] = L"sphinx of black quartz, judge my vow. 0123456789";
 
 static int Clamp(int v) { return v < FONT_MIN ? FONT_MIN : (v > FONT_MAX ? FONT_MAX : v); }
@@ -59,7 +59,7 @@ static void FaceAdd(const WCHAR *name)
     g_nfonts++;
 }
 
-/* one call per family and charset. bitmap fonts are left out: they don't scale over 9..70 pt */
+/* one call per family and charset. bitmap fonts are left out: they don't scale over 7..100 pt */
 static int CALLBACK EnumCb(const void *lf, const void *tm, DWORD type, LPARAM lp)
 {
     (void)tm; (void)lp;
@@ -159,15 +159,27 @@ static void SelectFace(FontSt *d, int force)
     SendMessageW(d->list, LB_SETTOPINDEX, (WPARAM)(i > 3 ? i - 3 : 0), 0);
 }
 
-/* the size edit's number, clamped; def when it doesn't start with one (empty) */
+/* the size edit's number in tenths of a point, clamped: "8" = 80, "8.5" = 85 (one decimal digit, the rest is dropped);
+ * def when it doesn't start with a digit (empty) */
 static int SizeText(HWND e, int def)
 {
     WCHAR t[16];
     const WCHAR *p = t;
+    int whole = 0, frac = 0;
     t[0] = 0;
     GetWindowTextW(e, t, 16);
     while (*p == ' ' || *p == '\t') p++;
-    return (*p >= '0' && *p <= '9') ? Clamp(wtoi(p)) : def;
+    if (*p < '0' || *p > '9') return def;
+    while (*p >= '0' && *p <= '9') whole = whole * 10 + (*p++ - '0');
+    if ((*p == '.' || *p == ',') && p[1] >= '0' && p[1] <= '9') frac = p[1] - '0';
+    return Clamp(whole * 10 + frac);
+}
+
+/* tenths -> "8" or "8.5" */
+static void FormatPt(WCHAR *t, int tenths)
+{
+    if (tenths % 10) wsprintfW(t, L"%d.%d", tenths / 10, tenths % 10);
+    else wsprintfW(t, L"%d", tenths / 10);
 }
 
 /* d->pt -> the size edit. WM_SETTEXT on an edit does send EN_CHANGE, synchronously: FontCmd re-enters from inside
@@ -176,7 +188,7 @@ static int SizeText(HWND e, int def)
 static void SetSizeText(FontSt *d)
 {
     WCHAR t[16], cur[16];
-    wsprintfW(t, L"%d", d->pt);
+    FormatPt(t, d->pt);
     cur[0] = 0;
     GetWindowTextW(d->edit, cur, 16);
     if (wcmp(cur, t)) {
@@ -210,7 +222,7 @@ static void PreviewFont(FontSt *d)
 {
     HFONT f;
     if (!d->pv) return;
-    f = MakeFont(d, MulDiv(d->pt, g_dpi, 72));
+    f = MakeFont(d, MulDiv(d->pt, g_dpi, 720));
     if (!f) return;                                 /* preserve the last preview if a GDI allocation fails */
     if (d->font) DeleteObject(d->font);
     d->font = f;
@@ -320,7 +332,7 @@ static void FontLayout(FontSt *d)
     int i;
     UiLabel(h, L"font:", 12, 10, 236, 16, 0, SS_NOPREFIX);
     UiLabel(h, L"size:", 264, 10, 120, 16, 0, SS_NOPREFIX);
-    UiLabel(h, L"9 to 70 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
+    UiLabel(h, L"7 to 100 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
     UiLabel(h, L"preview:", 12, 228, 200, 16, 0, SS_NOPREFIX);
     DlgFrame(b, 12, 246, 504, 146, BV_SUNKEN);
     d->pv = CreateWindowExW(0, L"mp_fontpv", g_sample, WS_CHILD | WS_VISIBLE, S(12) + 2, S(246) + 2, S(504) - 4, S(146) - 4,
@@ -334,15 +346,15 @@ static void FontLayout(FontSt *d)
     DarkScroll(d->list);
     Opt(h, L"monospaced fonts only", 12, 200, 236, ID_MONO, WS_GROUP, d->mono);
 
-    d->edit = UiEdit(b, L"", 264, 28, 56, 23, ID_SIZE, ES_NUMBER | WS_GROUP);
-    SendMessageW(d->edit, EM_LIMITTEXT, 3, 0);
+    d->edit = UiEdit(b, L"", 264, 28, 56, 23, ID_SIZE, WS_GROUP);      /* no ES_NUMBER: a decimal point is typed too */
+    SendMessageW(d->edit, EM_LIMITTEXT, 5, 0);                         /* "100.5" */
     for (i = 0; i < COUNTOF(g_sizes); i++) {                       /* one tab stop: the arrow keys move along */
-        wsprintfW(t, L"%d", g_sizes[i]);
-        c = UiButton(h, t, 264 + (i % 5) * 51, 60 + (i / 5) * 26, 48, 22, ID_PRESET + i, BS_PUSHBUTTON | (i ? 0 : WS_GROUP));
+        FormatPt(t, g_sizes[i]);
+        c = UiButton(h, t, 264 + (i % 6) * 42, 60 + (i / 6) * 26, 40, 22, ID_PRESET + i, BS_PUSHBUTTON | (i ? 0 : WS_GROUP));
         if (i) SetWindowLongPtrW(c, GWL_STYLE, GetWindowLongPtrW(c, GWL_STYLE) & ~WS_TABSTOP);
     }
-    Opt(h, L"bold", 264, 150, 80, ID_BOLD, WS_GROUP, d->bold);
-    Opt(h, L"italic", 352, 150, 80, ID_ITALIC, 0, d->italic);
+    Opt(h, L"bold", 264, 170, 80, ID_BOLD, WS_GROUP, d->bold);
+    Opt(h, L"italic", 352, 170, 80, ID_ITALIC, 0, d->italic);
 
     UiButton(h, L"reset", 12, 404, 88, 24, ID_RESET, BS_PUSHBUTTON | WS_GROUP);
     UiButton(h, L"ok", 336, 404, 86, 24, IDOK, BS_DEFPUSHBUTTON | WS_GROUP);
@@ -388,7 +400,7 @@ static void FontCmd(FontSt *d, int id, int code)
     case ID_RESET:
         wcopy(d->face, L"Consolas", 32);
         FontResolve(d->face);
-        d->pt = 11;
+        d->pt = 100;
         d->bold = 0;
         d->italic = 0;
         ShowState(d);

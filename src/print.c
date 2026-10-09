@@ -286,7 +286,7 @@ static int PrintJob(HDC dc, const WCHAR *text, int n, int copies, int from, int 
     oy = GetDeviceCaps(dc, PHYSICALOFFSETY);
     if (pw <= 0 || ph <= 0) { pw = hz; ph = vt; ox = oy = 0; }       /* not a printer: all of the page is printable */
 
-    font = CreateFontW(-MulDiv(g_pf.pt, lpy, 72), 0, 0, 0, g_pf.bold ? FW_BOLD : FW_NORMAL, g_pf.italic ? TRUE : FALSE, 0, 0,
+    font = CreateFontW(-MulDiv(g_pf.pt, lpy, 720), 0, 0, 0, g_pf.bold ? FW_BOLD : FW_NORMAL, g_pf.italic ? TRUE : FALSE, 0, 0,
                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, g_pf.font);
     if (!font) return 0;
     old = SelectObject(dc, font);

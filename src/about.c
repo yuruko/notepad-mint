@@ -210,7 +210,7 @@ static const WCHAR g_help[] =
     L"with a selection the position also shows the lines and bytes it covers, like \"162:54 [5 L 54 B]\". "
     L"click the line ending or the encoding to change it.\r\n"
     L"\r\n"
-    L"font: format > font picks the face and the size, 9 to 70 pt. the menus, title bar and status bar use "
+    L"font: format > font picks the face and the size, 7 to 100 pt. the menus, title bar and status bar use "
     L"the same face at a fixed 11 px. tab size (2, 4 or 8 columns), line ending and encoding are in the format menu.\r\n"
     L"\r\n"
     L"theme: view > theme switches between dark (the default) and light. the sun / moon button at the right "

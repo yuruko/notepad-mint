@@ -1134,6 +1134,7 @@ function Line-Height($app) {                                                    
     return ((($p1 -shr 16) -band 0xFFFF) - (($p0 -shr 16) -band 0xFFFF))
 }
 function Test-T9 {                                                               # font dialog
+    function PtText($v) { if ($v % 10) { '{0}.{1}' -f [math]::Floor($v / 10), ($v % 10) } else { [string][math]::Floor($v / 10) } }   # tenths of a point -> the size box text
     $sizes = @(([regex]::Match([IO.File]::ReadAllText((Join-Path $Src 'fontdlg.c')), 'g_sizes\[\d+\]\s*=\s*\{([^}]*)\}').Groups[1].Value -split '\s*,\s*') | ForEach-Object { [int]$_.Trim() })
     $app = Start-App
     Ed-Set $app ("a`r`nb")
@@ -1141,12 +1142,12 @@ function Test-T9 {                                                              
     $dlg = Open-Font $app
     Pass 'T9.1 font dialog opens (class mp_font, title "font")'
     $defPt = [regex]::Match([IO.File]::ReadAllText((Join-Path $Src 'prefs.c')), 'g_pf\.pt\s*=\s*(\d+)\s*;').Groups[1].Value     # PrefsDefaults
-    CkEq 'T9.2 the size box starts with the default size (PrefsDefaults)' $defPt (Get-Field $dlg $IDT.ID_SIZE)
+    CkEq 'T9.2 the size box starts with the default size (PrefsDefaults)' (PtText ([int]$defPt)) (Get-Field $dlg $IDT.ID_SIZE)
     CkChk 'T9.3 "monospaced fonts only" is on by default' $dlg $IDT.ID_MONO 1
     Set-Field $dlg $IDT.ID_SIZE '18'
     Press $dlg $IDOK
     Ck 'T9.4 ok closes the dialog' (Gone $dlg) 'the dialog is still visible'
-    CkEq 'T9.5 settings.ini has size=18 under [editor]' '18' (Ini-Val $app 'editor' 'size' '18')
+    CkEq 'T9.5 settings.ini has size10=180 under [editor] (18 pt, tenths)' '180' (Ini-Val $app 'editor' 'size10' '180')
     $lh18 = 0; [void](WaitFor { $script:lh = Line-Height $app; $script:lh -gt $lh12 } 2000); $lh18 = $script:lh
     Ck 'T9.6 the editor font really changed: the line height grew (12 pt -> 18 pt)' ($lh18 -gt $lh12) ('line height ' + $lh12 + ' px at 12 pt, ' + $lh18 + ' px at 18 pt')
 
@@ -1154,24 +1155,24 @@ function Test-T9 {                                                              
     CkEq 'T9.7 reopened: the size box shows 18' '18' (Get-Field $dlg $IDT.ID_SIZE)
     Set-Field $dlg $IDT.ID_SIZE '5'
     Press $dlg $IDOK
-    CkEq 'T9.8 size 5 clamps up to 9 (FONT_MIN) on ok' ([string]$IDM.FONT_MIN) (Ini-Val $app 'editor' 'size' ([string]$IDM.FONT_MIN))
+    CkEq 'T9.8 size 5 clamps up to FONT_MIN on ok' ([string]$IDM.FONT_MIN) (Ini-Val $app 'editor' 'size10' ([string]$IDM.FONT_MIN))
     $dlg = Open-Font $app
     Set-Field $dlg $IDT.ID_SIZE '500'
     Press $dlg $IDOK
-    CkEq 'T9.9 size 500 clamps down to 70 (FONT_MAX) on ok' ([string]$IDM.FONT_MAX) (Ini-Val $app 'editor' 'size' ([string]$IDM.FONT_MAX))
+    CkEq 'T9.9 size 500 clamps down to FONT_MAX on ok' ([string]$IDM.FONT_MAX) (Ini-Val $app 'editor' 'size10' ([string]$IDM.FONT_MAX))
     $lh96 = 0; [void](WaitFor { $script:lh = Line-Height $app; $script:lh -gt $lh18 } 2000); $lh96 = $script:lh
-    Ck 'T9.10 ... and the editor line height grew again at 70 pt' ($lh96 -gt $lh18) ('line height ' + $lh18 + ' px at 18 pt, ' + $lh96 + ' px at 70 pt')
+    Ck 'T9.10 ... and the editor line height grew again at 70 pt' ($lh96 -gt $lh18) ('line height ' + $lh18 + ' px at 18 pt, ' + $lh96 + ' px at FONT_MAX pt')
 
     $dlg = Open-Font $app
     Set-Field $dlg $IDT.ID_SIZE '30'
     Press $dlg $IDCANCEL
     Ck 'T9.11 cancel closes the dialog' (Gone $dlg) 'the dialog is still visible'
-    CkEq 'T9.12 ... and leaves the saved size unchanged (70)' ([string]$IDM.FONT_MAX) (Ini-Val $app 'editor' 'size' '30' 700)
+    CkEq 'T9.12 ... and leaves the saved size unchanged (FONT_MAX)' ([string]$IDM.FONT_MAX) (Ini-Val $app 'editor' 'size10' '300' 1000)
 
     $dlg = Open-Font $app                                                        # a preset button, then face / bold / italic
     $p = 6
     Press $dlg ($IDT.ID_PRESET + $p)
-    Ck ('T9.13 preset button #' + $p + ' puts ' + $sizes[$p] + ' in the size box') ([bool](WaitFor { (Get-Field $dlg $IDT.ID_SIZE) -eq [string]$sizes[$p] } 1500)) ('size box [' + (Get-Field $dlg $IDT.ID_SIZE) + ']')
+    Ck ('T9.13 preset button #' + $p + ' puts ' + $sizes[$p] + ' in the size box') ([bool](WaitFor { (Get-Field $dlg $IDT.ID_SIZE) -eq (PtText $sizes[$p]) } 1500)) ('size box [' + (Get-Field $dlg $IDT.ID_SIZE) + ']')
     $lb = Ctl $dlg $IDT.ID_LIST
     $idx = [U]::SndStr($lb, $LB_FINDSTRINGEXACT, -1, 'Courier New')
     if ($idx -lt 0) { Skip 'T9.14 pick the face Courier New + bold + italic' 'Courier New is not in the (monospaced only) family list of this machine' }
@@ -1182,7 +1183,7 @@ function Test-T9 {                                                              
         CkChk 'T9.15 italic checkbox toggles on' $dlg $IDT.ID_ITALIC 1
     }
     Press $dlg $IDOK
-    CkEq ('T9.16 ok writes the preset size ' + $sizes[$p]) ([string]$sizes[$p]) (Ini-Val $app 'editor' 'size' ([string]$sizes[$p]))
+    CkEq ('T9.16 ok writes the preset size ' + $sizes[$p]) ([string]$sizes[$p]) (Ini-Val $app 'editor' 'size10' ([string]$sizes[$p]))
     if ($idx -ge 0) {
         CkEq 'T9.17 ... face Courier New' 'Courier New' (Ini-Val $app 'editor' 'font' 'Courier New')
         CkEq 'T9.18 ... bold=1' '1' (Ini-Val $app 'editor' 'bold' '1')
@@ -1191,10 +1192,10 @@ function Test-T9 {                                                              
 
     $dlg = Open-Font $app
     Press $dlg $IDT.ID_RESET
-    Ck 'T9.20 "reset": the size box shows 11' ([bool](WaitFor { (Get-Field $dlg $IDT.ID_SIZE) -eq '11' } 1500)) ('size box [' + (Get-Field $dlg $IDT.ID_SIZE) + ']')
+    Ck 'T9.20 "reset": the size box shows 10' ([bool](WaitFor { (Get-Field $dlg $IDT.ID_SIZE) -eq '10' } 1500)) ('size box [' + (Get-Field $dlg $IDT.ID_SIZE) + ']')
     CkChk 'T9.21 ... bold is off again' $dlg $IDT.ID_BOLD 0
     Press $dlg $IDOK
-    CkEq 'T9.22 ok after reset: size=11' '11' (Ini-Val $app 'editor' 'size' '11')
+    CkEq 'T9.22 ok after reset: size10=100' '100' (Ini-Val $app 'editor' 'size10' '100')
     CkEq 'T9.23 ... font=Consolas' 'Consolas' (Ini-Val $app 'editor' 'font' 'Consolas')
     CkEq 'T9.24 ... bold=0' '0' (Ini-Val $app 'editor' 'bold' '0')
     CkEq 'T9.25 ... italic=0' '0' (Ini-Val $app 'editor' 'italic' '0')
@@ -2313,10 +2314,11 @@ function Test-T25 {
     $para = ('wrapping words go on and on ' * 14).TrimEnd()
     $sb = New-Object Text.StringBuilder
     for ($k = 1; $k -le 60; $k++) { [void]$sb.Append($k.ToString() + ' ' + $para + "`r`n") }
+    # at the 10 pt default the wrapped row's edge antialiases one pixel differently from the control (biggest channel 58): tol 60, as T25.19
     Reset-Doc $app $sb.ToString()
-    Band-Ck 'T25.21 word wrap on (rows of wrapped lines): the band shows the next row of the paragraph' $app 0
+    Band-Ck 'T25.21 word wrap on (rows of wrapped lines): the band shows the next row of the paragraph' $app 0 $false $false 60
     [void](Snd $ed $EM_SETSEL 20 700)
-    Band-Ck 'T25.22 ... with a selection over several rows (a soft wrap has no line break block)' $app 0
+    Band-Ck 'T25.22 ... with a selection over several rows (a soft wrap has no line break block)' $app 0 $false $false 60
     Cmd $app 'IDM_FMT_WRAP'
     Start-Sleep -Milliseconds 500
     $ed = Get-Edit $app

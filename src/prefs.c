@@ -11,7 +11,7 @@ static void PrefsDefaults(void)
 {
     memset(&g_pf, 0, sizeof g_pf);
     wcopy(g_pf.font, L"Consolas", 32);
-    g_pf.pt = 11;
+    g_pf.pt = 100;
     g_pf.cur = g_pf.pt;
     g_pf.fg = C_EDIT_FG;
     g_pf.bg = C_EDIT_BG;
@@ -165,7 +165,9 @@ static void PrefsLoad(void)
     PrefsDefaults();
     GetPrivateProfileStringW(L"editor", L"font", L"", f, 32, g_ini);
     if (f[0]) wcopy(g_pf.font, f, 32);
-    g_pf.pt      = Clamp(IniGet(L"editor", L"size", g_pf.pt), FONT_MIN, FONT_MAX);
+    g_pf.pt      = IniGet(L"editor", L"size10", 0);             /* tenths of a point; a 1.0.9 settings.ini has only whole points in "size" */
+    if (!g_pf.pt) g_pf.pt = 10 * IniGet(L"editor", L"size", 10);
+    g_pf.pt      = Clamp(g_pf.pt, FONT_MIN, FONT_MAX);
     g_pf.cur     = g_pf.pt;                                          /* the working size always starts at the chosen one */
     g_pf.bold    = IniGet(L"editor", L"bold", 0) != 0;
     g_pf.italic  = IniGet(L"editor", L"italic", 0) != 0;
@@ -208,7 +210,7 @@ void AppSavePrefs(void)
     IniEnsure();                                  /* utf-16 ini: font names can be anything */
 
     IniPutStr(L"editor", L"font", g_pf.font);
-    IniPutInt(L"editor", L"size", g_pf.pt);
+    IniPutInt(L"editor", L"size10", g_pf.pt);
     IniPutInt(L"editor", L"bold", g_pf.bold);
     IniPutInt(L"editor", L"italic", g_pf.italic);
     IniPutInt(L"editor", L"wrap", g_pf.wrap);

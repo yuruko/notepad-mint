@@ -7,7 +7,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME                  /* the window title is "<name>" + this (main.c AppUpdateTitle); the title strip draws the name bold and this part regular */
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.0.8"
+#define APP_VERSION  L"1.0.9"
 #define PATH_CAP     1024
 
 /* ------------------------------------------------------------- palette --
@@ -235,11 +235,11 @@ DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol);      /* the sam
 extern DWORD g_textRev;                             /* bumped whenever the document text changes (EN_CHANGE, WM_SETTEXT): what caches of text-derived values are keyed on */
 
 /* ---------------------------------------------------------- app state ---- */
-#define FONT_MIN 9
-#define FONT_MAX 70
+#define FONT_MIN 70
+#define FONT_MAX 1000
 typedef struct Prefs {
     WCHAR    font[32];
-    int      pt, bold, italic;                  /* the size picked in the font dialog (saved); ctrl+0 returns to it */
+    int      pt, bold, italic;                  /* the size picked in the font dialog (saved, tenths of a point: 85 = 8.5 pt); ctrl+0 returns to it */
     int      cur;                               /* working size: ctrl+plus / ctrl+minus / ctrl+wheel move it (not saved) */
     int      theme;                             /* THEME_DARK / THEME_LIGHT (saved) */
     COLORREF fg, bg;                            /* editor colours: always the theme's (C_EDIT_FG / C_EDIT_BG), not saved */
@@ -289,7 +289,7 @@ void   EditCaretPos(int *line, int *col);       /* 1-based, logical lines (also 
 BOOL   EditSelStats(int enc, int eol, int *lines, DWORD *bytes);   /* the selection: TRUE when there is one, then the lines it covers and the bytes a save would write for it in this encoding / line ending (no bom) */
 BOOL   EditGotoLine(int line);
 void   EditClearLine(void);                     /* ctrl+k: empties the caret's logical line (the text only, its line break stays); one undo step */
-void   EditZoomStep(int dir);                   /* +1 / -1: next bigger / smaller size (9..70pt) */
+void   EditZoomStep(int dir);                   /* +1 / -1: next bigger / smaller size (7..100pt; ctrl+plus steps 8..48) */
 void   EditZoomReset(void);                     /* back to g_pf.pt, the size picked in the font dialog */
 BOOL   EditZoomCan(int dir);                    /* false at the ends of the range */
 void   EditInsert(const WCHAR *s);

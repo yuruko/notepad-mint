@@ -114,7 +114,7 @@ function Test-T43 {
 
         # An oversized native caret uses a display adjustment in 1.0.7. It still
         # needs the original logical row when navigating after a manual scroll.
-        $maxPx = [int][Math]::Round($IDM.FONT_MAX * [FP]::Dpi($ed) / 72.0, [MidpointRounding]::AwayFromZero)
+        $maxPx = [int][Math]::Round(480 * [FP]::Dpi($ed) / 720.0, [MidpointRounding]::AwayFromZero)      # the ctrl+plus ladder tops out at 48 pt (480 tenths)
         for ($j = 0; $j -lt 32 -and ([FP]::Font($ed)).height -gt -$maxPx; $j++) { [void](Snd $app.Main $WM_COMMAND $IDM.IDM_ZOOM_IN 0) }
         $idx++; CkEq ('T43.' + $idx + ' oversized caret case reaches the maximum font size') (-$maxPx) (([FP]::Font($ed)).height)
         [void][Nd]::Size($app.Main, 450, 140)

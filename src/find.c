@@ -34,7 +34,7 @@ static void Dodge(HWND dlg, int at)
     POINT pt;
     RECT r;
     LRESULT p;
-    int lh = MulDiv(g_pf.cur, g_dpi, 48), h, y;
+    int lh = MulDiv(g_pf.cur, g_dpi, 480), h, y;
     if (!dlg) return;
     p = SendMessageW(g_edit, EM_POSFROMCHAR, (WPARAM)at, 0);
     if (p == -1) return;

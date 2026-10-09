@@ -38,16 +38,16 @@ function Test-T39 {
         $pv = Ctl $dlg $IDT.ID_PREVIEW
         $idx++; CkEq ('T39.' + $idx + ' ' + $theme + ': preview text is the requested sentence and digits') 'sphinx of black quartz, judge my vow. 0123456789' ([U]::Text($pv))
         $dpi = [FP]::Dpi($pv)
-        foreach ($pt in $IDM.FONT_MIN..$IDM.FONT_MAX) {
+        foreach ($pt in @("7", "8.5", "10", "24", "48", "100")) {       # a sample of the range: the typed sizes, decimals included
             Set-Field $dlg $IDT.ID_SIZE ([string]$pt)
             $f = [FP]::Font($pv)
-            $px = [int][Math]::Round($pt * $dpi / 72.0, [MidpointRounding]::AwayFromZero)
+            $px = [int][Math]::Round([double]$pt * $dpi / 72.0, [MidpointRounding]::AwayFromZero)
             $idx++; CkEq ('T39.' + $idx + ' ' + $theme + ': ' + $pt + ' pt is rendered at its actual selected size') (-$px) $f.height
             $bmp = [U]::Grab($pv)
             try {
                 $ink = [FP]::Ink($bmp)
                 $idx++; Ck ('T39.' + $idx + ' ' + $theme + ': ' + $pt + ' pt has a visible single line') ($ink[0] -gt 0 -and $ink[2] - $ink[1] -lt 2 * $px) ('ink ' + $ink[0] + ', text height ' + ($ink[2] - $ink[1] + 1))
-                if ($pt -in @(9, 24, 70)) { $bmp.Save((Join-Path $Root ('build\audit106-preview-' + $theme + '-' + $pt + '.png')), [System.Drawing.Imaging.ImageFormat]::Png) }
+                if ($pt -in @("8.5", "24", "48")) { $bmp.Save((Join-Path $Root ('build\audit106-preview-' + $theme + '-' + $pt + '.png')), [System.Drawing.Imaging.ImageFormat]::Png) }
             } finally { $bmp.Dispose() }
         }
         Press $dlg $IDT.ID_BOLD
