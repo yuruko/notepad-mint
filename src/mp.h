@@ -7,7 +7,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME                  /* the window title is "<name>" + this (main.c AppUpdateTitle); the title strip draws the name bold and this part regular */
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.0.11"
+#define APP_VERSION  L"1.0.12"
 #define PATH_CAP     1024
 
 /* ------------------------------------------------------------- palette --
@@ -37,6 +37,8 @@ extern Palette g_pal;
 #define C_LO2       (g_pal.lo2)
 #define C_TEXT      (g_pal.text)
 #define C_DIM       (g_pal.dim)
+#define PROBE_ID    0x4D494E54                      /* "MINT": what a probe build answers to its "are you a probe" messages (tests only) */
+#define DEFAULT_FACE L"Consolas"                    /* the editor font until the user picks another */
 #define C_EDIT_FG   (g_pal.editFg)
 #define C_EDIT_BG   (g_pal.editBg)
 enum { THEME_DARK, THEME_LIGHT };
@@ -168,6 +170,8 @@ HWND  UiLabel(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWO
 HWND  UiEdit(DlgBase *b, const WCHAR *text, int x, int y, int w, int h, int id, DWORD extra);
 HWND  UiButton(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWORD style);
 int   MpAsk(HWND owner, const WCHAR *title, const WCHAR *msg, const WCHAR *b1, const WCHAR *b2, const WCHAR *b3, int escIdx);
+void  MpNote(HWND owner, const WCHAR *title, const WCHAR *msg);   /* a message with just an "ok" button */
+int   ClampInt(int v, int lo, int hi);
 
 /* ------------------------------------------ menu.c / menu_defs.c ---- */
 #define MS_CHECK 1
@@ -179,7 +183,7 @@ struct MenuDef { const MenuItem *items; int n; };
 typedef unsigned (*MenuStateFn)(int id);
 #define BAR_BTN_W 31                                  /* the buttons at the right end of the menu bar (word wrap, then the theme button flush right; its icon is a sun in the light theme, a moon in the dark one): the width of each, 96-dpi pixels (31, not 30: an odd width has a middle pixel, where the icon's middle goes) */
 #define BAR_BTN_ICON 12                               /* ... the box of the icon inside it, 96-dpi pixels  */
-#define BAR_BTN_OPACITY_ON 60                         /* ... the word wrap button (the left one of the two) is this opaque at rest while word wrap is ON (my choice: a toggle has to show its state, and no frame / sunken look is wanted) */
+#define BAR_BTN_OPACITY_ON 60                         /* ... the word wrap button (the left one of the two) is this opaque at rest while word wrap is ON (a toggle has to show its state, and no frame / sunken look is wanted) */
 #define BAR_BTN_OPACITY 20                           /* ... and how opaque the icon is at rest, percent (hovered: 100) */
 #define BAR_WRAP_ICON_DY 1                           /* ... the word wrap button's icon is drawn this many 96-dpi pixels below the middle of its button (the hover fill stays put; the theme button's icon stays centred) */
 #define BAR_TIP_DELAY 500                             /* ... the tooltip of a button (what it does + its key combo) shows once the pointer has been on it this many ms (the system's own initial delay: the double click time) */
@@ -230,7 +234,7 @@ enum { EOL_CRLF, EOL_LF, EOL_CR, EOL_COUNT };
 #define ENC_CP_MIN   100
 #define ERR_NOMEM    8
 #define ERR_TOO_BIG  223
-#define ERR_BADCP    87
+#define ERR_BADCP    0xE0000001u                    /* ours, not a windows error (87 was ERROR_INVALID_PARAMETER: a real one from CreateFileW looked like a missing code page) */
 #define ERR_LOSSY    1113                           /* ERROR_NO_UNICODE_TRANSLATION */
 extern const WCHAR *const g_encName[ENC_COUNT];
 extern const WCHAR *const g_eolName[EOL_COUNT];
@@ -255,7 +259,6 @@ typedef struct Prefs {
     int      pt, bold, italic;                  /* the size picked in the font dialog (saved, tenths of a point: 85 = 8.5 pt); ctrl+0 returns to it */
     int      cur;                               /* working size: ctrl+plus / ctrl+minus / ctrl+wheel move it (not saved) */
     int      theme;                             /* THEME_DARK / THEME_LIGHT (saved) */
-    COLORREF fg, bg;                            /* editor colours: always the theme's (C_EDIT_FG / C_EDIT_BG), not saved */
     int      wrap, statusbar;
     int      tab;                               /* tab size in columns: 2, 4 or 8 (saved) */
     int      winx, winy, winw, winh, maximized;
@@ -288,7 +291,7 @@ void  AppUpdateStatus(void);
 #define EDIT_BAND_INSET 0                           /* the row that is only partly in view at the bottom runs down to this many 96-dpi pixels above the editor's bottom edge: 0 = to the edge, EDIT_PAD = the bottom padding stays blank */
 HWND   EditCreate(HWND parent);                 /* (re)creates g_edit for g_pf.wrap, carrying text/selection/rtl over */
 void   EditApplyFont(void);                     /* font from g_pf (face, g_pf.cur size, dpi) */
-void   EditApplyColors(void);                   /* bg brush from g_pf.bg, repaint */
+void   EditApplyColors(void);                   /* bg brush from C_EDIT_BG, repaint */
 HBRUSH EditBrush(void);
 void   FontResolve(WCHAR *face);                /* swaps a missing face for consolas / lucida console / courier new */
 BOOL   EditSetDocText(const WCHAR *t);          /* load a document: resets undo + modified flag on success */

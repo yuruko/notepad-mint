@@ -72,6 +72,11 @@ int MpAsk(HWND owner, const WCHAR *title, const WCHAR *msg, const WCHAR *b1, con
     return 1;
 }
 
+void MpNote(HWND owner, const WCHAR *title, const WCHAR *msg)
+{
+    MpAsk(owner, title, msg, L"ok", NULL, NULL, 1);
+}
+
 WCHAR *EditGetDocText(int *len)
 {
     int n = GetWindowTextLengthW(g_edit);

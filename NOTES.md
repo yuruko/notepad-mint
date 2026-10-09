@@ -1,5 +1,13 @@
 # notepad mint
 
+## 1.0.12 installer fixes and an audit pass (2026-10-09)
+
+- the finish page checkbox is "set as default text editor" (the long text was cut off). a reviewer found the real bug behind it: `MUI_PAGE_CUSTOMFUNCTION_SHOW` applies to the NEXT page inserted, and the define sat before the welcome page, so `FinishShow` ran there (the box was never hidden / unticked on the finish page). it now sits right before `MUI_PAGE_FINISH`. "run notepad mint" goes through explorer (`LaunchApp`: the installer is elevated, the editor must not be). the uninstaller deletes the HKCU keys only when `...\shell\open\command` is this copy's. none of this could be run here (needs admin): the nsi compiles; check the finish page by hand.
+- measured and applied: `EditPaintBuffered` clips the offscreen DC to the update rectangle (a one row repaint cost the same as a full one: 15.5 ms at 1772 x 914, now 7.3 ms; `build\paint_bench.ps1`-style loop of `InvalidateRect` + `UpdateWindow`; the rest is the control laying out its text). `EolConvert` uses `mp_find3`. `ThemeIcon` samples each icon once per size (`g_icCov`).
+- measured and NOT changed: the 25 Hz scrollbar poll timer (idle cpu 0.0 ms over 10 s), the status bar recounts, the per-keystroke caret math.
+- cleanup: `MpNote` (9 call sites), `ClampInt`, 14 unused `w32.h` entries (`Get/SetWindowLongW` stay: the `*LongPtrW` macros use them; `VK_NEXT` stays as part of the key range), `g_pf.fg / bg` (read `C_EDIT_FG / C_EDIT_BG`), `PROBE_ID`, `DEFAULT_FACE`, stale comments. `ERR_BADCP` is a private value (87 collided with ERROR_INVALID_PARAMETER).
+- reviewed, left as follow-ups: printing runs on the ui thread (a huge job cannot be cancelled), rtl documents print left aligned, `FramePaint` / `MpAsk` do not check GDI creation, the `Applications\notepad-mint.exe` key assumes the exe name, no windows 7 fallback for the settings link, the uninstaller leaves a stale UserChoice (windows falls back to "open with"), `SaveBytes` has no in-place fallback, no multi-level undo. `FRAME_CUSTOM` dead branches and the SHOTDC probe code in `edit.c` were not touched (intentional switches).
+
 ## 1.0.11 default text editor, names from 2026 (2026-10-09)
 
 - asked: "make .txt open with notepad mint by default / add option in windows for extensions"; the maintainer chose installer + an in-app item and the plain text set (.txt .log .ini .cfg .conf .md .csv .nfo .diz .text). windows 8+ protects the default (UserChoice hash): a program can only register itself as a choice and open settings; the last click is the user's.

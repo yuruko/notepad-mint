@@ -279,14 +279,14 @@ void EditApplyFont(void)
 
 HBRUSH EditBrush(void)
 {
-    if (!g_brEdit) g_brEdit = CreateSolidBrush(g_pf.bg);
+    if (!g_brEdit) g_brEdit = CreateSolidBrush(C_EDIT_BG);
     return g_brEdit;
 }
 
 void EditApplyColors(void)
 {
     HBRUSH old = g_brEdit;
-    g_brEdit = CreateSolidBrush(g_pf.bg);
+    g_brEdit = CreateSolidBrush(C_EDIT_BG);
     if (g_edit) InvalidateRect(g_edit, NULL, TRUE);
     if (old) DeleteObject(old);
 }
@@ -762,11 +762,11 @@ static void BandRows(HWND h, HDC dc, const BandGeom *g, int r0, int r1, const RE
         }
         {
             int x = g->x0;
-            SetTextColor(dc, g_pf.fg);
+            SetTextColor(dc, C_EDIT_FG);
             x = BandText(dc, x, y, t + rs, a - rs, g->x0);
             SetTextColor(dc, hit);
             x = BandText(dc, x, y, t + a, b - a, g->x0);
-            SetTextColor(dc, g_pf.fg);
+            SetTextColor(dc, C_EDIT_FG);
             BandText(dc, x, y, t + b, re - b, g->x0);
         }
     }
@@ -872,6 +872,7 @@ static int EditPaintBuffered(HWND h, const RECT *dirty)
     if (!bmp) goto cleanup;
     ob = SelectObject(mdc, bmp);                               /* a bitmap selection fails with NULL */
     if (!ob) goto cleanup;
+    IntersectClipRect(mdc, dirty->left, dirty->top, dirty->right, dirty->bottom);   /* only the dirty part is blitted: the rest is neither filled nor drawn (a one row repaint cost the same as a full one) */
     saved = SaveDC(mdc);
     if (!saved || !FillRect(mdc, &cr, EditBrush())) goto cleanup;
     ReleaseDC(h, own);
@@ -1018,7 +1019,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return v; }
     case WM_APP + 92: {                                         /* standalone resize erase, captured before the next WM_PAINT can run */
         HDC dc;
-        if (!w) return 0x4D494E54;
+        if (!w) return PROBE_ID;
         dc = GetDC(h);
         if (dc) {
             SendMessageW(h, WM_ERASEBKGND, (WPARAM)dc, 0);
@@ -1038,7 +1039,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
         return 0; }
     case WM_APP + 94:                                           /* live pixels after the actual repaint erase, before native text drawing */
-        if (!w) return 0x4D494E54;
+        if (!w) return PROBE_ID;
         g_shotPaintW = (int)w;
         g_shotPaintH = (int)(l & 0xFFFF);
         g_shotPaintY = (int)((l >> 16) & 0xFFFF);
@@ -1051,7 +1052,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         RECT dirty = { 17, 19, 157, 51 };
         HDC dc;
         int ht = (int)(l & 0xFFFF), y0 = (int)((l >> 16) & 0xFFFF);
-        if (!w) return 0x4D494E54;
+        if (!w) return PROBE_ID;
         dc = GetDC(h);
         if (dc) {
             SetPixelV(dc, (int)w - 4, y0 + ht - 4, 0x00FF00FF);
@@ -1064,7 +1065,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_APP + 96: {                                         /* isolated caret/status calculation benchmark, alternating nearby positions near EOF */
         DWORD ss = 0, se = 0, now, elapsed;
         int n, i, a, b, line, col;
-        if (!w) return 0x4D494E54;
+        if (!w) return PROBE_ID;
         n = GetWindowTextLengthW(h);
         b = n > 16 ? n - 16 : n;
         a = b > (int)l ? b - (int)l : 0;

@@ -196,18 +196,34 @@ static int IconInside(int kind, int x, int y)
 /* a sun (TB_LIGHT) or a crescent moon (TB_DARK) in a size x size box at x, y: fg over bg at `pct` percent opacity (bg is what is under it already: only the
  * pixels the shape touches are drawn). antialiased by area: each pixel takes the share of its ICON_SS x ICON_SS sample points that are inside the shape,
  * times pct, as the share of fg in the mix */
-static void ThemeIcon(HDC dc, int kind, int x, int y, int size, COLORREF fg, COLORREF bg, int pct)
+static BYTE g_icCov[3][ICON_MAX * ICON_MAX];                     /* the coverage of every pixel, per icon, for g_icSize (the shapes never change: they are sampled once per size, not on every paint / hover step) */
+static int  g_icSize[3];
+
+static void IconCoverage(int kind, int size, BYTE *out)
 {
-    int g[ICON_MAX * ICON_SS], n, i, j, a, b, cov, num, den = ICON_SS * ICON_SS * 100, shift;
-    if (size > ICON_MAX) size = ICON_MAX;
+    int g[ICON_MAX * ICON_SS], n, i, j, a, b, cov, shift;
     n = size * ICON_SS;
     shift = (size & 1) ? 0 : 1792 / size;                       /* an even size puts the middle of the 56 grid on the line between two pixels: the picture moves half a pixel right and down, so the middle is the middle of a pixel (the sun's straight rays are then one crisp pixel wide, not two faint ones) */
     for (i = 0; i < n; i++) g[i] = (2 * i + 1) * 56 * 32 / n - shift;   /* the middle of sample i, in 1/64 grid units (the same for x and y) */
-    for (j = 0; j < size; j++) {
+    for (j = 0; j < size; j++)
         for (i = 0; i < size; i++) {
             cov = 0;
             for (b = 0; b < ICON_SS; b++)
                 for (a = 0; a < ICON_SS; a++) cov += IconInside(kind, g[i * ICON_SS + a], g[j * ICON_SS + b]);
+            out[j * size + i] = (BYTE)cov;
+        }
+}
+
+static void ThemeIcon(HDC dc, int kind, int x, int y, int size, COLORREF fg, COLORREF bg, int pct)
+{
+    int i, j, cov, num, den = ICON_SS * ICON_SS * 100;
+    const BYTE *c;
+    if (size > ICON_MAX) size = ICON_MAX;
+    if (g_icSize[kind] != size) { IconCoverage(kind, size, g_icCov[kind]); g_icSize[kind] = size; }
+    c = g_icCov[kind];
+    for (j = 0; j < size; j++) {
+        for (i = 0; i < size; i++) {
+            cov = c[j * size + i];
             if (!cov) continue;
             num = cov * pct;                                    /* the share of fg is num / den */
             SetPixelV(dc, x + i, y + j, num >= den ? fg : RGB(GetRValue(bg) + (GetRValue(fg) - GetRValue(bg)) * num / den,
@@ -806,7 +822,7 @@ static LRESULT CALLBACK BarProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
 #ifdef MENU_NO_TRACK
     case WM_APP + 91:                                   /* probe builds only: "this exe keeps a hover" (the gui tests look for it before they try one) */
-        return 0x4D494E54;
+        return PROBE_ID;
 #endif
     case WM_MOUSEMOVE: {
         int i = BarHit(GET_X_LPARAM(l), GET_Y_LPARAM(l));

@@ -11,11 +11,9 @@ static WCHAR g_iniDir[PATH_CAP], g_ini[PATH_CAP];
 static void PrefsDefaults(void)
 {
     memset(&g_pf, 0, sizeof g_pf);
-    wcopy(g_pf.font, L"Consolas", 32);
+    wcopy(g_pf.font, DEFAULT_FACE, 32);
     g_pf.pt = 100;
     g_pf.cur = g_pf.pt;
-    g_pf.fg = C_EDIT_FG;
-    g_pf.bg = C_EDIT_BG;
     g_pf.statusbar = 1;
     g_pf.tab = 4;
     g_pf.wrapAround = 1;
@@ -150,15 +148,12 @@ void RecentRemove(const WCHAR *path)                  /* a file that can't be op
     RecentStore();
 }
 
-static int Clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-/* the editor colours come with the theme: g_pf.fg / bg are derived, never saved */
+/* the editor colours come with the theme (C_EDIT_FG / C_EDIT_BG), never saved */
 void ThemeUse(int theme)
 {
     ThemeSet(theme);
     g_pf.theme = ThemeGet();
-    g_pf.fg = C_EDIT_FG;
-    g_pf.bg = C_EDIT_BG;
 }
 
 static void PrefsLoad(void)
@@ -169,7 +164,7 @@ static void PrefsLoad(void)
     if (f[0]) wcopy(g_pf.font, f, 32);
     g_pf.pt      = IniGet(L"editor", L"size10", 0);             /* tenths of a point; a settings.ini of 1.0.8 or older has only whole points in "size" */
     if (!g_pf.pt) g_pf.pt = 10 * IniGet(L"editor", L"size", 10);
-    g_pf.pt      = Clamp(g_pf.pt, FONT_MIN, FONT_MAX);
+    g_pf.pt      = ClampInt(g_pf.pt, FONT_MIN, FONT_MAX);
     g_pf.cur     = g_pf.pt;                                          /* the working size always starts at the chosen one */
     g_pf.bold    = IniGet(L"editor", L"bold", 0) != 0;
     g_pf.italic  = IniGet(L"editor", L"italic", 0) != 0;

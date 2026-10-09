@@ -926,7 +926,7 @@ static void TestDocDetect(void)
     FilePut(g_file, LIT("abc"));
     t = NULL;
     r = DocRead(g_file, &t, &n, &e, &l, 12345);
-    Want(r == ERR_BADCP, L"expected ERR_BADCP (87), got %d", (int)r, 0);
+    Want(r == ERR_BADCP, L"expected ERR_BADCP, got %d", (int)r, 0);
     Want(t == NULL, L"text not NULL", 0, 0);
     mem_free(t);
     Done(L"forced read with a code page that doesn't exist => ERR_BADCP");

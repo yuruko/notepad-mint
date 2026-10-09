@@ -42,7 +42,6 @@ static struct { HWND target; Sb *v, *h; int trimR, trimB; } g_tab[8];
 static HBRUSH g_dither;
 
 /* ------------------------------------------------------------ geometry --- */
-static int Clamp3(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 static int ReadSi(const Sb *s, SCROLLINFO *si)               /* the target's native bar; FALSE when it has none */
 {
@@ -71,7 +70,7 @@ static void Measure(const Sb *s, int w, int h, Geo *g)
     if (tlen < th) tlen = th;
     if (tlen > tl) tlen = tl;
     maxp = range - (page > 0 ? page : 0);                    /* the offsets the thumb can stand for: 0 .. maxp */
-    pos = Clamp3(s->si.nPos - s->si.nMin, 0, maxp);
+    pos = ClampInt(s->si.nPos - s->si.nMin, 0, maxp);
     g->a0 = g->t0 + (maxp > 0 ? MulDiv(tl - tlen, pos, maxp) : 0);
     g->a1 = g->a0 + tlen;
 }
@@ -213,14 +212,14 @@ static void ScrollTo(Sb *s, int pos)
     int maxp, cur;
     if (!ReadSi(s, &si)) return;
     maxp = si.nMax - (int)si.nPage + 1;
-    pos = Clamp3(pos, si.nMin, maxp > si.nMin ? maxp : si.nMin);
+    pos = ClampInt(pos, si.nMin, maxp > si.nMin ? maxp : si.nMin);
     if (!s->horz && IsClass(s->target, L"Edit")) {
         cur = (int)SendMessageW(s->target, EM_GETFIRSTVISIBLELINE, 0, 0);
         if (pos != cur) SendMessageW(s->target, EM_LINESCROLL, 0, (LPARAM)(pos - cur));
     } else if (!s->horz && IsClass(s->target, L"ListBox")) {
         SendMessageW(s->target, LB_SETTOPINDEX, (WPARAM)pos, 0);
     } else if (pos != si.nPos) {
-        SendMessageW(s->target, s->horz ? WM_HSCROLL : WM_VSCROLL, MAKEWPARAM(SB_THUMBPOSITION, (WORD)Clamp3(pos, 0, 65535)), 0);
+        SendMessageW(s->target, s->horz ? WM_HSCROLL : WM_VSCROLL, MAKEWPARAM(SB_THUMBPOSITION, (WORD)ClampInt(pos, 0, 65535)), 0);
     }
 }
 
@@ -241,7 +240,7 @@ static void Drag(Sb *s)                                      /* the pointer move
     a = s->horz ? s->px : s->py;
     tlen = g.a1 - g.a0;
     tl = g.t1 - g.t0;
-    na = Clamp3(a - s->grab, g.t0, g.t1 - tlen);
+    na = ClampInt(a - s->grab, g.t0, g.t1 - tlen);
     s->dragA = na;
     range = s->si.nMax - s->si.nMin + 1;
     page = (int)s->si.nPage;

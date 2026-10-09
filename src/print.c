@@ -28,7 +28,7 @@ static BOOL CdLoad(HWND owner)
         pCdErr    = (CdErrFn)GetProcAddress(g_cd, "CommDlgExtendedError");
     }
     if (pPrintDlg && pPageDlg && pCdErr) return TRUE;
-    MpAsk(owner, APP_NAME, L"cannot load comdlg32.dll, so printing is not available.", L"ok", NULL, NULL, 1);
+    MpNote(owner, APP_NAME, L"cannot load comdlg32.dll, so printing is not available.");
     return FALSE;
 }
 
@@ -68,7 +68,7 @@ static BOOL CdRun(HWND owner, PRINTDLGW *pd, PAGESETUPDLGW *ps)
     if (ok) return TRUE;
     if (!er || er == PDERR_NODEFAULTPRN || er == PDERR_NODEVICES) return FALSE;     /* cancelled / no printer (comdlg32 has said so itself) */
     wsprintfW(msg, L"cannot use the printer (error 0x%lx).", er);
-    MpAsk(owner, APP_NAME, msg, L"ok", NULL, NULL, 1);
+    MpNote(owner, APP_NAME, msg);
     return FALSE;
 }
 
@@ -404,8 +404,8 @@ void PrintDoc(HWND owner, int quiet)
     } else text = EditGetDocText(&n);
     /* with PD_USEDEVMODECOPIESANDCOLLATE the driver makes the copies and nCopies comes back 1; more => repeat the document */
     ok = pd.hDC && text ? PrintJob(pd.hDC, text, n, pd.nCopies > 1 ? pd.nCopies : 1, from, to) : 0;
-    SetCursor(cur);
+    SetCursor(cur ? cur : LoadCursorW(NULL, IDC_ARROW));   /* (NULL = there was no cursor yet: not "no cursor at all") */
     mem_free(text);
     if (pd.hDC) DeleteDC(pd.hDC);
-    if (!ok) MpAsk(owner, APP_NAME, L"cannot print the document.", L"ok", NULL, NULL, 1);
+    if (!ok) MpNote(owner, APP_NAME, L"cannot print the document.");
 }

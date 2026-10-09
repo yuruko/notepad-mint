@@ -10,7 +10,7 @@ Unicode true
 SetCompressor /SOLID lzma
 
 !ifndef VERSION
-  !define VERSION "1.0.11"
+  !define VERSION "1.0.12"
 !endif
 !ifndef EXE_PATH
   !error "EXE_PATH is not set (the built notepad-mint.exe)"
@@ -50,17 +50,18 @@ Var AssocBefore                                           ; 1 = an earlier insta
   !define MUI_UNICON "${ICON_PATH}"
 !endif
 !define MUI_ABORTWARNING
-!define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchApp            ; (through explorer: the installer runs elevated, the editor should not)
 !define MUI_FINISHPAGE_RUN_TEXT "run ${APP_NAME}"
 !define MUI_FINISHPAGE_SHOWREADME ""
-!define MUI_FINISHPAGE_SHOWREADME_TEXT "choose ${APP_NAME} as the default for text files (opens windows settings)"
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "set as default text editor"
 !define MUI_FINISHPAGE_SHOWREADME_FUNCTION OpenDefaultApps
-!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishShow
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishShow          ; (applies to the NEXT page inserted: this one, not the welcome page)
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -163,6 +164,10 @@ Section "text file types" SecAssoc
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'   ; SHCNE_ASSOCCHANGED
 SectionEnd
 
+Function LaunchApp
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\${APP_EXE}"'
+FunctionEnd
+
 Function OpenDefaultApps
   ExecShell "open" "ms-settings:defaultapps?registeredAppMachine=${REGAPP}"
 FunctionEnd
@@ -203,6 +208,10 @@ Section "Uninstall"
   ${EndIf}
   !insertmacro UnAssoc HKLM
   SetRegView 32
-  !insertmacro UnAssoc HKCU                              ; (help > set as default text editor writes the same keys per user)
+  ; help > set as default text editor writes the same keys per user: remove them only when they point at THIS copy (a portable exe elsewhere may be using them)
+  ReadRegStr $0 HKCU "Software\Classes\${PROGID}\shell\open\command" ""
+  StrCmp $0 '"$INSTDIR\${APP_EXE}" "%1"' 0 keepUserKeys
+    !insertmacro UnAssoc HKCU
+  keepUserKeys:
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd

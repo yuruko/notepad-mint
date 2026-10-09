@@ -62,7 +62,6 @@ typedef int     (CALLBACK *FONTENUMPROCW)(const void *, const void *, DWORD, LPA
 
 #define LOWORD(l)   ((WORD)((DWORD_PTR)(l) & 0xffff))
 #define HIWORD(l)   ((WORD)(((DWORD_PTR)(l) >> 16) & 0xffff))
-#define LOBYTE(w)   ((BYTE)((DWORD_PTR)(w) & 0xff))
 #define MAKELONG(a, b) ((LONG)(((WORD)((DWORD_PTR)(a) & 0xffff)) | ((DWORD)((WORD)((DWORD_PTR)(b) & 0xffff))) << 16))
 #define MAKELPARAM(a, b) ((LPARAM)MAKELONG(a, b))
 #define MAKEWPARAM(a, b) ((WPARAM)MAKELONG(a, b))
@@ -179,7 +178,6 @@ typedef struct {
 #define CW_USEDEFAULT        ((int)0x80000000)
 #define HWND_TOP        ((HWND)0)
 #define HWND_BOTTOM     ((HWND)1)
-#define HWND_TOPMOST    ((HWND)(LONG_PTR)-1)
 
 /* window styles */
 #define WS_OVERLAPPED 0x00000000L
@@ -304,7 +302,6 @@ typedef struct {
 #define HTTOP 12
 #define HTTOPLEFT 13
 #define HTTOPRIGHT 14
-#define HTBOTTOMRIGHT 17
 #define MA_NOACTIVATE 3
 #define ICON_SMALL 0
 #define ICON_BIG 1
@@ -332,7 +329,6 @@ typedef struct {
 #define GWLP_ID (-12)
 #define GW_HWNDNEXT 2
 #define GW_HWNDPREV 3
-#define GW_OWNER 4
 
 #define SB_HORZ 0
 #define SB_VERT 1
@@ -358,8 +354,6 @@ typedef struct {
 
 #define IDOK 1
 #define IDCANCEL 2
-#define IDYES 6
-#define IDNO 7
 
 #define RDW_INVALIDATE 0x0001
 #define RDW_ERASE 0x0004
@@ -426,7 +420,6 @@ typedef struct {
 #define EM_GETLINECOUNT 0x00BA
 #define EM_LINEINDEX 0x00BB
 #define EM_GETHANDLE 0x00BD
-#define EM_LINELENGTH 0x00C1
 #define EM_REPLACESEL 0x00C2
 #define EM_LIMITTEXT 0x00C5
 #define EM_CANUNDO 0x00C6
@@ -473,7 +466,6 @@ typedef struct {
 #define LB_GETCURSEL 0x0188
 #define LB_GETTEXT 0x0189
 #define LB_GETTEXTLEN 0x018A
-#define LB_GETCOUNT 0x018B
 #define LB_SETTOPINDEX 0x0197
 #define LB_GETITEMDATA 0x0199
 #define LB_SETITEMDATA 0x019A
@@ -543,7 +535,6 @@ typedef struct {
 #define FILE_ATTRIBUTE_NOT_CONTENT_INDEXED 0x2000
 #define MOVEFILE_WRITE_THROUGH 0x8
 #define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
-#define CP_ACP 0
 #define CP_UTF8 65001
 #define CT_CTYPE1 1
 #define CT_CTYPE3 4
@@ -655,6 +646,8 @@ API HGLOBAL WINAPI GlobalFree(HGLOBAL);
 API UINT    WINAPI SetErrorMode(UINT);
 
 /* --------------------------------------------------------------- user32 -- */
+API LONG    WINAPI SetWindowLongW(HWND, int, LONG);              /* 32-bit user32 has no ...LongPtr exports */
+API LONG    WINAPI GetWindowLongW(HWND, int);
 API ATOM    WINAPI RegisterClassExW(const WNDCLASSEXW *);
 API HWND    WINAPI CreateWindowExW(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, LPVOID);
 API BOOL    WINAPI DestroyWindow(HWND);
@@ -669,8 +662,6 @@ API LRESULT WINAPI CallWindowProcW(WNDPROC, HWND, UINT, WPARAM, LPARAM);
 API LRESULT WINAPI SendMessageW(HWND, UINT, WPARAM, LPARAM);
 API BOOL    WINAPI PostMessageW(HWND, UINT, WPARAM, LPARAM);
 API void    WINAPI PostQuitMessage(int);
-API LONG    WINAPI SetWindowLongW(HWND, int, LONG);              /* 32-bit user32 has no ...LongPtr exports */
-API LONG    WINAPI GetWindowLongW(HWND, int);
 #define SetWindowLongPtrW SetWindowLongW
 #define GetWindowLongPtrW GetWindowLongW
 API BOOL    WINAPI SetWindowPos(HWND, HWND, int, int, int, int, UINT);
@@ -703,8 +694,6 @@ API BOOL    WINAPI ReleaseCapture(void);
 API HWND    WINAPI GetCapture(void);
 API HWND    WINAPI GetFocus(void);
 API HWND    WINAPI SetFocus(HWND);
-API HWND    WINAPI GetForegroundWindow(void);
-API BOOL    WINAPI SetForegroundWindow(HWND);
 API HWND    WINAPI SetActiveWindow(HWND);
 API BOOL    WINAPI EnableWindow(HWND, BOOL);
 API BOOL    WINAPI IsWindowEnabled(HWND);
@@ -752,7 +741,6 @@ API DWORD   WINAPI SetClassLongW(HWND, int, LONG);              /* SetClassLongP
 API BOOL    WINAPI GetCaretPos(POINT *);
 API BOOL    WINAPI SetCaretPos(int, int);
 API BOOL    WINAPI GetGUIThreadInfo(DWORD, GUITHREADINFO *);
-API BOOL    WINAPI CreateCaret(HWND, HBITMAP, int, int);
 API BOOL    WINAPI ShowCaret(HWND);
 API BOOL    WINAPI HideCaret(HWND);
 API BOOL    WINAPI GetUpdateRect(HWND, RECT *, BOOL);

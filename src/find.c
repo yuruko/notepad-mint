@@ -24,7 +24,7 @@ static void NotFound(HWND owner)
     wcopy(msg, L"cannot find \"", COUNTOF(msg));
     wcat(msg, g_findWhat, COUNTOF(msg));
     wcat(msg, L"\"", COUNTOF(msg));
-    MpAsk(owner, APP_NAME, msg, L"ok", NULL, NULL, 1);
+    MpNote(owner, APP_NAME, msg);
 }
 
 /* like notepad: move the dialog above (else below) the match when it covers it */
@@ -117,7 +117,7 @@ static void ReplaceAll(HWND owner)
     }
     EditUnlockText(hl);
     if (found && !out) {
-        MpAsk(owner, APP_NAME, L"not enough memory available to complete this operation.", L"ok", NULL, NULL, 1);
+        MpNote(owner, APP_NAME, L"not enough memory available to complete this operation.");
         return;
     }
     if (!found || !cnt) { mem_free(out); NotFound(owner); return; }
@@ -347,7 +347,7 @@ static LRESULT CALLBACK GotoProc(HWND h, UINT m, WPARAM w, LPARAM l)
             GetWindowTextW(d->edit, t, 16);
             n = wtoi(t);
             if (EditGotoLine(n < 1 ? 1 : n)) { b->result = 1; b->done = 1; return 0; }
-            MpAsk(h, L"go to line", L"the line number is beyond the total number of lines", L"ok", NULL, NULL, 1);
+            MpNote(h, L"go to line", L"the line number is beyond the total number of lines");
             SetFocus(d->edit);
             SendMessageW(d->edit, EM_SETSEL, 0, (LPARAM)-1);
             return 0;

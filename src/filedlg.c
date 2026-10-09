@@ -43,7 +43,7 @@ static BOOL PickFile(HWND owner, WCHAR *path, int cap, BOOL save)
 
     if (!path || cap <= 0) return FALSE;
     if (!CdLoad()) {
-        MpAsk(owner, APP_NAME, L"cannot show the file dialog.", L"ok", NULL, NULL, 1);
+        MpNote(owner, APP_NAME, L"cannot show the file dialog.");
         return FALSE;
     }
 
@@ -70,12 +70,11 @@ static BOOL PickFile(HWND owner, WCHAR *path, int cap, BOOL save)
     DialogReleaseFind(fd);
 
     if (!ok) {
-        if (er) MpAsk(owner, APP_NAME, er == FNERR_BUFFERTOOSMALL ? L"the file name is too long." : L"cannot show the file dialog.",
-                      L"ok", NULL, NULL, 1);
+        if (er) MpNote(owner, APP_NAME, er == FNERR_BUFFERTOOSMALL ? L"the file name is too long." : L"cannot show the file dialog.");
         return FALSE;
     }
     if (wlen(buf) >= cap) {
-        MpAsk(owner, APP_NAME, L"the file name is too long.", L"ok", NULL, NULL, 1);
+        MpNote(owner, APP_NAME, L"the file name is too long.");
         return FALSE;
     }
     wcopy(path, buf, cap);

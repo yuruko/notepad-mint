@@ -308,6 +308,11 @@ int MpAsk(HWND owner, const WCHAR *title, const WCHAR *msg, const WCHAR *b1, con
     return d.b.result;
 }
 
+void MpNote(HWND owner, const WCHAR *title, const WCHAR *msg)
+{
+    MpAsk(owner, title, msg, L"ok", NULL, NULL, 1);
+}
+
 void DialogInit(void)
 {
     RegClass(L"mp_msg", MsgProc, 0, NULL);

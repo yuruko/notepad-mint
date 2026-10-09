@@ -407,11 +407,11 @@ static WCHAR *EolConvert(const WCHAR *t, int len, int eol, int *outLen, int *own
 {
     size_t el = (eol == EOL_CRLF) ? 2 : 1, i, breaks = 0, consumed = 0, total;
     WCHAR *out, *d;
-    for (i = 0; i < (size_t)len; i++) {
+    for (i = mp_find3(t, (size_t)len, '\r', '\n', '\n'); i < (size_t)len; i += 1 + mp_find3(t + i + 1, (size_t)len - i - 1, '\r', '\n', '\n')) {   /* (sse2: from one break to the next) */
         if (t[i] == '\r') {
             breaks++; consumed++;
             if (i + 1 < (size_t)len && t[i + 1] == '\n') { i++; consumed++; }
-        } else if (t[i] == '\n') {
+        } else {
             breaks++; consumed++;
         }
     }
@@ -423,14 +423,15 @@ static WCHAR *EolConvert(const WCHAR *t, int len, int eol, int *outLen, int *own
     if (!out) return NULL;
     d = out;
     for (i = 0; i < (size_t)len; i++) {
-        WCHAR c = t[i];
-        if (c == '\r' || c == '\n') {
-            if (c == '\r' && i + 1 < (size_t)len && t[i + 1] == '\n') i++;
-            if (eol == EOL_CRLF) { *d++ = '\r'; *d++ = '\n'; }
-            else *d++ = (eol == EOL_LF) ? '\n' : '\r';
-        } else {
-            *d++ = c;
-        }
+        size_t k = mp_find3(t + i, (size_t)len - i, '\r', '\n', '\n');         /* the run up to the next break in one copy */
+        WCHAR c;
+        memcpy(d, t + i, k * sizeof(WCHAR));
+        d += k; i += k;
+        if (i >= (size_t)len) break;
+        c = t[i];
+        if (c == '\r' && i + 1 < (size_t)len && t[i + 1] == '\n') i++;
+        if (eol == EOL_CRLF) { *d++ = '\r'; *d++ = '\n'; }
+        else *d++ = (eol == EOL_LF) ? '\n' : '\r';
     }
     *d = 0;
     *outLen = (int)total;

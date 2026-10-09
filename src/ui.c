@@ -55,7 +55,7 @@ static DpiSysFn pDpiSys;
 static AdjDpiFn pAdjDpi;
 static MetricFn pMetric;
 
-static WCHAR g_chromeFace[32] = L"Consolas";   /* menu bar / popups / status bar / title strip font: the editor font face, CHROME_PX pixels */
+static WCHAR g_chromeFace[32] = DEFAULT_FACE;   /* menu bar / popups / status bar / title strip font: the editor font face, CHROME_PX pixels */
 
 int S(int v)    { return MulDiv(v, g_dpi, 96); }
 int UnS(int px) { return MulDiv(px, 96, g_dpi); }

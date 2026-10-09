@@ -32,7 +32,7 @@ static void Measure(void)
     g_floor[SB_LINES] = 0;                                         /* fully dynamic like the encoding: it grows and shrinks with the text, nothing is reserved */
     g_floor[SB_BYTES] = 0;
     g_floor[SB_EOL] = 0;                                           /* fully dynamic too: "lf" gets a panel of its own width, not the width of "crlf" */
-    g_floor[SB_ENC] = 0;                                          /* fully dynamic (maintainer's request): the width is the text's width, whatever it is */
+    g_floor[SB_ENC] = 0;                                          /* fully dynamic: the width is the text's width, whatever it is */
     for (i = 0; i < SB_COUNT; i++) g_need[i] = TextWidth(dc, g_txt[i]);
     SelectObject(dc, of);
     ReleaseDC(NULL, dc);

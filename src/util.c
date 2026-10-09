@@ -45,6 +45,8 @@ void mem_free(void *p)
     if (p) HeapFree(g_heap, 0, p);
 }
 
+int ClampInt(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
 int wlen(const WCHAR *s)
 {
     const WCHAR *p = s;

@@ -398,7 +398,7 @@ static void FontCmd(FontSt *d, int id, int code)
         d->italic = Checked(h, ID_ITALIC);
         break;
     case ID_RESET:
-        wcopy(d->face, L"Consolas", 32);
+        wcopy(d->face, DEFAULT_FACE, 32);
         FontResolve(d->face);
         d->pt = 100;
         d->bold = 0;

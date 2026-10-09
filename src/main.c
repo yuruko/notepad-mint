@@ -20,7 +20,7 @@ static WCHAR  g_title[PATH_CAP + 64];
 /* ===================================================== small helpers ===== */
 static void Say(const WCHAR *msg)
 {
-    MpAsk(g_hwnd, APP_NAME, msg, L"ok", NULL, NULL, 1);
+    MpNote(g_hwnd, APP_NAME, msg);
 }
 
 static void FileError(DWORD er, const WCHAR *path, BOOL saving)
@@ -811,8 +811,8 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0; }
     case WM_CTLCOLOREDIT:
         if ((HWND)l == g_edit) {
-            SetTextColor((HDC)w, g_pf.fg);
-            SetBkColor((HDC)w, g_pf.bg);
+            SetTextColor((HDC)w, C_EDIT_FG);
+            SetBkColor((HDC)w, C_EDIT_BG);
             return (LRESULT)EditBrush();
         }
         break;
