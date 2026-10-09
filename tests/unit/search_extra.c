@@ -20,6 +20,58 @@ static int RefSearch(const WCHAR *t, int n, const WCHAR *p, int m, int from, int
     return -1;
 }
 
+static int Naive3(const WCHAR *p, int n, WCHAR a, WCHAR b, WCHAR c)
+{
+    int i;
+    for (i = 0; i < n; i++) if (p[i] == a || p[i] == b || p[i] == c) return i;
+    return n;
+}
+
+/* mp_find3 (rt.asm) against a plain loop: every single hit position, every length 0..40, 8 alignments, each of the three values; traps that
+ * share a byte with a wanted unit; a protected page right after the text. and the wlow table (util.c) against the system's single-char form */
+static void TestFind3(void)
+{
+    static const WCHAR vals[3] = { '\r', '\n', 0 };
+    WCHAR text[64], *guard, *edge;
+    DWORD old;
+    int i, n, from, v, bad = 0, c;
+
+    Group(L"rt.asm mp_find3");
+    for (v = 0; v < 3; v++)
+        for (from = 0; from < 8; from++)
+            for (n = 0; n <= 40; n++)
+                for (i = -1; i < n; i++) {
+                    int k;
+                    for (k = 0; k < 64; k++) text[k] = (WCHAR)(k & 1 ? 0x0A0D : 0x0D00);   /* (bytes of \r / \n in the wrong half) */
+                    if (i >= 0) text[from + i] = vals[v];
+                    if ((int)mp_find3(text + from, (size_t)n, '\r', '\n', 0) != Naive3(text + from, n, '\r', '\n', 0)) bad++;
+                }
+    Int(L"every hit position x lengths 0..40 x 8 alignments x 3 values (traps 0x0a0d, 0x0d00)", bad, 0);
+    for (i = 0; i < 64; i++) text[i] = (WCHAR)('a' + i % 26);
+    Int(L"a, b and c can be the same unit", (int)mp_find3(text, 64, 'q', 'q', 'q'), 16);
+    Int(L"the last of the three matches too", (int)mp_find3(text, 64, 0x212A, 'Z', 'k'), 10);
+    Int(L"no hit = n", (int)mp_find3(text, 64, '!', '?', 0), 64);
+    guard = (WCHAR *)VirtualAlloc(NULL, 8192, 0x3000, 4);
+    if (guard && VirtualProtect((BYTE *)guard + 4096, 4096, 1, &old)) {
+        bad = 0;
+        for (n = 0; n <= 80; n++) {
+            edge = (WCHAR *)((BYTE *)guard + 4096) - n;
+            for (i = 0; i < n; i++) edge[i] = 'x';
+            if ((int)mp_find3(edge, (size_t)n, '\r', '\n', 0) != n) bad++;
+            if (n && (int)mp_find3(edge, (size_t)n, 'y', 'y', 'x') != 0) bad++;
+            if (n) { edge[n - 1] = '\n'; if ((int)mp_find3(edge, (size_t)n, '\r', '\n', 0) != n - 1) bad++; }
+        }
+        Int(L"never reads past a protected page (lengths 0..80, miss and last-unit hit)", bad, 0);
+    } else Result(L"protected-tail allocation", L"VirtualAlloc / VirtualProtect failed");
+    if (guard) VirtualFree(guard, 0, 0x8000);
+
+    Group(L"util.c wlow table");
+    bad = 0;
+    for (c = 0; c < 65536; c++)
+        if (wlow((WCHAR)c) != (WCHAR)(ULONG_PTR)CharLowerW((LPWSTR)(ULONG_PTR)c)) bad++;
+    Int(L"all 65536 units: the table = CharLowerW of the single unit", bad, 0);
+}
+
 static void TestSearchExtra(void)
 {
     static const struct { const WCHAR *text, *pat; int from, up, mc, at; } words[] = {
@@ -109,4 +161,5 @@ static void TestSearchExtra(void)
         Done(L"newline count / search never read past protected page (lengths 0..80)");
     } else Result(L"protected-tail allocation", L"VirtualAlloc / VirtualProtect failed");
     if (guard) VirtualFree(guard, 0, 0x8000);
+    TestFind3();
 }

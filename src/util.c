@@ -78,10 +78,29 @@ int wcmpi(const WCHAR *a, const WCHAR *b)
     return CompareStringOrdinal(a, -1, b, -1, TRUE) - CSTR_EQUAL;
 }
 
+/* the lower case of every utf-16 unit, made on the first non-ascii one: a search that ignores case looks up each character of the text,
+ * and the system call costs about 100 ns a character (seconds on a big cyrillic or greek file). CharLowerW of a string maps unit by unit like its
+ * single-char form, except that a surrogate pair is mapped as one character: the surrogates stay out of the strings (they map to themselves) */
+static WCHAR *g_low;
+
+static void LowInit(void)
+{
+    WCHAR *t = (WCHAR *)mem_alloc(65537 * sizeof(WCHAR));
+    int i;
+    if (!t) return;
+    for (i = 0; i < 65536; i++) t[i] = (WCHAR)i;
+    t[0xD800] = 0; t[0x10000] = 0;                  /* (each range a nul terminated string) */
+    CharLowerW(t + 128);
+    CharLowerW(t + 0xE000);
+    t[0xD800] = 0xD800;
+    g_low = t;
+}
+
 WCHAR wlow(WCHAR c)
 {
     if (c < 128) return (c >= 'A' && c <= 'Z') ? (WCHAR)(c + 32) : c;
-    return (WCHAR)(ULONG_PTR)CharLowerW((LPWSTR)(ULONG_PTR)c);   /* single-char form */
+    if (!g_low) LowInit();
+    return g_low ? g_low[c] : (WCHAR)(ULONG_PTR)CharLowerW((LPWSTR)(ULONG_PTR)c);   /* (no memory for the table: the single-char form) */
 }
 
 int wtoi(const WCHAR *s)
@@ -97,62 +116,38 @@ int wtoi(const WCHAR *s)
     return neg ? -v : v;
 }
 
-/* the default name of an unsaved document: "mint-" + four characters from 0-9 a-z (base 36, zero padded) of the sum
- * year + month * 100 + day + seconds since midnight (local time). that is at most about 97600 for any year up to 9999,
- * far below 36^4 = 1679616, so it always fits four characters; the modulo only guards against a nonsense SYSTEMTIME.
- * out needs room for 10 characters (cap < 10 gives an empty string) */
-void DefaultDocName(const SYSTEMTIME *st, WCHAR *out, int cap)
+/* the default name of an unsaved document: "mint-" + four characters from 0-9 a-z (base 36, zero padded) of a number that only grows.
+ * DocNameClock = the local date and time as DOCNAME_STEPS steps a day (45: one every 32 minutes) counted from midnight on 1 january 2000
+ * (= 0000). only the last two digits of the year count, so 2100 starts at 0000 again: a century is at most 36525 days * 45 = 1643625 steps,
+ * below 36^4 = 1679616, so it always fits four characters (today's names start with 9, the first character steps every 2.8 years). */
+unsigned DocNameClock(const SYSTEMTIME *st)
+{
+    static const WORD before[12] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+    unsigned y = st->wYear % 100u, m = st->wMonth, d = st->wDay, sec;
+    if (m < 1 || m > 12) m = 1;
+    if (d < 1 || d > 31) d = 1;
+    sec = ((unsigned)st->wHour * 3600u + (unsigned)st->wMinute * 60u + (unsigned)st->wSecond) % 86400u;
+    return (y * 365u + (y + 3u) / 4u + before[m - 1] + (m > 2 && y % 4u == 0) + d - 1u) * DOCNAME_STEPS + sec / (86400u / DOCNAME_STEPS);
+}
+
+/* the next name: one more than the last one handed out while that is ahead of the clock (several documents within 32 minutes, or the clock
+ * was set back), else the clock's. a last name more than DOCNAME_AHEAD steps ahead is stale (a new century, a clock that was far off): the clock wins */
+unsigned DocNameNext(unsigned clock, unsigned last)
+{
+    unsigned next = last + 1u;                      /* (DOCNAME_NONE + 1 = 0: never ahead) */
+    return next > clock && next - clock <= DOCNAME_AHEAD ? next : clock;
+}
+
+/* out needs room for 10 characters (cap < 10 gives an empty string) */
+void DefaultDocName(unsigned v, WCHAR *out, int cap)
 {
     static const WCHAR dig[] = L"0123456789abcdefghijklmnopqrstuvwxyz";
-    unsigned v = (unsigned)st->wYear + (unsigned)st->wMonth * 100u + (unsigned)st->wDay +
-                 (unsigned)st->wHour * 3600u + (unsigned)st->wMinute * 60u + (unsigned)st->wSecond;
     int i;
     if (cap < 10) { if (cap > 0) out[0] = 0; return; }
     v %= 1679616u;
     wcopy(out, L"mint-", cap);
     for (i = 8; i >= 5; i--) { out[i] = dig[v % 36u]; v /= 36u; }
     out[9] = 0;
-}
-
-static int hexval(WCHAR c)
-{
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
-/* "rrggbb", "#rrggbb", "rgb" */
-BOOL ParseColor(const WCHAR *s, COLORREF *out)
-{
-    int v[6], n = 0;
-    while (*s == ' ') s++;
-    if (*s == '#') s++;
-    while (n < 6 && hexval(*s) >= 0) v[n++] = hexval(*s++);
-    while (*s == ' ') s++;
-    if (*s) return FALSE;
-    if (n == 3) {
-        *out = RGB(v[0] * 17, v[1] * 17, v[2] * 17);
-        return TRUE;
-    }
-    if (n == 6) {
-        *out = RGB(v[0] * 16 + v[1], v[2] * 16 + v[3], v[4] * 16 + v[5]);
-        return TRUE;
-    }
-    return FALSE;
-}
-
-void FormatColor(COLORREF c, WCHAR *out)
-{
-    static const WCHAR hx[] = L"0123456789abcdef";
-    BYTE b[3];
-    int i;
-    b[0] = GetRValue(c); b[1] = GetGValue(c); b[2] = GetBValue(c);
-    for (i = 0; i < 3; i++) {
-        out[i * 2]     = hx[b[i] >> 4];
-        out[i * 2 + 1] = hx[b[i] & 15];
-    }
-    out[6] = 0;
 }
 
 const WCHAR *PathName(const WCHAR *path)
@@ -180,38 +175,6 @@ void PathJoin(WCHAR *dir, const WCHAR *name, int cap)
     int n = wlen(dir);
     if (n > 0 && dir[n - 1] != '\\') wcat(dir, L"\\", cap);
     wcat(dir, name, cap);
-}
-
-/* one pattern [p, pe) against a whole name: '*' = any run (also empty), '?' = exactly one char */
-static BOOL Wild1(const WCHAR *p, const WCHAR *pe, const WCHAR *s)
-{
-    const WCHAR *star = NULL, *ss = NULL;
-    while (*s) {
-        if (p < pe && *p == '*') { star = ++p; ss = s; }
-        else if (p < pe && (*p == '?' || wlow(*p) == wlow(*s))) { p++; s++; }
-        else if (star) { p = star; s = ++ss; }
-        else return FALSE;
-    }
-    while (p < pe && *p == '*') p++;
-    return p == pe;
-}
-
-/* file dialog filters. like the classic dialogs a trailing ".*" may also match "no extension",
- * so "*.*" lists every file and "readme.*" finds "readme". "*.txt; *.log" = either pattern */
-BOOL WildMatch(const WCHAR *pat, const WCHAR *name)
-{
-    while (*pat) {
-        const WCHAR *b, *e;
-        while (*pat == ' ' || *pat == ';') pat++;
-        b = pat;
-        while (*pat && *pat != ';') pat++;
-        e = pat;
-        while (e > b && e[-1] == ' ') e--;
-        if (e == b) continue;
-        if (Wild1(b, e, name)) return TRUE;
-        if (e - b >= 2 && e[-1] == '*' && e[-2] == '.' && Wild1(b, e - 2, name)) return TRUE;
-    }
-    return FALSE;
 }
 
 BOOL IsDir(const WCHAR *path)

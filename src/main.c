@@ -50,12 +50,12 @@ static void FocusEdit(void)
     if (g_edit && IsWindowEnabled(g_hwnd)) SetFocus(g_edit);
 }
 
-/* a fresh default name for a document that has no file yet ("mint-XXXX", from the local date and time) */
+/* a fresh default name for a document that has no file yet ("mint-XXXX": from the local date and time, and always higher than the last one) */
 static void NewDocName(void)
 {
     SYSTEMTIME st;
     GetLocalTime(&st);
-    DefaultDocName(&st, g_doc.name, COUNTOF(g_doc.name));
+    DefaultDocName(PrefsTakeDocName(DocNameClock(&st)), g_doc.name, COUNTOF(g_doc.name));
 }
 
 const WCHAR *AppDocName(void)
@@ -87,7 +87,8 @@ static void EditArea(RECT *r)                       /* the area the edit fills (
     r->right = cr.right;
     r->bottom = cr.bottom - sh;
     if (r->bottom < r->top + 4) r->bottom = r->top + 4;
-    r->right += S(SBAR_TRIM);                         /* the overhang that makes the scrollbars thinner (sbar.c, EditPad2): the parent clips it away */
+    if (EditIsRtl()) r->left -= S(SBAR_TRIM);         /* the overhang that makes the scrollbars thinner (sbar.c, EditViewRect): the parent clips it away. */
+    else r->right += S(SBAR_TRIM);                    /* it is on the side of the vertical bar: the left one in a right to left editor */
     r->bottom += S(SBAR_TRIM);
 }
 
@@ -109,6 +110,27 @@ static void Layout(void)
     }
     if (g_status) ShowWindow(g_status, sh ? SW_SHOW : SW_HIDE);
     InvalidateRect(g_hwnd, NULL, FALSE);            /* the frame lines move with the edit */
+}
+
+/* ===================================================== reading order ===== */
+#define DIR_SCAN 4096                               /* how far the automatic reading order looks for the first letter with a direction */
+static int g_dirManual;                             /* the user picked the reading order of this document: nothing automatic until the next new / open */
+
+static void SetRtl(BOOL rtl)
+{
+    if (!EditSetRtl(rtl)) return;
+    Layout();                                       /* (the overhang of the editor's window moves to the side of its scrollbar) */
+    SbarSync(g_edit);
+}
+
+/* like dir="auto" in html: the reading order follows the first letter that has a direction (hebrew, arabic ... = right to left) until the user
+ * picks one (context menu, ctrl+right shift / ctrl+left shift). a document without such a letter keeps the order it has */
+static void AutoDir(void)
+{
+    int d;
+    if (g_dirManual) return;
+    d = EditStrongDir(DIR_SCAN);
+    if (d) SetRtl(d == 2);
 }
 
 /* ===================================================== document state ==== */
@@ -178,8 +200,20 @@ static BOOL OpenDoc(const WCHAR *path, int force, BOOL logEntry)
     int len, enc, eol, logFile;
     FileStamp stamp = DiskStamp(path);
     DWORD er = DocRead(path, &t, &len, &enc, &eol, force);
+    if (er == ERR_LOSSY) {                          /* not valid in its encoding: never opened by accident, but it can be opened */
+        WCHAR msg[PATH_CAP + 320];
+        wcopy(msg, path, COUNTOF(msg));
+        wcat(msg, L"\n\nsome bytes of this file are not valid in its encoding (a broken utf-8 sequence, or an odd number of bytes for utf-16). "
+                  L"open it anyway? they are shown as \xFFFD, and saving writes them that way. format > encoding > reopen with encoding can pick another encoding.", COUNTOF(msg));
+        if (MpAsk(g_hwnd, APP_NAME, msg, L"open", L"cancel", NULL, 2) != 1) return FALSE;
+        DocAllowLossy(TRUE);
+        er = DocRead(path, &t, &len, &enc, &eol, force);
+        DocAllowLossy(FALSE);
+    }
     if (er) { FileError(er, path, FALSE); return FALSE; }
     if (!EditSetDocText(t)) { mem_free(t); FileError(ERR_NOMEM, path, FALSE); return FALSE; }
+    g_dirManual = 0;
+    SetRtl(EditStrongDir(DIR_SCAN) == 2);
     /* classic .LOG files get a new entry each time they are opened for editing. */
     logFile = len >= 4 && t[0] == '.' && t[1] == 'L' && t[2] == 'O' && t[3] == 'G';
     mem_free(t);
@@ -261,6 +295,8 @@ static void FileNew(void)
 {
     if (!Confirm()) return;
     if (!EditSetDocText(L"")) { Say(L"not enough memory available to complete this operation."); return; }
+    g_dirManual = 0;
+    SetRtl(FALSE);
     g_doc.path[0] = 0;
     g_diskStamp.valid = 0;
     NewDocName();                                            /* every new document gets its own default name */
@@ -285,8 +321,8 @@ void AppOpenPath(const WCHAR *path)
     if (Confirm()) OpenDoc(path, -1, TRUE);
 }
 
-/* the file named on the command line. like notepad: "foo" falls back to "foo.txt", a missing file can be created */
-static void OpenCmdFile(const WCHAR *arg)
+/* the file named on the command line. like notepad: "foo" falls back to "foo.txt", a missing file can be created. force = the encoding of /a or /w (-1 = detect) */
+static void OpenCmdFile(const WCHAR *arg, int force)
 {
     WCHAR full[PATH_CAP], msg[PATH_CAP + 128];
     const WCHAR *nm;
@@ -296,14 +332,14 @@ static void OpenCmdFile(const WCHAR *arg)
     r = (int)GetFullPathNameW(arg, PATH_CAP, full, NULL);
     if (!r || r >= PATH_CAP) { FileError(r >= PATH_CAP ? 206 : GetLastError(), arg, FALSE); return; }
     if (IsDir(full)) return;
-    if (GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES) { OpenDoc(full, -1, TRUE); return; }
+    if (GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES) { OpenDoc(full, force, TRUE); return; }
 
     for (nm = PathName(arg); *nm; nm++) if (*nm == '.') dot = TRUE;
     if (!dot) {
         WCHAR t[PATH_CAP];
         wcopy(t, full, PATH_CAP);
         wcat(t, L".txt", PATH_CAP);
-        if (GetFileAttributesW(t) != INVALID_FILE_ATTRIBUTES) { OpenDoc(t, -1, TRUE); return; }
+        if (GetFileAttributesW(t) != INVALID_FILE_ATTRIBUTES) { OpenDoc(t, force, TRUE); return; }
     }
 
     wcopy(msg, L"cannot find the ", COUNTOF(msg));
@@ -383,15 +419,12 @@ static void SetEnc(int e)
 static void Reopen(void)
 {
     int e = g_doc.enc;
-    if (!g_doc.path[0]) {
-        Say(L"this document hasn't been saved yet, so there is nothing to reopen.");
-        return;
-    }
-    if (!EncDlg(g_hwnd, &e, 1)) return;
-    if (AppIsDirty() &&
+    if (!g_doc.path[0]) return;                              /* (grayed: nothing saved yet) */
+    if (AppIsDirty() &&                                      /* asked before the encoding is picked, not after */
         MpAsk(g_hwnd, APP_NAME, L"reopening the file will discard your unsaved changes.\n\ndo you want to continue?",
               L"yes", L"no", NULL, 2) != 1) return;
-    OpenDoc(g_doc.path, e, TRUE);
+    if (!EncDlg(g_hwnd, &e, 1)) return;
+    OpenDoc(g_doc.path, e, FALSE);                           /* (a .LOG file got its entry when it was opened) */
 }
 
 /* our top-level windows on this thread (the main window, a modeless find dialog): frame colours + a full repaint */
@@ -425,6 +458,7 @@ static const WCHAR g_ucc[17] = {
 
 static void Cmd(int id)
 {
+    EditDirKeyCancel();                                      /* an accelerator ate the key after ctrl+shift (ctrl+shift+n ...): no reading order on the key release */
     switch (id) {
     case IDM_FILE_NEW:      FileNew(); break;
     case IDM_FILE_NEWWIN:   NewWindow(NULL); break;
@@ -450,7 +484,11 @@ static void Cmd(int id)
         if (f && f != g_edit && f != g_hwnd) { SendMessageW(f, EM_SETSEL, 0, (LPARAM)-1); return; }   /* ctrl+a inside a text box of the find dialog */
         SendMessageW(g_edit, EM_SETSEL, 0, (LPARAM)-1);
         break; }
-    case IDM_EDIT_TIMEDATE: InsertTimeDate(); break;
+    case IDM_EDIT_TIMEDATE: {
+        HWND f = GetFocus();
+        if (f && f != g_edit && f != g_hwnd) return;         /* f5 inside a text box of the find dialog: not the editor's text */
+        InsertTimeDate();
+        break; }
     case IDM_EDIT_CLEARLINE: {
         HWND f = GetFocus();
         if (f && f != g_edit && f != g_hwnd) return;         /* ctrl+k inside a text box of the find dialog: not the editor's line to clear */
@@ -477,7 +515,9 @@ static void Cmd(int id)
         if (EncDlg(g_hwnd, &e, 0)) SetEnc(e);
         break; }
     case IDM_ENC_REOPEN:    Reopen(); break;
-    case IDM_RTL:           EditToggleRtl(); break;
+    case IDM_RTL:           g_dirManual = 1; SetRtl(!EditIsRtl()); break;
+    case IDM_DIR_LTR:       g_dirManual = 1; SetRtl(FALSE); break;
+    case IDM_DIR_RTL:       g_dirManual = 1; SetRtl(TRUE); break;
 
     case IDM_VIEW_STATUS:
         g_pf.statusbar = !g_pf.statusbar;
@@ -505,7 +545,7 @@ static void Cmd(int id)
         if (id >= IDM_RECENT_BASE && id < IDM_RECENT_BASE + RECENT_MAX) {          /* file > recent */
             WCHAR p[PATH_CAP];
             if (RecentPath(id - IDM_RECENT_BASE, p, COUNTOF(p))) {
-                if (Confirm() && !OpenDoc(p, -1, TRUE)) RecentRemove(p);            /* (a file that is gone leaves the list) */
+                if (Confirm() && !OpenDoc(p, -1, TRUE) && GetFileAttributesW(p) == INVALID_FILE_ATTRIBUTES) RecentRemove(p);   /* (only a file that is gone leaves the list) */
             }
         } else if (id >= IDM_UCC_BASE && id < IDM_UCC_BASE + 17) {
             WCHAR s[2];
@@ -514,7 +554,7 @@ static void Cmd(int id)
         }
         break;
     }
-    FocusEdit();
+    if (!FindDlgHwnd() || GetActiveWindow() != FindDlgHwnd()) FocusEdit();   /* (alt+z, ctrl+plus ... pressed in the find dialog keep it active) */
 }
 
 /* the chrome (menu bar, popups, status bar, title strip) uses the editor font face at a static size (CHROME_PX) */
@@ -571,6 +611,7 @@ static unsigned MenuState(int id)
     case IDM_ZOOM_IN:       return EditZoomCan(1) ? 0 : MS_GRAY;
     case IDM_ZOOM_OUT:      return EditZoomCan(-1) ? 0 : MS_GRAY;
     case IDM_ZOOM_RESET:    return g_pf.cur != g_pf.pt ? 0 : MS_GRAY;
+    case IDM_ENC_REOPEN:    return g_doc.path[0] ? 0 : MS_GRAY;
     case IDM_THEME_DARK:    return g_pf.theme == THEME_DARK ? on : 0;
     case IDM_THEME_LIGHT:   return g_pf.theme == THEME_LIGHT ? on : 0;
     case IDM_SYS_RESTORE: case IDM_SYS_MOVE: case IDM_SYS_SIZE:
@@ -647,6 +688,7 @@ static void OnDpiChanged(HWND h, WPARAM w, LPARAM l)
     StatusRefont(g_status);
     FrameRefont(h);
     EditApplyFont();
+    SbarTrim(g_edit, S(SBAR_TRIM), S(SBAR_TRIM));    /* (the overhang is in pixels of the new dpi too: EditArea, EditViewRect) */
     SetWindowPos(h, NULL, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
     Layout();
 }
@@ -753,6 +795,7 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
             switch (HIWORD(w)) {
             case EN_CHANGE:
                 g_textRev++;
+                AutoDir();                                     /* (typing or pasting the first letter of a document) */
                 AppUpdateTitle();
                 AppUpdateStatus();
                 EditScrollSoon();                              /* scrollbars only when the text needs them */
@@ -790,6 +833,9 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_QUERYENDSESSION:
         return Confirm() ? TRUE : FALSE;
+    case WM_ENDSESSION:                                        /* logoff / shutdown: no WM_CLOSE comes, keep the settings */
+        if (w) AppSavePrefs();
+        return 0;
     case WM_CLOSE:
         if (!Confirm()) return 0;
         AppSavePrefs();
@@ -852,6 +898,22 @@ static void CmdLineFile(WCHAR *out, int cap)
     out[n] = 0;
 }
 
+/* notepad's switches: "/p file" prints it, "/a file" opens it as ansi, "/w file" as utf-16. returns the letter (0 = none) and leaves only the
+ * file in arg, without its quotes */
+static int CmdSwitch(WCHAR *arg)
+{
+    WCHAR sw, *f;
+    int n;
+    if (arg[0] != '/' || !arg[1] || (arg[2] != ' ' && arg[2] != '\t')) return 0;
+    sw = wlow(arg[1]);
+    if (sw != 'p' && sw != 'a' && sw != 'w') return 0;
+    f = arg + 3;
+    while (*f == ' ' || *f == '\t') f++;
+    if (*f == '"') { f++; for (n = 0; f[n] && f[n] != '"'; n++) ; f[n] = 0; }
+    memmove(arg, f, ((size_t)wlen(f) + 1) * sizeof(WCHAR));
+    return sw;
+}
+
 /* a second window opened from the first one shouldn't sit exactly on top of it */
 static void Cascade(int *x, int *y)
 {
@@ -902,6 +964,7 @@ int mp_main(void)
     WNDCLASSEXW wc;
     MSG msg;
     WCHAR arg[PATH_CAP];
+    int sw;
 
     UiInit(hi);
     PrefsInit();
@@ -926,20 +989,16 @@ int mp_main(void)
                          CW_USEDEFAULT, 0, S(900), S(620), NULL, NULL, hi, NULL)) return 1;
     if (FrameEnabled())                                        /* title strip: one more WM_NCCALCSIZE, the wParam TRUE kind */
         SetWindowPos(g_hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-    ShowMain();
-
     CmdLineFile(arg, PATH_CAP);
-    if (arg[0] == '/' && (arg[1] == 'p' || arg[1] == 'P') && arg[2] == ' ') {     /* notepad /p file: print it on the default printer and quit */
-        const WCHAR *f = arg + 3;
-        int n;
-        while (*f == ' ') f++;
-        if (*f == '"') { f++; for (n = 0; f[n] && f[n] != '"'; n++) ; arg[(f - arg) + n] = 0; }
-        if (*f && GetFileAttributesW(f) != INVALID_FILE_ATTRIBUTES) {
-            if (OpenDoc(f, -1, FALSE)) PrintDoc(g_hwnd, 1);
-        }
+    sw = CmdSwitch(arg);
+    if (sw == 'p') {                                         /* notepad /p file: print it on the default printer and quit (the window never shows) */
+        WCHAR full[PATH_CAP];
+        DWORD r = arg[0] ? GetFullPathNameW(arg, PATH_CAP, full, NULL) : 0;
+        if (r && r < PATH_CAP && GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES && OpenDoc(full, -1, FALSE)) PrintDoc(g_hwnd, 1);
         return 0;
     }
-    if (arg[0]) OpenCmdFile(arg);
+    ShowMain();
+    if (arg[0]) OpenCmdFile(arg, sw == 'a' ? ENC_ANSI : sw == 'w' ? ENC_UTF16LE : -1);
 
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
         HWND fd = FindDlgHwnd();

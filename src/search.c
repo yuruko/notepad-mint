@@ -72,8 +72,8 @@ static void Prepare(SearchPattern *p, const WCHAR *pat, int m, int up, int match
 
 static int Scan(const SearchPattern *p, const WCHAR *t, int n, int from, int wholeWord)
 {
-    int i, k, q = 0, at, left, step = p->up ? -1 : 1;
-    WCHAR f, fu;
+    int i, k, q = 0, at, left, step = p->up ? -1 : 1, skip;
+    WCHAR f, fu, sp;
     if (from < 0) from = 0;
     if (from > n) from = n;
     if (!p->folded) {
@@ -90,8 +90,16 @@ static int Scan(const SearchPattern *p, const WCHAR *t, int n, int from, int who
     left = p->up ? from : n - from;
     f = p->folded[0];
     fu = !p->matchCase && f >= 'a' && f <= 'z' ? (WCHAR)(f - 32) : f;
+    sp = p->matchCase ? f : f == 'k' ? 0x212A : f == 'i' ? 0x0130 : f;   /* the two non-ascii units that fold to an ascii letter (kelvin sign, dotted capital i) */
+    skip = !p->up && (p->matchCase || f < 128);       /* forward, and every possible first character is one of f / fu / sp: sse2 jumps to the next one */
     while (left-- > 0) {
-        WCHAR c = t[i];
+        WCHAR c;
+        if (!q && skip) {
+            k = (int)mp_find3(t + i, (size_t)left + 1, f, fu, sp);
+            if (k > left) break;
+            i += k; left -= k;
+        }
+        c = t[i];
         if (!q && c != f && c != fu && (p->matchCase || c < 128 || (f < 128 && c != 0x212A && c != 0x0130) || wlow(c) != f)) goto next;
         while (q && !Equal(t[i], p->folded[q], p->matchCase)) q = p->failure[q - 1];
         if (Equal(t[i], p->folded[q], p->matchCase)) q++;

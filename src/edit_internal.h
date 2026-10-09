@@ -15,5 +15,6 @@ int  EditCaretInView(HWND edit, int lineHeight);
 void EditCaretRemember(HWND edit, HFONT font);
 void EditCaretInvalidate(void);
 void EditCaretFit(HWND edit, HFONT font, WNDPROC nativeProc, int *tall);
+void EditViewRect(HWND edit, RECT *r);      /* the client area minus the overhang that is out of sight (SBAR_TRIM) */
 
 #endif

@@ -17,6 +17,9 @@ void AppUpdateStatus(void)
     if (EditSelStats(g_doc.enc, g_doc.eol, &sel, &selBytes)) wsprintfW(b, L"%d:%d [%d L %u B]", line, col, sel, selBytes);   /* "162:54 [5 L 54 B]": the lines it covers and the bytes a save would write for it */
     else wsprintfW(b, L"%d:%d", line, col);
     StatusSet(g_status, SB_POS, b);
+    if (g_pf.cur != g_pf.pt) wsprintfW(b, L"%d%%", MulDiv(g_pf.cur, 100, g_pf.pt));   /* ctrl+plus / minus / wheel: the size against the one picked in the font dialog ("120%"); no panel at 100% */
+    else b[0] = 0;
+    StatusSet(g_status, SB_ZOOM, b);
     {                                                   /* the number of lines ("5 L") and the size a save would write ("124 B"), the lines first: recounted only when the text, the encoding or the line ending changed (a big file is not scanned on every caret move) */
         static struct { DWORD rev, bytes; int lines, len, enc, eol, ok; } c;
         int len = GetWindowTextLengthW(g_edit);

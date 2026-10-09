@@ -44,6 +44,27 @@ static void CountTime(const WCHAR *label, CountFn fn, const WCHAR *t, int n, int
     Out(line);
 }
 
+/* 1.0.9's case folding: the system call for every non-ascii unit (util.c now looks the units up in a table) */
+static WCHAR LowSys(WCHAR c)
+{
+    if (c < 128) return (c >= 'A' && c <= 'Z') ? (WCHAR)(c + 32) : c;
+    return (WCHAR)(ULONG_PTR)CharLowerW((LPWSTR)(ULONG_PTR)c);
+}
+
+static int FindSysLower(const WCHAR *t, int n, const WCHAR *p, int m, int from, int up, int mc)
+{
+    WCHAR f = mc ? p[0] : LowSys(p[0]), fu = !mc && f >= 'a' && f <= 'z' ? (WCHAR)(f - 32) : f;
+    int i, k;
+    (void)up;
+    for (i = from; i <= n - m; i++) {
+        WCHAR c = t[i];
+        if (c != f && c != fu && (mc || c < 128 || (f < 128 && c != 0x212A && c != 0x130) || LowSys(c) != f)) continue;
+        for (k = 1; k < m; k++) if (t[i + k] != p[k] && LowSys(t[i + k]) != LowSys(p[k])) break;
+        if (k == m) return i;
+    }
+    return -1;
+}
+
 static void FindTime(const WCHAR *label, FindFn fn, const WCHAR *t, int n, const WCHAR *pat, int m, int mc)
 {
     WCHAR line[160];
@@ -75,6 +96,20 @@ void start(void)
         wsprintfW(label, L"find after repeated prefix, case %d", mc); FindTime(label, FindInText, text, 1000000, pattern, 256, mc);
         wsprintfW(label, L"find before ordinary miss, case %d", mc); FindTime(label, FindBefore, text, 1000000, L"missing", 7, mc);
         wsprintfW(label, L"find after ordinary miss, case %d", mc); FindTime(label, FindInText, text, 1000000, L"missing", 7, mc);
+    }
+    {                                                   /* realistic text: the first letter of the pattern turns up every 44 units */
+        static const WCHAR fox[] = L"the quick brown fox jumps over the lazy dog ";
+        for (i = 0; i < 1000000; i++) text[i] = fox[i % 44];
+        for (mc = 0; mc <= 1; mc++) {
+            wsprintfW(label, L"find before english miss, case %d", mc); FindTime(label, FindBefore, text, 1000000, L"missing", 7, mc);
+            wsprintfW(label, L"find after english miss, case %d", mc); FindTime(label, FindInText, text, 1000000, L"missing", 7, mc);
+        }
+    }
+    {                                                   /* cyrillic, ignoring case: 1.0.9 called the system for every unit */
+        static const WCHAR yabloko[] = { 0x44F, 0x431, 0x43B, 0x43E, 0x43A, 0x43E, 0 };
+        for (i = 0; i < 1000000; i++) text[i] = (WCHAR)(i % 33 == 32 ? ' ' : 0x430 + i % 33);
+        FindTime(L"find 1.0.9 cyrillic miss ignoring case (system lower case per unit)", FindSysLower, text, 1000000, yabloko, 6, 0);
+        FindTime(L"find now cyrillic miss ignoring case (lower case table)", FindInText, text, 1000000, yabloko, 6, 0);
     }
     mem_free(text);
     ExitProcess(0);

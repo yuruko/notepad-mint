@@ -13,7 +13,8 @@ static HFONT   g_font;
 static HBRUSH  g_brEdit;
 static int     g_wheel;
 static int     g_paintDepth;                    /* nested native paint / print calls may erase; a standalone resize erase must wait */
-static int     g_stubW, g_stubMax;                /* width of a selected line break's block, widest character of the font (see "selected line breaks" below); g_stubW 0 = measure again (the font changed) */
+static int     g_shiftDir;                      /* ctrl + a shift key is down with nothing else pressed since: 2 = right shift, 1 = left shift (EditProc) */
+static int     g_stubW, g_stubMax;               /* width of a selected line break's block, widest character of the font (see "selected line breaks" below); g_stubW 0 = measure again (the font changed) */
 
 /* -------------------------------------------------- scrollbars on demand -- */
 /* a native multiline edit always shows its bars (greyed out when there is nothing to scroll). we want them only when
@@ -177,15 +178,26 @@ void FontResolve(WCHAR *face)
  * (the rows that reach into them are drawn there), and with word wrap off the rectangle runs to the right edge of the client area. (a wrapped text, and a
  * right to left editor, keep the space on the right: nothing is ever scrolled out sideways there) */
 BOOL EditIsRtl(void);
+
+/* the part of the client area that can be seen. the window overhangs the visible area by SBAR_TRIM at the bottom and on the side of the vertical
+ * scrollbar (the right; the left in a right to left editor, see EditArea in main.c): a shown bar fills that part, without one it is client area out of sight */
+void EditViewRect(HWND h, RECT *r)
+{
+    LONG_PTR st = GetWindowLongPtrW(h, GWL_STYLE);
+    GetClientRect(h, r);
+    if (!(st & WS_VSCROLL)) {
+        if (GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_LEFTSCROLLBAR) r->left += S(SBAR_TRIM);
+        else r->right -= S(SBAR_TRIM);
+    }
+    if (!(st & WS_HSCROLL)) r->bottom -= S(SBAR_TRIM);
+}
+
 static void EditPad2(HWND h, int margins)
 {
     RECT r;
     int pad = S(EDIT_PAD), top = S(EDIT_PAD_TOP), height = LineHeight(), visibleBottom;
-    LONG_PTR st = GetWindowLongPtrW(h, GWL_STYLE);
-    int hidR = (st & WS_VSCROLL) ? 0 : S(SBAR_TRIM), hidB = (st & WS_HSCROLL) ? 0 : S(SBAR_TRIM);   /* the window overhangs the visible area (SBAR_TRIM): without a bar that part is client area, out of sight */
     if (margins) SendMessageW(h, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(pad, pad));
-    GetClientRect(h, &r);
-    r.right -= hidR; r.bottom -= hidB;
+    EditViewRect(h, &r);
     visibleBottom = r.bottom;
     if (r.bottom - r.top > top + pad + 8 && r.right - r.left > 2 * pad + 8) {
         r.left += pad;
@@ -318,21 +330,59 @@ void EditZoomReset(void)                       /* ctrl+0: the size picked in the
 }
 
 /* -------------------------------------------------------------- rtl ------- */
+/* right to left reading order: the paragraph direction of the whole editor (text right aligned, the vertical scrollbar on the left). the stock
+ * control takes it from these extended styles when they change. main.c picks it from the first strong letter of the text (EditStrongDir)
+ * until the user sets it (the context menu, ctrl+right shift / ctrl+left shift) */
 #define RTL_BITS (WS_EX_RTLREADING | WS_EX_RIGHT | WS_EX_LEFTSCROLLBAR)
+
+static void StubSync(HWND h);
+static void BandSync(HWND h);
 
 BOOL EditIsRtl(void)
 {
     return (GetWindowLongPtrW(g_edit, GWL_EXSTYLE) & WS_EX_RTLREADING) != 0;
 }
 
-void EditToggleRtl(void)
+/* FALSE when it already was that way. the caller moves the window afterwards: its overhang changes sides with the scrollbar (EditArea) */
+BOOL EditSetRtl(BOOL rtl)
 {
-    LONG_PTR ex = GetWindowLongPtrW(g_edit, GWL_EXSTYLE);
+    LONG_PTR ex;
+    if (!g_edit || !rtl == !EditIsRtl()) return FALSE;
+    ex = GetWindowLongPtrW(g_edit, GWL_EXSTYLE);
     EditCaretInvalidate();
-    ex = (ex & WS_EX_RTLREADING) ? (ex & ~(LONG_PTR)RTL_BITS) : (ex | RTL_BITS);
-    SetWindowLongPtrW(g_edit, GWL_EXSTYLE, ex);
+    SetWindowLongPtrW(g_edit, GWL_EXSTYLE, rtl ? (ex | RTL_BITS) : (ex & ~(LONG_PTR)RTL_BITS));
     SetWindowPos(g_edit, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    EditPad(g_edit);                                /* (the padded rectangle keeps its space on the other side now) */
+    g_revealPending = 1;
+    RevealCaret(g_edit);
     InvalidateRect(g_edit, NULL, TRUE);
+    EditScrollSoon();
+    StubSync(g_edit);
+    BandSync(g_edit);
+    return TRUE;
+}
+
+void EditDirKeyCancel(void) { g_shiftDir = 0; }
+
+/* the direction of the first letter that has one (2 = right to left: hebrew, arabic, syriac, thaana ...; 1 = left to right), 0 when the first
+ * `limit` characters have none (digits, spaces, punctuation and symbols are neutral). bounded: it runs on every change while the direction is automatic */
+int EditStrongDir(int limit)
+{
+    void *lock;
+    const WCHAR *t;
+    WORD ty[64];
+    int n, i, j, k, dir = 0;
+    t = EditLockText(&lock, &n);
+    if (!t) return 0;
+    if (n > limit) n = limit;
+    for (i = 0; i < n && !dir; i += k) {
+        k = n - i < COUNTOF(ty) ? n - i : COUNTOF(ty);
+        if (!GetStringTypeW(2, t + i, k, ty)) break;    /* CT_CTYPE2: C2_LEFTTORIGHT 1, C2_RIGHTTOLEFT 2 */
+        for (j = 0; j < k; j++)
+            if (ty[j] == 1 || ty[j] == 2) { dir = ty[j]; break; }
+    }
+    EditUnlockText(lock);
+    return dir;
 }
 
 /* ------------------------------------------------- selected line breaks ---- */
@@ -1114,6 +1164,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (g_tallCaret) FitTallCaret(h);         /* ordinary bar checks also re-layout; their temporary geometry must not place the caret */
         return 0;
     case WM_MOUSEWHEEL:
+        g_shiftDir = 0;
         if (w & MK_CONTROL) {                                  /* ctrl+wheel = font size, one step per notch; modifiers belong to this input message */
             g_wheel += GET_WHEEL_DELTA_WPARAM(w);
             while (g_wheel >= 120)  { g_wheel -= 120; EditZoomStep(1); }
@@ -1135,7 +1186,20 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         break;
+    case WM_KEYUP:                                              /* ctrl + one shift key and nothing else, like notepad: right shift = right to left, left shift = left to right */
+        if ((w == VK_SHIFT || w == VK_CONTROL) && g_shiftDir) {
+            PostMessageW(GetParent(h), WM_COMMAND, g_shiftDir == 2 ? IDM_DIR_RTL : IDM_DIR_LTR, 0);
+            g_shiftDir = 0;
+        }
+        break;
+    case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_SYSKEYDOWN:
+        g_shiftDir = 0;                                         /* (ctrl+shift+click extends a selection: not a direction) */
+        break;
     case WM_KEYDOWN:
+        if (w == VK_SHIFT && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000))
+            g_shiftDir = ((l >> 16) & 0xFF) == 0x36 ? 2 : 1;    /* scan code 0x36 = right shift, 0x2a = left */
+        else if (w != VK_SHIFT && w != VK_CONTROL)
+            g_shiftDir = 0;
         if (w == VK_DELETE && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000)) {
             EditDeleteWord(1);
             return 0;
@@ -1223,7 +1287,7 @@ HWND EditCreate(HWND parent)
     WCHAR *text = NULL;
     DWORD s = 0, en = 0, st = WS_CHILD | WS_CLIPSIBLINGS | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_NOHIDESEL;
     LONG_PTR ex = 0;
-    int mod = 0, focus = 0, x = 0, y = 0, w = 0, h = 0;
+    int mod = 0, focus = 0, x = 0, y = 0, w = 0, h = 0, back = 0;
 
     if (!g_pf.wrap) st |= WS_HSCROLL | ES_AUTOHSCROLL;
     if (old) {
@@ -1232,6 +1296,7 @@ HWND EditCreate(HWND parent)
         text = EditGetDocText(NULL);
         if (!text) return NULL;
         SendMessageW(old, EM_GETSEL, (WPARAM)&s, (LPARAM)&en);
+        back = en > s && EditCaretIndex() == (int)s;  /* a selection made backwards (shift+left): its caret is at the start */
         mod = (int)SendMessageW(old, EM_GETMODIFY, 0, 0);
         ex = GetWindowLongPtrW(old, GWL_EXSTYLE) & RTL_BITS;
         focus = (GetFocus() == old);
@@ -1265,7 +1330,7 @@ HWND EditCreate(HWND parent)
 
     if (text) {
         SendMessageW(e, WM_SETREDRAW, FALSE, 0);
-        SendMessageW(e, EM_SETSEL, s, en);
+        SendMessageW(e, EM_SETSEL, back ? en : s, back ? s : en);   /* (the caret goes to the second one) */
         SendMessageW(e, EM_SCROLLCARET, 0, 0);
         SendMessageW(e, EM_EMPTYUNDOBUFFER, 0, 0);
         SendMessageW(e, EM_SETMODIFY, (WPARAM)mod, 0);

@@ -658,7 +658,7 @@ static void KeyNav(WPARAM vk)
     case VK_RIGHT:
         if (g_np == 0) { if (g_kbd >= 0) { g_kbd = (g_kbd + 1) % (int)MENU_BAR_COUNT; InvalidateRect(g_bar, NULL, FALSE); } }
         else if (g_pop[lv].sel >= 0 && g_pop[lv].def->items[g_pop[lv].sel].sub) Activate(lv, g_pop[lv].sel);
-        else if (g_np == 1 && g_barIdx >= 0) SwitchBar(g_barIdx + 1, TRUE);
+        else if (g_barIdx >= 0) SwitchBar(g_barIdx + 1, TRUE);       /* (from a submenu too: the next menu of the bar, like windows) */
         break;
     case VK_LEFT:
         if (g_np == 0) { if (g_kbd >= 0) { g_kbd = (g_kbd + (int)MENU_BAR_COUNT - 1) % (int)MENU_BAR_COUNT; InvalidateRect(g_bar, NULL, FALSE); } }
@@ -775,8 +775,6 @@ static void RunMenu(HWND owner, int barIdx, int openPopup, const MenuDef *root, 
     if (g_result) PostMessageW(owner, WM_COMMAND, MAKEWPARAM(g_result, 0), 0);
     if (g_haveRedisp) DispatchMessageW(&g_redisp);
 }
-
-BOOL MenuActive(void) { return g_active; }
 
 void MenuCancel(void)
 {

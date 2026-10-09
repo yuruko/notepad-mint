@@ -11,6 +11,7 @@ void RecentAdd(const WCHAR *path);
 void RecentRemove(const WCHAR *path);
 void RecentClear(void);
 BOOL RecentPath(int index, WCHAR *path, int cap);
+unsigned PrefsTakeDocName(unsigned clock);           /* the next default name's number, shared by every window */
 
 /* app_state.c: establish the baseline only after a successful load/save/new. */
 void AppMarkClean(void);

@@ -11,16 +11,25 @@
 static struct { int n; DWORD h1, h2; int enc, eol; } g_clean;
 static struct { DWORD rev; int valid, changed; } g_dirtyCache;
 
+/* two units at a time (one 32-bit word) in two independent lanes per hash: a quarter of the dependent multiplies of one unit at a time (the
+ * hashes only ever meet each other in this process, so the exact function is free) */
 static void HashText(const WCHAR *t, int n, DWORD *a, DWORD *b)
 {
-    DWORD h1 = 2166136261u, h2 = 5381u;
-    int i;
-    for (i = 0; i < n; i++) {
+    const DWORD *w = (const DWORD *)t;
+    DWORD h1 = 2166136261u, h2 = 5381u, h3 = 2166136261u ^ 0x5BD1E995u, h4 = 5381u * 31u;
+    int i, m = n / 4;
+    for (i = 0; i < m; i++, w += 2) {
+        h1 = (h1 ^ w[0]) * 16777619u;
+        h3 = (h3 ^ w[1]) * 16777619u;
+        h2 = (h2 * 33u) ^ w[0];
+        h4 = (h4 * 33u) ^ w[1];
+    }
+    for (i = m * 4; i < n; i++) {
         h1 = (h1 ^ t[i]) * 16777619u;
         h2 = (h2 * 33u) ^ t[i];
     }
-    *a = h1;
-    *b = h2;
+    *a = h1 ^ (h3 * 0x9E3779B1u);
+    *b = h2 + h4 * 0x85EBCA6Bu;
 }
 
 void AppMarkClean(void)                         /* the document as it is now is the clean state: just loaded, created or saved */

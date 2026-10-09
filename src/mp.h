@@ -7,7 +7,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME                  /* the window title is "<name>" + this (main.c AppUpdateTitle); the title strip draws the name bold and this part regular */
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.0.9"
+#define APP_VERSION  L"1.0.10"
 #define PATH_CAP     1024
 
 /* ------------------------------------------------------------- palette --
@@ -50,7 +50,7 @@ enum {
     IDM_FMT_WRAP = 301, IDM_FMT_FONT, IDM_TAB_2 = 305, IDM_TAB_4, IDM_TAB_8,   /* format > tab size */
     IDM_EOL_CRLF = 311, IDM_EOL_LF, IDM_EOL_CR,
     IDM_ENC_UTF8 = 321, IDM_ENC_UTF8BOM, IDM_ENC_UTF16LE, IDM_ENC_UTF16BE, IDM_ENC_ANSI, IDM_ENC_OTHER, IDM_ENC_REOPEN,
-    IDM_RTL = 340, IDM_UCC_BASE = 350,                /* IDM_UCC_BASE + n inserts unicode control char n (0..16) */
+    IDM_RTL = 340, IDM_DIR_LTR = 341, IDM_DIR_RTL = 342, IDM_UCC_BASE = 350,                /* IDM_UCC_BASE + n inserts unicode control char n (0..16) */
     IDM_VIEW_STATUS = 401, IDM_ZOOM_IN, IDM_ZOOM_OUT, IDM_ZOOM_RESET, IDM_THEME_DARK, IDM_THEME_LIGHT, IDM_THEME_TOGGLE,
     IDM_HELP_TOPICS = 501, IDM_HELP_ABOUT,
     IDM_RECENT_BASE = 700, IDM_RECENT_NONE = 710, IDM_RECENT_CLEAR = 711,     /* file > recent: IDM_RECENT_BASE + n opens the n-th remembered file (0..RECENT_MAX - 1); NONE is the grayed placeholder of an empty list; CLEAR (the last item, after a separator) empties the list */
@@ -69,16 +69,19 @@ int    wcmp(const WCHAR *a, const WCHAR *b);
 int    wcmpi(const WCHAR *a, const WCHAR *b);
 WCHAR  wlow(WCHAR c);
 int    wtoi(const WCHAR *s);
-BOOL   ParseColor(const WCHAR *s, COLORREF *out);
-void   FormatColor(COLORREF c, WCHAR *out);          /* out >= 7 chars: "rrggbb" */
 const WCHAR *PathName(const WCHAR *path);
 void   PathDir(const WCHAR *path, WCHAR *out, int cap);
 void   PathJoin(WCHAR *dir, const WCHAR *name, int cap);
 BOOL   IsDir(const WCHAR *path);
-BOOL   WildMatch(const WCHAR *pat, const WCHAR *name);   /* case-insensitive * and ?, "a;b" = either, "*.*" also matches "readme" */
 size_t mp_count_lf(const WCHAR *p, size_t n);        /* rt.asm */
+size_t mp_find3(const WCHAR *p, size_t n, unsigned a, unsigned b, unsigned c);   /* rt.asm: index of the first unit that is a, b or c (n if none) */
 int    WordClass(WCHAR c);                           /* edit_text.c: 0 blank, 1 word char, 2 punctuation (word delete) */
-void   DefaultDocName(const SYSTEMTIME *st, WCHAR *out, int cap);   /* "mint-" + 4 base-36 chars of year + month*100 + day + seconds of the day */
+#define DOCNAME_STEPS 45u                            /* default names: steps a day (one every 32 minutes) */
+#define DOCNAME_AHEAD (DOCNAME_STEPS * 366u)         /* the counter may run ahead of the clock by up to a year */
+#define DOCNAME_NONE  0xFFFFFFFFu                    /* no name handed out yet */
+unsigned DocNameClock(const SYSTEMTIME *st);         /* local date/time -> steps since 2000-01-01 00:00 (year mod 100) */
+unsigned DocNameNext(unsigned clock, unsigned last); /* last + 1 while that is ahead of the clock (by at most DOCNAME_AHEAD), else the clock */
+void   DefaultDocName(unsigned v, WCHAR *out, int cap);   /* "mint-" + 4 base-36 chars of v (zero padded) */
 
 /* ------------------------------------------------------------ search.c -- */
 /* pure text search (no ui, unit tested): pattern pat[0..m) in t[0..n) (neither needs a terminator).
@@ -184,11 +187,10 @@ void  MenuBarRefont(HWND bar);
 void  MenuBarActivate(HWND bar, int idx, int openPopup);
 int   MenuBarMnemonic(WCHAR ch);
 void  MenuPopup(HWND owner, const MenuDef *def, int x, int y, int anchorBottom);
-BOOL  MenuActive(void);
 void  MenuCancel(void);
 
 /* ------------------------------------------------------------ status.c -- */
-enum { SB_POS, SB_LINES, SB_BYTES, SB_EOL, SB_ENC, SB_COUNT };   /* left to right; SB_POS takes the remaining room; SB_EOL / SB_ENC are clickable */
+enum { SB_POS, SB_ZOOM, SB_LINES, SB_BYTES, SB_EOL, SB_ENC, SB_COUNT };   /* left to right; SB_POS takes the remaining room; all but SB_LINES / SB_BYTES are clickable; SB_ZOOM is empty (no panel at all) unless zoomed */
 HWND  StatusCreate(HWND parent);
 int   StatusHeight(void);
 int   StatusMinWidth(void);
@@ -229,6 +231,7 @@ void  EncShort(int enc, WCHAR *out, int cap);       /* status bar text for any e
 int   EncListCount(void);                           /* every encoding the pickers offer */
 int   EncListGet(int i, WCHAR *label, int cap);     /* returns the encoding id, label = "name  description" */
 DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int forceEnc);   /* forceEnc -1 = detect */
+void  DocAllowLossy(BOOL on);                 /* TRUE: DocRead opens a file that is invalid in its encoding (bad bytes -> U+FFFD) instead of ERR_LOSSY */
 DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, BOOL *lossy);
 DWORD DocEncodedSize(const WCHAR *text, int len, int enc, int eol);   /* the bytes DocWrite would write for this text (the control's: CR LF breaks); nothing is written or allocated */
 DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol);      /* the same without the byte order mark: what a piece of the text (the selection) takes in the file */
@@ -293,7 +296,9 @@ void   EditZoomStep(int dir);                   /* +1 / -1: next bigger / smalle
 void   EditZoomReset(void);                     /* back to g_pf.pt, the size picked in the font dialog */
 BOOL   EditZoomCan(int dir);                    /* false at the ends of the range */
 void   EditInsert(const WCHAR *s);
-void   EditToggleRtl(void);
+BOOL   EditSetRtl(BOOL rtl);                    /* right to left reading order on / off: FALSE when unchanged (the caller re-runs Layout) */
+void   EditDirKeyCancel(void);                   /* forget a ctrl + shift key press (an accelerator took the next key) */
+int    EditStrongDir(int limit);                   /* first strong letter in the first `limit` chars: 2 right to left, 1 left to right, 0 none */
 BOOL   EditIsRtl(void);
 
 /* ------------------------------------------------------------- dialogs -- */

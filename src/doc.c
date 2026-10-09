@@ -250,6 +250,12 @@ static int Utf16Guess(const BYTE *p, size_t n)
 }
 
 /* ----------------------------------------------------------------- read -- */
+/* a file that is not valid in its encoding (a broken utf-8 sequence after a bom, or an odd number of bytes for utf-16) fails with ERR_LOSSY:
+ * it never becomes a clean document by accident. after the user agreed (main.c OpenDoc) DocAllowLossy(TRUE) opens it anyway, the bad bytes
+ * as U+FFFD (what a save then writes) */
+static BOOL g_lossyOk;
+void DocAllowLossy(BOOL on) { g_lossyOk = on; }
+
 /* forceEnc >= 0 skips detection ("reopen with encoding"); *enc reports what was used */
 DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int forceEnc)
 {
@@ -306,18 +312,20 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
 
     /* 2. to utf-16 */
     if (e == ENC_UTF16LE || e == ENC_UTF16BE) {
-        if ((n - off) & 1) { mem_free(buf); return ERR_LOSSY; }
+        int odd = (int)((n - off) & 1);
+        if (odd && !g_lossyOk) { mem_free(buf); return ERR_LOSSY; }
         wn = (int)((n - off) / 2);
-        w = (WCHAR *)mem_alloc(((size_t)wn + 1) * sizeof(WCHAR));
+        w = (WCHAR *)mem_alloc(((size_t)wn + 2) * sizeof(WCHAR));
         if (w) {
             memcpy(w, buf + off, (size_t)wn * sizeof(WCHAR));
             if (e == ENC_UTF16BE)
                 for (k = 0; k < wn; k++) w[k] = (WCHAR)((w[k] << 8) | (w[k] >> 8));
+            if (odd) w[wn++] = 0xFFFD;                    /* (the last byte on its own) */
         }
     } else {
         UINT cp = CpOf(e);
         int src = (int)(n - off);
-        if (cp == CP_UTF8 && !validUtf8 && !Utf8Valid(buf + off, n - off)) { mem_free(buf); return ERR_LOSSY; }
+        if (cp == CP_UTF8 && !validUtf8 && !g_lossyOk && !Utf8Valid(buf + off, n - off)) { mem_free(buf); return ERR_LOSSY; }   /* (allowed: MultiByteToWideChar without MB_ERR_INVALID_CHARS makes U+FFFD of them) */
         w = (WCHAR *)mem_alloc(((size_t)src + 1) * sizeof(WCHAR));  /* one conversion, no size query: no code page makes more characters than it has bytes */
         wn = (w && src) ? MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, w, src) : 0;
         if (w && src && !wn && GetLastError() == 122) {              /* (ERROR_INSUFFICIENT_BUFFER: one that does: ask for the size) */
@@ -336,14 +344,14 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
     w[wn] = 0;
 
     /* 3. count line breaks, then normalise to CRLF (and blank out nul characters) */
-    for (i = 0; i < (size_t)wn; i++) {
+    for (i = mp_find3(w, (size_t)wn, '\r', '\n', 0); i < (size_t)wn; i += 1 + mp_find3(w + i + 1, (size_t)wn - i - 1, '\r', '\n', 0)) {   /* (sse2: from one break to the next) */
         WCHAR c = w[i];
         if (c == '\r') {
             if (i + 1 < (size_t)wn && w[i + 1] == '\n') { nCRLF++; i++; if (!first) first = 1; }
             else { nCR++; if (!first) first = 3; }
         } else if (c == '\n') {
             nLF++; if (!first) first = 2;
-        } else if (c == 0) {
+        } else {
             nNul++;
         }
     }
@@ -357,14 +365,19 @@ DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int
         {
             WCHAR *d = out;
             for (i = 0; i < (size_t)wn; i++) {
-                WCHAR c = w[i];
+                size_t k = mp_find3(w + i, (size_t)wn - i, '\r', '\n', 0);   /* the run up to the next break or nul in one copy */
+                WCHAR c;
+                memcpy(d, w + i, k * sizeof(WCHAR));
+                d += k; i += k;
+                if (i >= (size_t)wn) break;
+                c = w[i];
                 if (c == '\r') {
                     *d++ = '\r'; *d++ = '\n';
                     if (i + 1 < (size_t)wn && w[i + 1] == '\n') i++;
                 } else if (c == '\n') {
                     *d++ = '\r'; *d++ = '\n';
                 } else {
-                    *d++ = c ? c : ' ';
+                    *d++ = ' ';
                 }
             }
         }

@@ -30,15 +30,15 @@ one 32-bit exe (under 140 kb) runs on 32-bit windows, 64-bit windows and windows
   - **safer saves**: writes and flushes a temporary file before replacing the original, detects lossy legacy encoding conversions, and asks before overwriting a file whose size or modification time changed outside the app;
   - **selection printing**: select text before opening print to enable printing just that selection;
   - **text runs to the edge**: an 8 px margin around the text (4 px on top), but text that is scrolled out of it runs to the very edge of the editor, no blank frame; the row that is only partly in view at the bottom is drawn, cut off at the edge;
-  - **status bar**: compact (`12:5`, `5 L`, `124 B`, `crlf`, `utf8 bom`), the lines, bytes and line ending panels grow and shrink with their text, never cut off; with a selection it shows the lines and bytes selected (`162:54 [5 L 54 B]`); click the line ending / encoding panels to change them;
+  - **status bar**: compact (`12:5`, `5 L`, `124 B`, `crlf`, `utf8 bom`), the lines, bytes and line ending panels grow and shrink with their text, never cut off; with a selection it shows the lines and bytes selected (`162:54 [5 L 54 B]`); while zoomed it shows the zoom (`120%`, click: back to 100%); click the position to go to a line, the line ending / encoding panels to change them;
   - **zoom**: ctrl+plus / ctrl+minus / ctrl+0, ctrl + mouse wheel (8-48 pt); resizing or changing zoom scrolls the caret into view while keeping the selection and undo history;
   - **scrolling**: mouse-wheel and scrollbar scrolling keep the cursor in place; keyboard navigation returns to that position before moving it, including wrapped text and shift selections;
   - **font preview**: one line at the selected size, from 7 to 100 pt: "sphinx of black quartz, judge my vow. 0123456789"; face, bold and italic update live;
-  - **encodings and line endings**: utf-8 (with or without bom), utf-16 le / be, legacy code pages, reopen with another encoding; windows / unix / classic mac line endings; right-to-left toggle; unicode control characters; per-monitor dpi;
+  - **encodings and line endings**: utf-8 (with or without bom), utf-16 le / be, legacy code pages, reopen with another encoding; windows / unix / classic mac line endings; right to left reading order, picked automatically from the first letter (hebrew, arabic ...) or by hand (edit menu, ctrl+right shift / ctrl+left shift); unicode control characters; per-monitor dpi;
   - **drop files or folders** on the window to insert their paths at the caret, one per line (shift+drop opens the files instead); a selected line break shows as a small highlighted block, so empty lines and line ends inside a selection can be seen;
   - **ctrl+k** clears the current line (ctrl+z brings it back); ctrl+backspace / ctrl+delete delete a word;
-  - an unsaved document is called `mint-XXXX` (4 characters of 0-9 a-z from the date and time) instead of "untitled"; "modified" means *different from the file* (type and delete again, or undo back, is not a change);
-  - **command line**: `notepad-mint /p file` prints the file on the default printer without a dialog and exits (like notepad's `/p`); a plain `notepad-mint file` opens it;
+  - an unsaved document is called `mint-XXXX` instead of "untitled": 4 characters of 0-9 a-z that count up in 32 minute steps from `mint-0000` on 1 january 2000 (last two digits of the year), and every new one is higher than the last, in any window; "modified" means *different from the file* (type and delete again, or undo back, is not a change);
+  - **command line**: `notepad-mint /p file` prints the file on the default printer without a dialog and exits (like notepad's `/p`); `/a file` / `/w file` open it as ansi / utf-16; a plain `notepad-mint file` opens it;
   - the window can be made small: down to 320 x 140 px.
 
 ## small, fast, clean

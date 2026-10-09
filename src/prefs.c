@@ -4,6 +4,7 @@
 #include "app_internal.h"
 
 Prefs g_pf;
+static Prefs g_saved;                               /* what this window last read from or wrote to settings.ini (AppSavePrefs writes only what it changed) */
 static WCHAR g_iniDir[PATH_CAP], g_ini[PATH_CAP];
 
 /* ======================================================== settings ======= */
@@ -43,8 +44,9 @@ static int IniGet(const WCHAR *sec, const WCHAR *key, int def)
     return b[0] ? wtoi(b) : def;
 }
 
-/* WritePrivateProfileStringW fails while something else (an antivirus scan, a backup tool) has the file open for a moment: try again a few times */
-static void IniPutStr(const WCHAR *sec, const WCHAR *key, const WCHAR *v)
+/* WritePrivateProfileStringW fails while something else (an antivirus scan, a backup tool) has the file open for a moment: try again a few times.
+ * mine = FALSE: this window has not changed the value since it read it, so only a missing key is written (another window may have saved a newer one) */
+static void IniPutStr(const WCHAR *sec, const WCHAR *key, const WCHAR *v, BOOL mine)
 {
     static DWORD retryAfter;
     WCHAR current[PATH_CAP];
@@ -53,7 +55,7 @@ static void IniPutStr(const WCHAR *sec, const WCHAR *key, const WCHAR *v)
     if (retryAfter && (LONG)(GetTickCount() - retryAfter) < 0) return;
     retryAfter = 0;
     GetPrivateProfileStringW(sec, key, L"", current, COUNTOF(current), g_ini);
-    if (v && wcmp(current, v) == 0) return;
+    if (v && (wcmp(current, v) == 0 || (!mine && current[0]))) return;
     for (n = 0; n < 8; n++) {
         if (WritePrivateProfileStringW(sec, key, v, g_ini)) return;
         er = GetLastError();
@@ -63,11 +65,11 @@ static void IniPutStr(const WCHAR *sec, const WCHAR *key, const WCHAR *v)
     retryAfter = GetTickCount() + 1000;            /* one unavailable file must not stall for every settings key */
 }
 
-static void IniPutInt(const WCHAR *sec, const WCHAR *key, int v)
+static void IniPutInt(const WCHAR *sec, const WCHAR *key, int v, BOOL mine)
 {
     WCHAR b[16];
     wsprintfW(b, L"%d", v);
-    IniPutStr(sec, key, b);
+    IniPutStr(sec, key, b, mine);
 }
 
 /* the ini is utf-16 (font names and paths can be anything): make sure it exists as such before anything is written to it */
@@ -165,7 +167,7 @@ static void PrefsLoad(void)
     PrefsDefaults();
     GetPrivateProfileStringW(L"editor", L"font", L"", f, 32, g_ini);
     if (f[0]) wcopy(g_pf.font, f, 32);
-    g_pf.pt      = IniGet(L"editor", L"size10", 0);             /* tenths of a point; a 1.0.9 settings.ini has only whole points in "size" */
+    g_pf.pt      = IniGet(L"editor", L"size10", 0);             /* tenths of a point; a settings.ini of 1.0.8 or older has only whole points in "size" */
     if (!g_pf.pt) g_pf.pt = 10 * IniGet(L"editor", L"size", 10);
     g_pf.pt      = Clamp(g_pf.pt, FONT_MIN, FONT_MAX);
     g_pf.cur     = g_pf.pt;                                          /* the working size always starts at the chosen one */
@@ -189,6 +191,7 @@ static void PrefsLoad(void)
     g_pf.marginT = IniGet(L"page", L"top", g_pf.marginT);
     g_pf.marginR = IniGet(L"page", L"right", g_pf.marginR);
     g_pf.marginB = IniGet(L"page", L"bottom", g_pf.marginB);
+    g_saved = g_pf;
 }
 
 static void CapturePlacement(void)
@@ -197,7 +200,7 @@ static void CapturePlacement(void)
     if (!g_hwnd) return;
     wp.length = sizeof wp;
     if (!GetWindowPlacement(g_hwnd, &wp)) return;
-    g_pf.maximized = (wp.showCmd == SW_SHOWMAXIMIZED);
+    g_pf.maximized = wp.showCmd == SW_SHOWMAXIMIZED || (wp.showCmd == SW_SHOWMINIMIZED && (wp.flags & 2));   /* (WPF_RESTORETOMAXIMIZED: minimized from maximized) */
     g_pf.winx = wp.rcNormalPosition.left;
     g_pf.winy = wp.rcNormalPosition.top;
     g_pf.winw = wp.rcNormalPosition.right - wp.rcNormalPosition.left;
@@ -206,29 +209,49 @@ static void CapturePlacement(void)
 
 void AppSavePrefs(void)
 {
+#define MINE(f) (g_pf.f != g_saved.f)
     CapturePlacement();
     IniEnsure();                                  /* utf-16 ini: font names can be anything */
 
-    IniPutStr(L"editor", L"font", g_pf.font);
-    IniPutInt(L"editor", L"size10", g_pf.pt);
-    IniPutInt(L"editor", L"bold", g_pf.bold);
-    IniPutInt(L"editor", L"italic", g_pf.italic);
-    IniPutInt(L"editor", L"wrap", g_pf.wrap);
-    IniPutInt(L"editor", L"tab", g_pf.tab);
-    IniPutInt(L"view", L"statusbar", g_pf.statusbar);
-    IniPutStr(L"view", L"theme", g_pf.theme == THEME_LIGHT ? L"light" : L"dark");
-    IniPutInt(L"window", L"x", g_pf.winx);
-    IniPutInt(L"window", L"y", g_pf.winy);
-    IniPutInt(L"window", L"w", g_pf.winw);
-    IniPutInt(L"window", L"h", g_pf.winh);
-    IniPutInt(L"window", L"maximized", g_pf.maximized);
-    IniPutInt(L"find", L"matchcase", g_pf.matchCase);
-    IniPutInt(L"find", L"wraparound", g_pf.wrapAround);
-    IniPutInt(L"find", L"wholeword", g_pf.wholeWord);
-    IniPutInt(L"page", L"left", g_pf.marginL);
-    IniPutInt(L"page", L"top", g_pf.marginT);
-    IniPutInt(L"page", L"right", g_pf.marginR);
-    IniPutInt(L"page", L"bottom", g_pf.marginB);
+    IniPutStr(L"editor", L"font", g_pf.font, wcmp(g_pf.font, g_saved.font) != 0);
+    IniPutInt(L"editor", L"size10", g_pf.pt, MINE(pt));
+    IniPutInt(L"editor", L"bold", g_pf.bold, MINE(bold));
+    IniPutInt(L"editor", L"italic", g_pf.italic, MINE(italic));
+    IniPutInt(L"editor", L"wrap", g_pf.wrap, MINE(wrap));
+    IniPutInt(L"editor", L"tab", g_pf.tab, MINE(tab));
+    IniPutInt(L"view", L"statusbar", g_pf.statusbar, MINE(statusbar));
+    IniPutStr(L"view", L"theme", g_pf.theme == THEME_LIGHT ? L"light" : L"dark", MINE(theme));
+    IniPutInt(L"window", L"x", g_pf.winx, MINE(winx));
+    IniPutInt(L"window", L"y", g_pf.winy, MINE(winy));
+    IniPutInt(L"window", L"w", g_pf.winw, MINE(winw));
+    IniPutInt(L"window", L"h", g_pf.winh, MINE(winh));
+    IniPutInt(L"window", L"maximized", g_pf.maximized, MINE(maximized));
+    IniPutInt(L"find", L"matchcase", g_pf.matchCase, MINE(matchCase));
+    IniPutInt(L"find", L"wraparound", g_pf.wrapAround, MINE(wrapAround));
+    IniPutInt(L"find", L"wholeword", g_pf.wholeWord, MINE(wholeWord));
+    IniPutInt(L"page", L"left", g_pf.marginL, MINE(marginL));
+    IniPutInt(L"page", L"top", g_pf.marginT, MINE(marginT));
+    IniPutInt(L"page", L"right", g_pf.marginR, MINE(marginR));
+    IniPutInt(L"page", L"bottom", g_pf.marginB, MINE(marginB));
+    g_saved = g_pf;
+#undef MINE
+}
+
+/* the number behind the next unsaved document's name (DocNameNext): every window takes one from the same settings.ini ([name] last), so every
+ * new document gets a higher name than the one before it, in any window. a named mutex keeps two windows that start together from taking the same one */
+unsigned PrefsTakeDocName(unsigned clock)
+{
+    HANDLE mx = CreateMutexW(NULL, FALSE, L"notepad-mint-docname");
+    DWORD wait = mx ? WaitForSingleObject(mx, 2000) : 1;      /* (0 = ours, 0x80 = abandoned by a crashed window: ours too) */
+    unsigned v;
+    WCHAR b[16];
+    v = DocNameNext(clock, (unsigned)IniGet(L"name", L"last", -1));
+    IniEnsure();
+    wsprintfW(b, L"%u", v);
+    IniPutStr(L"name", L"last", b, TRUE);
+    if (wait == 0 || wait == 0x80) ReleaseMutex(mx);
+    if (mx) CloseHandle(mx);
+    return v;
 }
 
 /* Initialize persistence before any windows use theme colours or recent menus. */

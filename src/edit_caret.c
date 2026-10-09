@@ -14,11 +14,8 @@ int EditCaretInView(HWND h, int height)
 {
     POINT p;
     RECT r, fr;
-    LONG_PTR st = GetWindowLongPtrW(h, GWL_STYLE);
     if (GetFocus() != h || !GetCaretPos(&p)) return 0;
-    GetClientRect(h, &r);
-    if (!(st & WS_VSCROLL)) r.right -= S(SBAR_TRIM);
-    if (!(st & WS_HSCROLL)) r.bottom -= S(SBAR_TRIM);
+    EditViewRect(h, &r);
     SendMessageW(h, EM_GETRECT, 0, (LPARAM)&fr);
     if (!IntersectRect(&r, &r, &fr)) return 0;
     if (r.bottom - r.top < height) height = r.bottom - r.top;
@@ -35,8 +32,7 @@ void EditCaretRemember(HWND h, HFONT font)
     gi.cbSize = sizeof gi;
     if (n <= 0 || EditCaretIndex() != n || !GetGUIThreadInfo(GetCurrentThreadId(), &gi) ||
         gi.hwndCaret != h || gi.hwndFocus != h || gi.rcCaret.top <= -20000) return;
-    GetClientRect(h, &view);
-    if (!(GetWindowLongPtrW(h, GWL_STYLE) & WS_HSCROLL)) view.bottom -= S(SBAR_TRIM);
+    EditViewRect(h, &view);
     if (gi.rcCaret.bottom - gi.rcCaret.top > view.bottom - view.top) return; /* never cache a position we clipped ourselves */
     previous = SendMessageW(h, EM_POSFROMCHAR, (WPARAM)(n - 1), 0);
     if (previous == -1) return;
@@ -118,7 +114,6 @@ void EditCaretFit(HWND h, HFONT font, WNDPROC nativeProc, int *tall)
     static int fitting;
     GUITHREADINFO gi;
     RECT view, fr;
-    LONG_PTR style = GetWindowLongPtrW(h, GWL_STYLE);
     int index, x, y, width;
     LRESULT pos;
     if (fitting) return;
@@ -126,9 +121,7 @@ void EditCaretFit(HWND h, HFONT font, WNDPROC nativeProc, int *tall)
     memset(&gi, 0, sizeof gi);
     gi.cbSize = sizeof gi;
     if (!GetGUIThreadInfo(GetCurrentThreadId(), &gi) || gi.hwndCaret != h || gi.hwndFocus != h) goto done;
-    GetClientRect(h, &view);
-    if (!(style & WS_VSCROLL)) view.right -= S(SBAR_TRIM);
-    if (!(style & WS_HSCROLL)) view.bottom -= S(SBAR_TRIM);
+    EditViewRect(h, &view);
     if (gi.rcCaret.bottom - gi.rcCaret.top <= view.bottom - view.top) {
         *tall = 0;
         EditCaretRemember(h, font);

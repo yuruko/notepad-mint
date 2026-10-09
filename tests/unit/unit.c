@@ -241,49 +241,78 @@ static void NameAt(const WCHAR *label, int y, int mo, int d, int h, int mi, int 
     memset(&st, 0, sizeof st);
     st.wYear = (WORD)y; st.wMonth = (WORD)mo; st.wDay = (WORD)d;
     st.wHour = (WORD)h; st.wMinute = (WORD)mi; st.wSecond = (WORD)s;
-    DefaultDocName(&st, b, COUNTOF(b));
+    DefaultDocName(DocNameClock(&st), b, COUNTOF(b));
     Str(label, b, want);
+}
+
+static int DaysIn(int y, int m)
+{
+    static const int n[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    return m == 2 && y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) ? 29 : n[m - 1];
 }
 
 static void TestDocName(void)
 {
     SYSTEMTIME st;
-    WCHAR b[16], prev[16], c;
-    int h, mi, s, i, bad, same;
+    WCHAR b[16], c;
+    unsigned prev, v;
+    int y, m, d, i, bad, gaps, back;
 
-    Group(L"util.c default document name (mint- + 4 base-36 chars)");
-    /* year + month*100 + day + seconds since midnight, base 36 (0-9 a-z), zero padded */
-    NameAt(L"2026-10-05 21:53:42 = 2026 + 1005 + 78822 = 81853", 2026, 10, 5, 21, 53, 42, L"mint-1r5p");
-    NameAt(L"the next second is the next name", 2026, 10, 5, 21, 53, 43, L"mint-1r5q");
-    NameAt(L"midnight, 1 january 2026 (zero padded)", 2026, 1, 1, 0, 0, 0, L"mint-01n3");
-    NameAt(L"midnight, 6 october 2026", 2026, 10, 6, 0, 0, 0, L"mint-02c8");
-    NameAt(L"the last second of year 9999", 9999, 12, 31, 23, 59, 59, L"mint-23bx");
+    Group(L"util.c default document name (mint- + 4 base-36 chars, 45 steps a day from 2000-01-01)");
+    NameAt(L"midnight, 1 january 2000 = 0000", 2000, 1, 1, 0, 0, 0, L"mint-0000");
+    NameAt(L"00:31:59 is still the first step", 2000, 1, 1, 0, 31, 59, L"mint-0000");
+    NameAt(L"00:32:00 is the next one", 2000, 1, 1, 0, 32, 0, L"mint-0001");
+    NameAt(L"the last second of 1 january 2000 = step 44", 2000, 1, 1, 23, 59, 59, L"mint-0018");
+    NameAt(L"2 january 2000 = 45", 2000, 1, 2, 0, 0, 0, L"mint-0019");
+    NameAt(L"1 march 2000 (2000 is a leap year) = 60 days", 2000, 3, 1, 0, 0, 0, L"mint-0230");
+    NameAt(L"29 february 2024 06:00", 2024, 2, 29, 6, 0, 0, L"mint-8ifk");
+    NameAt(L"1 march 2024", 2024, 3, 1, 0, 0, 0, L"mint-8igi");
+    NameAt(L"9 october 2026 noon", 2026, 10, 9, 12, 0, 0, L"mint-9fj4");
+    NameAt(L"the last second of 2099 = 1643624", 2099, 12, 31, 23, 59, 59, L"mint-z888");
+    NameAt(L"2100 starts again at 0000 (only the last two digits of the year count)", 2100, 1, 1, 0, 0, 0, L"mint-0000");
+    NameAt(L"2126 = 2026", 2126, 10, 9, 12, 0, 0, L"mint-9fj4");
 
     memset(&st, 0, sizeof st);
-    st.wYear = 2026; st.wMonth = 10; st.wDay = 5;
-    bad = 0; same = 0; prev[0] = 0;
-    for (h = 0; h < 24; h++)
-        for (mi = 0; mi < 60; mi++)
-            for (s = 0; s < 60; s++) {
-                st.wHour = (WORD)h; st.wMinute = (WORD)mi; st.wSecond = (WORD)s;
-                DefaultDocName(&st, b, COUNTOF(b));
-                if (wlen(b) != 9 || b[0] != 'm' || b[1] != 'i' || b[2] != 'n' || b[3] != 't' || b[4] != '-') bad++;
+    bad = 0; gaps = 0; back = 0; prev = 0;
+    for (y = 2000; y < 2100; y++)
+        for (m = 1; m <= 12; m++)
+            for (d = 1; d <= DaysIn(y, m); d++) {
+                st.wYear = (WORD)y; st.wMonth = (WORD)m; st.wDay = (WORD)d;
+                st.wHour = 0; st.wMinute = 0; st.wSecond = 0;
+                v = DocNameClock(&st);
+                if (!(y == 2000 && m == 1 && d == 1) && v != prev + 1) gaps++;
+                st.wHour = 23; st.wMinute = 59; st.wSecond = 59;
+                prev = DocNameClock(&st);
+                if (prev != v + DOCNAME_STEPS - 1) back++;
+                DefaultDocName(prev, b, COUNTOF(b));
+                if (wlen(b) != 9 || b[0] != 'm' || b[4] != '-') bad++;
                 for (i = 5; i < 9; i++) {
                     c = b[i];
                     if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z'))) bad++;
                 }
-                if (wcmp(b, prev) == 0) same++;
-                wcopy(prev, b, COUNTOF(prev));
             }
-    Int(L"all 86400 seconds of a day: \"mint-\" + exactly four of 0-9 a-z", bad, 0);
-    Int(L"no two consecutive seconds share a name", same, 0);
+    Int(L"every day of the century: \"mint-\" + exactly four of 0-9 a-z", bad, 0);
+    Int(L"each day starts one step after the day before ends (no gap, never backwards)", gaps, 0);
+    Int(L"each day has exactly 45 steps", back, 0);
+    Want(prev < 1679616u, L"the last step of the century fits four base-36 characters", (int)prev, 0);
+    Done(L"the century fits four characters");
+
+    Group(L"util.c DocNameNext (one more than the last name while that is ahead of the clock)");
+    Int(L"no name handed out yet: the clock", (int)DocNameNext(100, DOCNAME_NONE), 100);
+    Int(L"last name behind the clock: the clock", (int)DocNameNext(100, 50), 100);
+    Int(L"last name one step behind: the clock", (int)DocNameNext(100, 99), 100);
+    Int(L"last name = the clock (two documents in one step): one more", (int)DocNameNext(100, 100), 101);
+    Int(L"last name ahead (many documents): one more", (int)DocNameNext(100, 150), 151);
+    Int(L"ahead by just under a year: one more", (int)DocNameNext(100, 99 + DOCNAME_AHEAD), (int)(100 + DOCNAME_AHEAD));
+    Int(L"ahead by more than a year (stale): the clock", (int)DocNameNext(100, 100 + DOCNAME_AHEAD), 100);
+    Int(L"a new century (last = end of 2099): the clock", (int)DocNameNext(5, 1643624u), 5);
 
     memset(b, 0x55, sizeof b);
-    DefaultDocName(&st, b, 9);
+    DefaultDocName(0, b, 9);
     Want(b[0] == 0 && b[1] == 0x5555, L"cap 9: expected an empty string and nothing written past it", 0, 0);
     Done(L"a buffer that cannot hold 9 chars + nul gets an empty string");
     memset(b, 0x55, sizeof b);
-    DefaultDocName(&st, b, 10);
+    DefaultDocName(0, b, 10);
     Want(wlen(b) == 9 && b[10] == 0x5555, L"cap 10: expected 9 characters and nothing written past the nul", 0, 0);
     Done(L"cap 10 is exactly enough");
 }
@@ -330,67 +359,6 @@ static void TestPaths(void)
     WantStr(L"text", b, wlen(b), WLIT(L"c:\\dir\\"));
     Want(b[8] == 0x5555, L"wrote past cap", 0, 0);
     Done(L"pathjoin truncates to cap");
-}
-
-/* ------------------------------------------------------------ colours -- */
-static void TestColors(void)
-{
-    static const WCHAR *const bad[] = { L"12345", L"1234567", L"gg0000", L"", L"#", L"12 34 56", L"9df5bd x", L"##9df5bd" };
-    static const COLORREF rt[] = { 0x000000, 0xffffff, 0x123456, 0xbdf59d, 0x010203, 0x804020 };
-    WCHAR b[16], name[64];
-    COLORREF c;
-    int i;
-    Group(L"util.c colours");
-    c = 0; Want(ParseColor(L"9df5bd", &c), L"rejected", 0, 0); Want(c == RGB(0x9d, 0xf5, 0xbd), L"got %06x", (int)c, 0); Done(L"parsecolor rrggbb");
-    c = 0; Want(ParseColor(L"#9DF5BD", &c), L"rejected", 0, 0); Want(c == RGB(0x9d, 0xf5, 0xbd), L"got %06x", (int)c, 0); Done(L"parsecolor #RRGGBB");
-    c = 0; Want(ParseColor(L"  #9df5bd  ", &c), L"rejected", 0, 0); Want(c == RGB(0x9d, 0xf5, 0xbd), L"got %06x", (int)c, 0); Done(L"parsecolor blanks around");
-    c = 0; Want(ParseColor(L"fff", &c), L"rejected", 0, 0); Want(c == RGB(0xff, 0xff, 0xff), L"got %06x", (int)c, 0); Done(L"parsecolor rgb");
-    c = 0; Want(ParseColor(L"#123", &c), L"rejected", 0, 0); Want(c == RGB(0x11, 0x22, 0x33), L"got %06x", (int)c, 0); Done(L"parsecolor #rgb");
-    for (i = 0; i < COUNTOF(bad); i++) {
-        c = 0x12345678;
-        wsprintfW(name, L"parsecolor rejects \"%s\"", bad[i]);
-        Want(!ParseColor(bad[i], &c), L"accepted", 0, 0);
-        Want(c == 0x12345678, L"changed the output on failure", 0, 0);
-        Done(name);
-    }
-    memset(b, 0x55, sizeof b);
-    FormatColor(RGB(0x9d, 0xf5, 0xbd), b);
-    WantStr(L"text", b, wlen(b), WLIT(L"9df5bd"));
-    Want(b[7] == 0x5555, L"wrote more than 7 chars", 0, 0);
-    Done(L"formatcolor");
-    for (i = 0; i < COUNTOF(rt); i++) {
-        FormatColor(rt[i], b);
-        c = 0x12345678;
-        wsprintfW(name, L"formatcolor -> parsecolor round trip %06x", (int)rt[i]);
-        Want(ParseColor(b, &c) && c == rt[i], L"got %06x", (int)c, 0);
-        Done(name);
-    }
-}
-
-/* ---------------------------------------------------------- wildmatch -- */
-static void TestWild(void)
-{
-    static const struct { const WCHAR *pat, *name; int want; } t[] = {
-        { L"*.txt", L"a.txt", 1 },           { L"*.txt", L"A.TXT", 1 },          { L"*.TXT", L"notes.txt", 1 },
-        { L"*.txt", L"a.txt.bak", 0 },       { L"*.txt", L"atxt", 0 },           { L"*.txt", L".txt", 1 },
-        { L"*.*", L"readme", 1 },            { L"*.*", L"a.b", 1 },              { L"*.*", L".hidden", 1 },
-        { L"readme.*", L"readme", 1 },       { L"readme.*", L"readme.md", 1 },   { L"readme.*", L"readmex", 0 },
-        { L"?.txt", L"a.txt", 1 },           { L"?.txt", L"ab.txt", 0 },         { L"?.txt", L".txt", 0 },
-        { L"*.txt;*.log", L"x.log", 1 },     { L"*.txt; *.log", L"x.log", 1 },   { L"*.txt;*.log", L"x.md", 0 },
-        { L" *.txt ", L"a.txt", 1 },         { L"a*b*c", L"axxbyyc", 1 },        { L"a*b*c", L"axxbyy", 0 },
-        { L"*ab", L"aab", 1 },               { L"*a*a*a", L"aaa", 1 },           { L"*a*a*a", L"aa", 0 },
-        { L"*", L"anything.at.all", 1 },     { L"\u00c4*", L"\u00e4rger.txt", 1 }, { L"abc", L"abcd", 0 },
-        { L";;", L"a", 0 },
-    };
-    WCHAR name[128];
-    int i, got;
-    Group(L"util.c wildmatch");
-    for (i = 0; i < COUNTOF(t); i++) {
-        got = WildMatch(t[i].pat, t[i].name) ? 1 : 0;
-        wsprintfW(name, L"wildmatch \"%s\" %s \"%s\"", t[i].pat, t[i].want ? L"matches" : L"doesn't match", t[i].name);
-        Want(got == t[i].want, got ? L"it matched" : L"it didn't match", 0, 0);
-        Done(name);
-    }
 }
 
 /* ------------------------------------------------------------- rt.asm -- */
@@ -1378,8 +1346,6 @@ void start(void)
     TestStrings();
     TestDocName();
     TestPaths();
-    TestColors();
-    TestWild();
     TestRt();
     TestFind();
     TestReplace();

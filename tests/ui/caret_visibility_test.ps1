@@ -104,6 +104,28 @@ public static class CV {
             }
         });
     }
+    public static void KeyMsg(uint tid, long edit, uint msg, int key, int lparam, bool shift, bool control) {   // one key message with this modifier state (rtl_test.ps1: ctrl + one shift key)
+        OnWorker(delegate() {
+            uint own = GetCurrentThreadId();
+            if (!AttachThreadInput(own, tid, true)) throw new Exception("cannot attach to the isolated app's input queue");
+            byte[] previous = new byte[256], keys = new byte[256];
+            bool saved = false;
+            try {
+                if (!GetKeyboardState(previous)) throw new Exception("cannot read isolated keyboard state");
+                saved = true;
+                keys[0x10] = shift ? (byte)0x80 : (byte)0;
+                keys[0x11] = control ? (byte)0x80 : (byte)0;
+                if (!SetKeyboardState(keys)) throw new Exception("cannot set isolated keyboard state");
+                IntPtr result;
+                if (SendMessageTimeoutW(new IntPtr(edit), msg, new IntPtr(key), new IntPtr(lparam), 2, 8000, out result) == IntPtr.Zero)
+                    throw new Exception("isolated key message timed out");
+            } finally {
+                if (saved) SetKeyboardState(previous);
+                AttachThreadInput(own, tid, false);
+            }
+        });
+    }
+    public static int ExStyle(long h) { return GetWindowLongW(new IntPtr(h), -20); }
     public static int[] Format(long edit) {
         R r = new R(); IntPtr result;
         if (SendMessageTimeoutW(new IntPtr(edit), 0xB2, IntPtr.Zero, ref r, 2, 8000, out result) == IntPtr.Zero) throw new Exception("format rectangle query timed out");
@@ -115,7 +137,7 @@ public static class CV {
         IntPtr h = new IntPtr(edit);
         if (!GetGUIThreadInfo(tid, ref g) || !GetClientRect(h, out r)) return new int[0];
         int style = GetWindowLongW(h, -16);
-        if ((style & 0x200000) == 0) r.r -= trim;
+        if ((style & 0x200000) == 0) { if ((GetWindowLongW(h, -20) & 0x4000) != 0) r.l += trim; else r.r -= trim; }   // the hidden overhang is on the side of the vertical bar (WS_EX_LEFTSCROLLBAR: the left)
         if ((style & 0x100000) == 0) r.b -= trim;
         return new int[] { g.caret == h ? 1 : 0, g.focus == h ? 1 : 0,
             g.rect.l, g.rect.t, g.rect.r, g.rect.b, r.l, r.t, r.r, r.b };

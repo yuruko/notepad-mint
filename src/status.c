@@ -16,7 +16,7 @@ static int   g_need[SB_COUNT];                  /* device px: the text it shows 
 static int PadL(void) { return S(8); }
 static int PadR(void) { return S(8); }
 static int TextWidth(HDC dc, const WCHAR *t) { return TextW(dc, t, -1) + PadL() + PadR(); }
-static int PanelW(int i) { return g_need[i] > g_floor[i] ? g_need[i] : g_floor[i]; }
+static int PanelW(int i) { return !g_txt[i][0] && i != SB_POS ? 0 : g_need[i] > g_floor[i] ? g_need[i] : g_floor[i]; }   /* (an empty panel takes no room: the zoom one while not zoomed) */
 
 static void Measure(void)
 {
@@ -28,6 +28,7 @@ static void Measure(void)
     GetTextMetricsW(dc, &tm);
     g_sbH = tm.tmHeight + S(8);
     g_floor[SB_POS] = TextWidth(dc, L"99999999:99999");              /* line:column of a very big file */
+    g_floor[SB_ZOOM] = 0;
     g_floor[SB_LINES] = 0;                                         /* fully dynamic like the encoding: it grows and shrinks with the text, nothing is reserved */
     g_floor[SB_BYTES] = 0;
     g_floor[SB_EOL] = 0;                                           /* fully dynamic too: "lf" gets a panel of its own width, not the width of "crlf" */
@@ -120,7 +121,8 @@ static void Paint(HWND h)
 
     Panels(&rc, p);
     for (i = 0; i < SB_COUNT; i++) {
-        BOOL hot = (i >= SB_EOL && i == g_hotp);             /* the clickable panels: hover = the accent as the background */
+        BOOL hot = (i != SB_POS && i == g_hotp);             /* the clickable panels: hover = the accent as the background (the position panel only goes to a line) */
+        if (p[i].right <= p[i].left) continue;              /* (an empty panel) */
         Bevel(mdc, &p[i], BV_FLAT_DN);
         if (hot) { r = p[i]; InflateRect(&r, -1, -1); FillC(mdc, &r, C_ACCENT); }
         r = p[i]; r.left += PadL(); r.right -= PadR();
@@ -141,6 +143,7 @@ static int AllText(WCHAR *out, int cap)
     static const WCHAR sep[] = L" | ";
     int i, k, n = 0;
     for (i = 0; i < SB_COUNT; i++) {
+        if (i && !g_txt[i][0]) continue;                     /* (no panel) */
         if (i) for (k = 0; sep[k]; k++, n++) if (out && n < cap - 1) out[n] = sep[k];
         for (k = 0; g_txt[i][k]; k++, n++) if (out && n < cap - 1) out[n] = g_txt[i][k];
     }
@@ -166,7 +169,7 @@ static LRESULT CALLBACK StatusProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_MOUSEMOVE: {
         int i = PanelAt(h, GET_X_LPARAM(l), GET_Y_LPARAM(l));
-        if (i < SB_EOL) i = -1;                              /* the position, the size and the lines are not buttons */
+        if (i != SB_ZOOM && i < SB_EOL) i = -1;              /* the size and the lines are not buttons, the position goes to a line without looking like one */
         if (i != g_hotp) {
             TRACKMOUSEEVENT te;
             g_hotp = i;
@@ -181,7 +184,10 @@ static LRESULT CALLBACK StatusProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_LBUTTONDOWN: {
         int i = PanelAt(h, GET_X_LPARAM(l), GET_Y_LPARAM(l));
-        if (i >= SB_EOL) {
+        if (i == SB_POS || i == SB_ZOOM) {                   /* the position goes to a line, the zoom back to 100% */
+            g_hotp = -1;
+            PostMessageW(GetParent(h), WM_COMMAND, i == SB_POS ? IDM_EDIT_GOTO : IDM_ZOOM_RESET, 0);
+        } else if (i >= SB_EOL) {
             RECT rc, p[SB_COUNT];
             POINT pt;
             GetClientRect(h, &rc);

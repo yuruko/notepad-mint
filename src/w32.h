@@ -230,6 +230,7 @@ typedef struct {
 #define WM_QUIT 0x0012
 #define WM_ERASEBKGND 0x0014
 #define WM_QUERYENDSESSION 0x0011
+#define WM_ENDSESSION 0x0016
 #define WM_ACTIVATEAPP 0x001C
 #define WM_CANCELMODE 0x001F
 #define WM_SETCURSOR 0x0020
@@ -310,6 +311,7 @@ typedef struct {
 
 #define SW_HIDE 0
 #define SW_SHOWNORMAL 1
+#define SW_SHOWMINIMIZED 2
 #define SW_SHOWMAXIMIZED 3
 #define SW_SHOWNOACTIVATE 4
 #define SW_SHOW 5
@@ -604,6 +606,9 @@ API LPWSTR  WINAPI GetCommandLineW(void);
 API DWORD   WINAPI GetLastError(void);
 API void    WINAPI SetLastError(DWORD);
 API void    WINAPI Sleep(DWORD);
+API HANDLE  WINAPI CreateMutexW(void *, BOOL, LPCWSTR);
+API DWORD   WINAPI WaitForSingleObject(HANDLE, DWORD);
+API BOOL    WINAPI ReleaseMutex(HANDLE);
 API HANDLE  WINAPI CreateFileW(LPCWSTR, DWORD, DWORD, void *, DWORD, DWORD, HANDLE);
 API BOOL    WINAPI ReadFile(HANDLE, LPVOID, DWORD, DWORD *, void *);
 API BOOL    WINAPI WriteFile(HANDLE, LPCVOID, DWORD, DWORD *, void *);

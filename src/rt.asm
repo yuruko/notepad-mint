@@ -219,4 +219,66 @@ cl_done:
     ret
 _mp_count_lf endp
 
+; ---------------------------------------------------------------------------
+; size_t mp_find3(const WCHAR *p, size_t n, unsigned a, unsigned b, unsigned c)
+; index of the first unit of p[0..n) that is a, b or c (n when there is none): the line breaks
+; and nuls of a file being read (doc.c), the possible first characters of a search (search.c).
+; 8 words per step with bounded unaligned reads like mp_count_lf (never past p + n).
+; ---------------------------------------------------------------------------
+_mp_find3 proc
+    push    esi
+    mov     esi, [esp + 8]          ; p
+    mov     edx, [esp + 12]         ; n
+    mov     ecx, esi
+    cmp     edx, 8
+    jb      f3_tail
+    movd    xmm0, dword ptr [esp + 16]
+    pshuflw xmm0, xmm0, 0
+    pshufd  xmm0, xmm0, 0           ; a in all 8 words
+    movd    xmm1, dword ptr [esp + 20]
+    pshuflw xmm1, xmm1, 0
+    pshufd  xmm1, xmm1, 0           ; b
+    movd    xmm2, dword ptr [esp + 24]
+    pshuflw xmm2, xmm2, 0
+    pshufd  xmm2, xmm2, 0           ; c
+f3_vec:
+    movdqu  xmm3, xmmword ptr [ecx]
+    movdqa  xmm4, xmm3
+    movdqa  xmm5, xmm3
+    pcmpeqw xmm3, xmm0
+    pcmpeqw xmm4, xmm1
+    pcmpeqw xmm5, xmm2
+    por     xmm3, xmm4
+    por     xmm3, xmm5
+    pmovmskb eax, xmm3
+    test    eax, eax
+    jnz     f3_hit
+    add     ecx, 16
+    sub     edx, 8
+    cmp     edx, 8
+    jae     f3_vec
+f3_tail:
+    test    edx, edx
+    jz      f3_found                ; (none: ecx = p + n)
+    movzx   eax, word ptr [ecx]
+    cmp     eax, [esp + 16]
+    je      f3_found
+    cmp     eax, [esp + 20]
+    je      f3_found
+    cmp     eax, [esp + 24]
+    je      f3_found
+    add     ecx, 2
+    dec     edx
+    jmp     f3_tail
+f3_hit:
+    bsf     eax, eax                ; the first matching byte: 2 per word
+    add     ecx, eax
+f3_found:
+    mov     eax, ecx
+    sub     eax, esi
+    shr     eax, 1
+    pop     esi
+    ret
+_mp_find3 endp
+
 end

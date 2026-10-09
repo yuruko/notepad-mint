@@ -1016,10 +1016,25 @@ function Test-T7 {                                                              
     [void](Snd $lb $LB_SETCURSEL ([U]::ListFind($lb, $IDM.ENC_UTF8)) 0)
     Press $dlg $IDOK
     $box = Wait-Box $app $AppName
-    Ck 'T7.10 invalid utf-8 is rejected with an open error' ($box.Text -like 'cannot open*') $box.Text
-    [void](Box-Press $box $IDOK)
-    CkEdText 'T7.10a failed decode preserves the previous document' $app $exp1252
-    CkBytes 'T7.10b failed decode preserves the file on disk' $bytes $f
+    Ck 'T7.10 invalid utf-8 is not opened by accident: the app asks first' ($box.Text -like '*some bytes of this file are not valid in its encoding*') $box.Text
+    [void](Box-Press $box $BOX_BTN2)                                             # cancel
+    CkEdText 'T7.10a cancel preserves the previous document' $app $exp1252
+    CkBytes 'T7.10b ... and the file on disk' $bytes $f
+    Cmd $app 'IDM_ENC_REOPEN'
+    $dlg = Wait-Win $app 'mp_enc' 'reopen with encoding'
+    $lb = Ctl $dlg $IDO.ID_ENCLIST
+    [void](Snd $lb $LB_SETCURSEL ([U]::ListFind($lb, $IDM.ENC_UTF8)) 0)
+    Press $dlg $IDOK
+    $box = Wait-Box $app $AppName
+    [void](Box-Press $box $IDOK)                                                 # open anyway
+    CkEdText 'T7.10c "open" opens it anyway, each bad byte as U+FFFD' $app ('caf' + (Chars @(0xFFFD)) + " au lait`r`nna" + (Chars @(0xFFFD)) + "ve`r`n") 3000
+    CkBytes 'T7.10d ... the file on disk is untouched' $bytes $f
+    Cmd $app 'IDM_ENC_REOPEN'                                                    # back to windows-1252 for the rest
+    $dlg = Wait-Win $app 'mp_enc' 'reopen with encoding'
+    $lb = Ctl $dlg $IDO.ID_ENCLIST
+    [void](Snd $lb $LB_SETCURSEL ([U]::ListFind($lb, 1252)) 0)
+    Press $dlg $IDOK
+    CkEdText 'T7.10e ... and reopening it as windows-1252 gives the real text again' $app $exp1252 3000
 
     Cmd $app 'IDM_ENC_REOPEN'
     $dlg = Wait-Win $app 'mp_enc' 'reopen with encoding'
@@ -1028,31 +1043,28 @@ function Test-T7 {                                                              
     Start-Sleep -Milliseconds 250
     CkText 'T7.12 ... and the text is unchanged' $exp1252 (Ed-Text $app)
 
-    Ed-Dirty $app 'zz'                                                           # a modified document: reopening asks first
+    Ed-Dirty $app 'zz'                                                           # a modified document: reopening asks first, before the encoding is picked
     $dirtyText = Ed-Text $app
     Cmd $app 'IDM_ENC_REOPEN'
-    $dlg = Wait-Win $app 'mp_enc' 'reopen with encoding'
-    [void](Snd (Ctl $dlg $IDO.ID_ENCLIST) $LB_SETCURSEL ([U]::ListFind((Ctl $dlg $IDO.ID_ENCLIST), 1252)) 0)
-    Press $dlg $IDOK
     $box = Wait-Box $app $AppName
-    Ck 'T7.13 reopening a modified document warns: "reopening the file will discard your unsaved changes."' ($box.Text -like 'reopening the file will discard your unsaved changes.*') ('box text [' + (Show $box.Text) + ']')
+    Ck 'T7.13 reopening a modified document warns first: "reopening the file will discard your unsaved changes."' ($box.Text -like 'reopening the file will discard your unsaved changes.*') ('box text [' + (Show $box.Text) + ']')
     Ck 'T7.14 ... answer no (2nd button): the box closes' (Box-Press $box $BOX_BTN2) 'box still visible'
     Start-Sleep -Milliseconds 250
     CkText 'T7.15 ... the edited text is kept' $dirtyText (Ed-Text $app)
     Cmd $app 'IDM_ENC_REOPEN'
+    $box = Wait-Box $app $AppName
+    Ck 'T7.16 ... asked again; answer yes (1st button): the box closes' (Box-Press $box $IDOK) 'box still visible'
     $dlg = Wait-Win $app 'mp_enc' 'reopen with encoding'
     [void](Snd (Ctl $dlg $IDO.ID_ENCLIST) $LB_SETCURSEL ([U]::ListFind((Ctl $dlg $IDO.ID_ENCLIST), 1252)) 0)
     Press $dlg $IDOK
-    $box = Wait-Box $app $AppName
-    Ck 'T7.16 ... asked again; answer yes (1st button): the box closes' (Box-Press $box $IDOK) 'box still visible'
     CkEdText 'T7.17 ... the file is reloaded as windows-1252' $app $exp1252 3000
     Ck 'T7.18 ... and the document is clean again' (-not (Ed-Modified $app)) 'EM_GETMODIFY is set'
 
-    $app2 = Start-App                                                            # untitled: nothing to reopen
+    $app2 = Start-App                                                            # untitled: nothing to reopen (the menu item is grayed)
     Cmd $app2 'IDM_ENC_REOPEN'
-    $box = Wait-Box $app2 $AppName
-    CkEq 'T7.19 an untitled document says there is nothing to reopen' 'this document hasn''t been saved yet, so there is nothing to reopen.' $box.Text
-    [void](Box-Press $box $IDOK)
+    $box = $null
+    try { $box = Wait-Box $app2 $AppName 800 } catch { $box = $null }
+    Ck 'T7.19 an untitled document has nothing to reopen: no dialog, no box' (-not $box -and -not [U]::FindTop($app2.Pid, 'mp_enc', '')) 'something opened'
 }
 
 function Read-Palette() {                                                        # the two palettes from the g_themes table in ui.c: face + editor background
@@ -1101,7 +1113,8 @@ function Strip-Section([string]$ini, [string]$sec) {                            
 function Test-T8 {                                                               # theme
     $pal = Read-Palette
     $app = Start-App
-    Ck 'T8.0 no settings.ini yet in the fresh %APPDATA% (isolation)' (-not (Test-Path -LiteralPath $app.Ini)) ('unexpected ' + $app.Ini)
+    $ri = Read-Ini $app.Ini                                                      # (the only thing a start writes: the last default name handed out, [name] last)
+    Ck 'T8.0 no settings yet in the fresh %APPDATA% (isolation)' (@($ri.Keys | Where-Object { $_ -ne 'name' }).Count -eq 0) ('unexpected sections in ' + $app.Ini + ': ' + (@($ri.Keys) -join ','))
     if ($pal) { CkPix 'T8.1 default theme is dark: the editor area is black' $app 'edit' $pal.dark.edit; CkPix 'T8.2 ... and the chrome (menu bar) has the dark face colour' $app 'bar' $pal.dark.face }
     else { Skip 'T8.1 pixel checks' 'could not parse the g_themes palette table in src\ui.c' }
 
@@ -1317,12 +1330,18 @@ function Test-T12 {                                                             
 }
 
 # =========================================================================================================== T13
-function Expected-Name([DateTime]$t) {                                           # DefaultDocName (util.c): "mint-" + base 36 of year + month*100 + day + seconds since midnight
-    $v = ($t.Year + $t.Month * 100 + $t.Day + $t.Hour * 3600 + $t.Minute * 60 + $t.Second) % 1679616
+function Expected-Name([DateTime]$t) {                                           # DocNameClock + DefaultDocName (util.c): "mint-" + base 36 of (days since 2000-01-01, year mod 100) * 45 + (seconds since midnight) / 1920
+    $days = ([DateTime]::new(2000 + ($t.Year % 100), $t.Month, $t.Day) - [DateTime]::new(2000, 1, 1)).Days
+    $v = $days * 45 + [int][Math]::Floor(($t.Hour * 3600 + $t.Minute * 60 + $t.Second) / 1920)
     $d = '0123456789abcdefghijklmnopqrstuvwxyz'
     $s = ''
     for ($i = 0; $i -lt 4; $i++) { $s = [string]$d[$v % 36] + $s; $v = [int][Math]::Floor($v / 36) }
     return 'mint-' + $s
+}
+function Name-Value([string]$n) {                                                # "mint-XXXX" -> the number behind it
+    $d = '0123456789abcdefghijklmnopqrstuvwxyz'; $v = 0
+    foreach ($c in $n.Substring(5).ToCharArray()) { $v = $v * 36 + $d.IndexOf([string]$c) }
+    return $v
 }
 function Test-T13 {                                                              # the default document name "mintXXXX"
     $t0 = Get-Date
@@ -1332,14 +1351,20 @@ function Test-T13 {                                                             
     Ck 'T13.1 an unsaved document is called "mint-" + 4 characters from 0-9 a-z (title "mint-XXXX - notepad mint")' ($name -ne $null) ('title [' + (Title $app) + ']')
     $cands = @()                                                                 # the app computed the name some time between just before the launch and the first title
     for ($t = $t0.AddSeconds(-1); $t -le $t1.AddSeconds(1); $t = $t.AddSeconds(1)) { $cands += (Expected-Name $t) }
-    Ck 'T13.2 ... it is the base-36 form of year + month*100 + day + seconds since midnight (local time, +-1 s)' ($cands -contains $name) ('name ' + $name + ', the formula gives ' + (($cands | Select-Object -Unique) -join ' '))
+    Ck 'T13.2 ... with no name handed out before it is the clock: base 36 of days since 2000-01-01 * 45 + seconds since midnight / 1920 (local time, +-1 s)' ($cands -contains $name) ('name ' + $name + ', the formula gives ' + (($cands | Select-Object -Unique) -join ' '))
+    $script:iniLast = $null
+    [void](WaitFor { $ri = Read-Ini $app.Ini; if ($ri.ContainsKey('name')) { $script:iniLast = $ri['name']['last'] }; $script:iniLast } 3000)
+    CkEq 'T13.2b ... and settings.ini [name] last holds its number' ([string](Name-Value $name)) ([string]$script:iniLast)
 
-    Start-Sleep -Milliseconds 2200                                               # a later second: a different name
-    Cmd $app 'IDM_FILE_NEW'
+    Cmd $app 'IDM_FILE_NEW'                                                      # (same 32 minute step: the counter, not the clock, makes it higher)
     $new = $null
     [void](WaitFor { $script:n2 = Default-Name $app; $script:n2 -and ($script:n2 -cne $name) } 3000)
     $new = $script:n2
-    Ck 'T13.3 file > new gives the new document its own default name (a later second, so a different one)' (($new -ne $null) -and ($new -cne $name)) ('before [' + $name + '] after [' + $new + ']')
+    Ck 'T13.3 file > new gives the new document a higher default name, one more when the clock has not moved on' (($new -ne $null) -and ((Name-Value $new) -gt (Name-Value $name)) -and ((Name-Value $new) -eq (Name-Value $name) + 1 -or $cands -contains $new -or (Name-Value $new) -eq (Name-Value (Expected-Name (Get-Date))))) ('before [' + $name + '] after [' + $new + ']')
+    $app2 = Start-App '' $app.AppData                                             # a second window that shares the settings
+    $other = Default-Name $app2
+    Ck 'T13.3b a second window (same settings.ini) gets a higher name than the last one handed out' (($other -ne $null) -and ((Name-Value $other) -gt (Name-Value $new))) ('last [' + $new + '] second window [' + $other + ']')
+    Stop-App $app2
 
     Cmd $app 'IDM_FILE_SAVEAS'                                                   # the native save as dialog (see the helpers above T5)
     $dlg = Nat-Wait $app
@@ -3122,11 +3147,12 @@ function Test-T38 {
 . (Join-Path $PSScriptRoot 'caret_visibility_test.ps1')
 . (Join-Path $PSScriptRoot 'caret_scroll_test.ps1')
 . (Join-Path $PSScriptRoot 'ui_resources_test.ps1')
+. (Join-Path $PSScriptRoot 'rtl_test.ps1')
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43', 'T44', 'T45')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine

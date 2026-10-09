@@ -138,7 +138,7 @@ static const MenuItem miView[] = {
     SUB(L"&theme",             &mdTheme),
 };
 static const MenuItem miHelp[] = {
-    IT(L"&help topics",        NULL, IDM_HELP_TOPICS),
+    IT(L"&help topics",        L"f1", IDM_HELP_TOPICS),
     SEP,
     IT(L"&about notepad mint", NULL, IDM_HELP_ABOUT),
 };

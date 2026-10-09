@@ -139,6 +139,7 @@ static LRESULT CALLBACK AboutProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0; }
     case WM_COMMAND:
         if (LOWORD(w) == IDOK || LOWORD(w) == IDCANCEL) { b->result = 1; b->done = 1; return 0; }
+        if (LOWORD(w) == ID_LINK) { LinkOpen(GetDlgItem(h, ID_LINK)); return 0; }   /* enter on the focused link (the dialog manager sends it as a button click) */
         break;
     case WM_NCDESTROY:
         if (d->icon) { DestroyIcon(d->icon); d->icon = NULL; }
@@ -185,6 +186,8 @@ static const WCHAR g_help[] =
     L"  ctrl+backspace    delete the word before the caret\r\n"
     L"  ctrl+delete       delete the word after the caret\r\n"
     L"  ctrl+k            clear the current line (ctrl+z brings it back)\r\n"
+    L"  ctrl+right shift  right to left reading order\r\n"
+    L"  ctrl+left shift   left to right reading order\r\n"
     L"\r\n"
     L"format\r\n"
     L"  alt+z             word wrap on / off\r\n"
@@ -195,6 +198,9 @@ static const WCHAR g_help[] =
     L"  ctrl+plus         bigger font (or ctrl + mouse wheel up)\r\n"
     L"  ctrl+minus        smaller font (or ctrl + mouse wheel down)\r\n"
     L"  ctrl+0            back to the size picked in the font dialog\r\n"
+    L"\r\n"
+    L"help\r\n"
+    L"  f1                this window\r\n"
     L"\r\n"
     L"tips\r\n"
     L"\r\n"
@@ -208,7 +214,8 @@ static const WCHAR g_help[] =
     L"\r\n"
     L"status bar: the line and column, the number of lines, the size in bytes, the line ending and the encoding. "
     L"with a selection the position also shows the lines and bytes it covers, like \"162:54 [5 L 54 B]\". "
-    L"click the line ending or the encoding to change it.\r\n"
+    L"after ctrl+plus / minus the zoom shows next to the position (\"120%\"). click the position to go to a line, "
+    L"the zoom to go back to 100%, the line ending or the encoding to change it.\r\n"
     L"\r\n"
     L"font: format > font picks the face and the size, 7 to 100 pt. the menus, title bar and status bar use "
     L"the same face at a fixed 11 px. tab size (2, 4 or 8 columns), line ending and encoding are in the format menu.\r\n"
@@ -224,7 +231,12 @@ static const WCHAR g_help[] =
     L"\r\n"
     L"menus: alt or f10 selects the menu bar, alt + a letter opens that menu, esc closes it. right click "
     L"in the text for the edit menu, which also has the right to left reading order and the unicode "
-    L"control characters.\r\n";
+    L"control characters.\r\n"
+    L"\r\n"
+    L"right to left: a document whose first letter is hebrew, arabic or another right to left script "
+    L"opens (or, typed into an empty document, switches) right to left: the text is right aligned and the "
+    L"scroll bar moves to the left. the edit menu's right to left reading order, ctrl+right shift and "
+    L"ctrl+left shift set it by hand until the next new or open.\r\n";
 
 /* the text fills the whole window: no frame, no padding around it and no button (esc or enter closes) */
 #define HELP_W 560

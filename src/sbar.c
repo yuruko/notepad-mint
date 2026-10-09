@@ -381,7 +381,8 @@ static void Strips(HWND t, RECT *wr, int *l, int *r, int *b, int trimR, int trim
     *l = o.x - wr->left;
     *r = wr->right - (o.x + cr.right);
     *b = wr->bottom - (o.y + cr.bottom);
-    wr->right -= trimR; *r -= trimR;                         /* the window overhangs the visible area at the right and at the bottom on purpose (SbarTrim): that part is not ours to cover */
+    if (GetWindowLongPtrW(t, GWL_EXSTYLE) & WS_EX_LEFTSCROLLBAR) { wr->left += trimR; *l -= trimR; }   /* the window overhangs the visible area on the side of its vertical bar */
+    else { wr->right -= trimR; *r -= trimR; }                /* (the right, the left in a right to left layout) and at the bottom on purpose (SbarTrim): that part is not ours to cover */
     wr->bottom -= trimB; *b -= trimB;
     if (*l < 0) *l = 0;
     if (*r < 0) *r = 0;
