@@ -25,6 +25,10 @@ ENUM_NAMES = [
     "DWMWA_CAPTION_COLOR",
     "DWMWA_TEXT_COLOR",
     "DWMWCP_DONOTROUND",
+    "DVASPECT_CONTENT",
+    "TYMED_HGLOBAL",
+    "DATADIR_GET",
+    "CLSCTX_INPROC_SERVER",
 ]
 
 # object-like #defines that are not values (the aliases like SetWindowLongPtrW are found by their body)

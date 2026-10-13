@@ -13,7 +13,7 @@ from the [latest release](https://github.com/yuruko/notepad-mint/releases/latest
 - `notepad-mint-<version>-setup.exe`: the installer (installs to `program files (x86)\notepad-mint`; start menu shortcut, optional desktop shortcut, uninstaller in *installed apps*; your settings are left alone when you uninstall)
 - `notepad-mint-<version>.exe`: the standalone exe, nothing to install: put it anywhere and run it
 
-one 32-bit exe (under 140 kb) runs on 32-bit windows, 64-bit windows and windows on arm. settings are in `%appdata%\notepad-mint\settings.ini`.
+one 32-bit exe (under 170 kb) runs on 32-bit windows, 64-bit windows and windows on arm. settings are in `%appdata%\notepad-mint\settings.ini`.
 
 ## what it does
 
@@ -29,22 +29,26 @@ one 32-bit exe (under 140 kb) runs on 32-bit windows, 64-bit windows and windows
   - **log files**: opening text beginning with `.LOG` appends the local time and date at the end, ready to type the next entry; one undo removes the entry;
   - **safer saves**: writes and flushes a temporary file before replacing the original, detects lossy legacy encoding conversions, and asks before overwriting a file whose size or modification time changed outside the app;
   - **selection printing**: select text before opening print to enable printing just that selection;
+  - **header and footer** (file > page setup, like windows xp's notepad): `&f` file name, `&p` page number, `&d` date, `&t` time, `&l` / `&c` / `&r` align what follows left / centre / right, `&&` an ampersand (defaults `&f` and `page &p`, remembered); a small window with a cancel button stays up while it prints;
   - **text runs to the edge**: an 8 px margin around the text (4 px on top), but text that is scrolled out of it runs to the very edge of the editor, no blank frame; the row that is only partly in view at the bottom is drawn, cut off at the edge;
   - **status bar**: compact (`12:5`, `5 L`, `124 B`, `crlf`, `utf8 bom`), the lines, bytes and line ending panels grow and shrink with their text, never cut off; with a selection it shows the lines and bytes selected (`162:54 [5 L 54 B]`); while zoomed it shows the zoom (`120%`, click: back to 100%); click the position to go to a line, the line ending / encoding panels to change them;
   - **zoom**: ctrl+plus / ctrl+minus / ctrl+0, ctrl + mouse wheel (8-48 pt); resizing or changing zoom scrolls the caret into view while keeping the selection and undo history;
   - **scrolling**: mouse-wheel and scrollbar scrolling keep the cursor in place; keyboard navigation returns to that position before moving it, including wrapped text and shift selections;
   - **font preview**: one line at the selected size, from 7 to 100 pt: "sphinx of black quartz, judge my vow. 0123456789"; face, bold and italic update live;
   - **encodings and line endings**: utf-8 (with or without bom), utf-16 le / be, legacy code pages, reopen with another encoding; windows / unix / classic mac line endings; right to left reading order, picked automatically from the first letter (hebrew, arabic ...) or by hand (edit menu, ctrl+right shift / ctrl+left shift); unicode control characters; per-monitor dpi;
-  - **drop files or folders** on the window to insert their paths at the caret, one per line (shift+drop opens the files instead); a selected line break shows as a small highlighted block, so empty lines and line ends inside a selection can be seen;
+  - **drag and drop like notepad**: drop a file on the window and it opens (the first one in this window, after the save prompt; the others in new windows; folders are skipped; more than 10 files asks first); hold shift while dropping to insert the paths at the drop point instead, one per line;
+    drag selected text to move it (hold ctrl to copy), and drag text in from or out to other programs: a thin mark shows where it will land and the editor scrolls when you hold it near an edge;
+  - a selected line break shows as a small highlighted block, so empty lines and line ends inside a selection can be seen;
   - **ctrl+k** clears the current line (ctrl+z brings it back); ctrl+backspace / ctrl+delete delete a word;
   - an unsaved document is called `mint-XXXX` instead of "untitled": 4 characters of 0-9 a-z that count up in 32 minute steps from `mint-0000` on 1 january 2026 (a 100 year cycle), and every new one is higher than the last, in any window; "modified" means *different from the file* (type and delete again, or undo back, is not a change);
   - **default editor**: the installer lists notepad mint under *open with* and in *settings > default apps* for .txt .log .ini .cfg .conf .md .csv .nfo .diz .text (windows lets only you pick the default: the finish page opens that page); help > set as default text editor does the same per user, also for the standalone exe;
-  - **command line**: `notepad-mint /p file` prints the file on the default printer without a dialog and exits (like notepad's `/p`); `/a file` / `/w file` open it as ansi / utf-16; a plain `notepad-mint file` opens it;
+  - **command line**: `notepad-mint /p file` prints the file on the default printer without a dialog and exits (like notepad's `/p`); `/pt file printer driver port` prints it on the named printer (what explorer's "print to" sends); `/a file` / `/w file` open it as ansi / utf-16; a plain `notepad-mint file` opens it (a name without an extension that does not exist is offered as `name.txt`, like xp);
+  - **find** remembers the search text, the replacement and the direction across sessions; f3 searches in the direction picked in the find dialog, shift+f3 the other way;
   - the window can be made small: down to 320 x 140 px.
 
 ## small, fast, clean
 
-- **small**: the whole editor is one exe under 140 kb (the hard limit is 300 kb). small icon images are packed losslessly as png (`tools/pack_icon.py`), the 256 px icon uses a compact palette (`tools/shrink_icon.py`), and release builds combine size optimization with link-time optimization (`/O1 /GL /LTCG`). no crt, no libraries, no third-party code: the imports are kernel32 / user32 / gdi32 and nothing else (checked on every build by `tools/check_imports.ps1`).
+- **small**: the whole editor is one exe under 170 kb (the hard limit is 300 kb). small icon images are packed losslessly as png (`tools/pack_icon.py`), the 256 px icon uses a compact palette (`tools/shrink_icon.py`), and release builds combine size optimization with link-time optimization (`/O1 /GL /LTCG`). no crt, no libraries, no third-party code: the imports are kernel32 / user32 / gdi32 and nothing else (checked on every build by `tools/check_imports.ps1`).
 - **fast**: it uses the stock windows edit control, so typing and scrolling are as quick as notepad's, and big files open quickly:
   - opening converts the file once (no size query pass), reuses successful utf-8 detection validation, and gives back what multi-byte text did not need; saving converts utf-8 in one pass, writes straight from the editor's own buffer (no 40 mb copy of a 20 mb file) and skips the line-ending rewrite when the text already is crlf;
   - nearby caret moves update logical line / column from only the moved text, and crlf byte sizing skips an unused newline scan; on a text over a million characters, the line / byte counts follow when typing pauses instead of on every key;
@@ -52,7 +56,7 @@ one 32-bit exe (under 140 kb) runs on 32-bit windows, 64-bit windows and windows
   - find / replace uses linear-time KMP matching, including backwards searches; `memcmp` compares a dword at a time, `memmove` copies dwords backwards too, and `mp_count_lf` (line counting) is sse2 assembly;
   - dirty-state comparisons are cached until the text changes, and settings skip unchanged values and bound retries when their file is locked;
   - native text and custom partial rows are painted into one offscreen frame and presented together, keeping existing text visible while multilingual glyphs are drawn;
-- **clean**: zero warnings at `/W3`; `tools/layout_check` proves every struct, constant and function in the hand-written `src/w32.h` against the real windows sdk; 457 unit checks (including randomized search cases and file failure injection), 38 print checks and over 1,000 gui checks drive the real exe on a private desktop (nothing shows on your screen): `tools\verify.bat ui`. icon packing verifies identical pixels and native Windows rendering.
+- **clean**: zero warnings at `/W3`; `tools/layout_check` proves every struct, constant and function in the hand-written `src/w32.h` against the real windows sdk; 451 unit checks (including randomized search cases and file failure injection), 42 print checks and over 1,000 gui checks drive the real exe on a private desktop (nothing shows on your screen): `tools\verify.bat ui`. icon packing verifies identical pixels and native Windows rendering.
 
 ## status
 
@@ -61,7 +65,7 @@ replace, go to, clear line), format (word wrap, font, tab size, line ending, enc
 are our own dark / light dialogs; open, save as, print and page setup are the native windows dialogs (they follow windows' own dark / light mode, not the app theme). the encoding and line ending of a file are set from the
 format menu or the status bar, not in the save as dialog.
 
-how each part was verified, and what is still open, is in `NOTES.md` (status) and `TODO.md`. the native editor has one undo level and loads large files synchronously. tabs, session recovery and custom print headers are not implemented. whole-word boundaries conservatively treat supplementary unicode characters (including emoji) as word characters; embedded nul characters are converted to spaces on load, and mixed line endings are normalized to the majority style.
+how each part was verified, and what is still open, is in `NOTES.md` (status) and `TODO.md`. the native editor has one undo level and loads large files synchronously. tabs and session recovery are not implemented. whole-word boundaries conservatively treat supplementary unicode characters (including emoji) as word characters; embedded nul characters are converted to spaces on load, and mixed line endings are normalized to the majority style.
 
 ## build
 
@@ -71,6 +75,8 @@ needs visual studio's c++ build tools (x86 target) and the windows sdk (python 3
     build.bat dbg             debug build (symbols, build\dbg.log tracing)
 
 `build.bat` looks for `vcvarsamd64_x86.bat` of visual studio 18 community and falls back to `vswhere`.
+
+there is no linux or mac build: every window, control and dialog is raw win32, so a port would be a rewrite. the exe needs only kernel32 / user32 / gdi32 to start, so it may run under wine, but that has not been tested.
 
 ## source map
 
@@ -83,6 +89,7 @@ needs visual studio's c++ build tools (x86 target) and the windows sdk (python 3
 | menu data/interaction, title strip, status panels and scrollbars | `menu_defs.c`, `menu.c`, `frame.c`, `status.c`, `sbar.c` |
 | document encoding/safe writes, search and pagination | `doc.c`, `search.c`, `print.c` |
 | find, font, file/encoding and help/about dialogs | `find.c`, `fontdlg.c`, `filedlg.c`, `about.c` |
+| drag and drop: ole drop target, text drag source, dropped files | `dnd.c` |
 | shared declarations and CRT-free runtime | `mp.h`, `w32.h`, `util.c`, `rt.asm` |
 
 Private headers describe the small contracts between extracted modules. `ui_probe.c` and the existing editor probes compile only with test instrumentation enabled; release builds expose no probe messages.

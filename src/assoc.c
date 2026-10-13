@@ -31,8 +31,12 @@ static BOOL Load(void) {
     return g_regCreate && g_regSet && g_regClose && g_regGet;
 }
 
+static void VerbCommand(const WCHAR *exe, const WCHAR *tail, WCHAR *cmd, int cap) {
+    wcopy(cmd, L"\"", cap); wcat(cmd, exe, cap); wcat(cmd, tail, cap);
+}
+
 static void OpenCommand(const WCHAR *exe, WCHAR *cmd, int cap) {
-    wcopy(cmd, L"\"", cap); wcat(cmd, exe, cap); wcat(cmd, L"\" \"%1\"", cap);
+    VerbCommand(exe, L"\" \"%1\"", cmd, cap);
 }
 
 BOOL AssocMachineHas(const WCHAR *exe) {
@@ -56,7 +60,7 @@ static BOOL Put(const WCHAR *key, const WCHAR *name, DWORD type, const WCHAR *va
 }
 
 BOOL AssocRegisterUser(const WCHAR *exe) {
-    WCHAR cmd[PATH_CAP + 16], icon[PATH_CAP + 4], key[96];
+    WCHAR cmd[PATH_CAP + 16], verb[PATH_CAP + 32], icon[PATH_CAP + 4], key[96];
     BOOL ok = TRUE;
     int i;
     if (!Load()) return FALSE;
@@ -65,6 +69,10 @@ BOOL AssocRegisterUser(const WCHAR *exe) {
     ok &= Put(L"Software\\Classes\\" ASSOC_PROGID, NULL, RT_SZ, L"text document");
     ok &= Put(L"Software\\Classes\\" ASSOC_PROGID L"\\DefaultIcon", NULL, RT_EXPAND, L"%SystemRoot%\\system32\\imageres.dll,-102");
     ok &= Put(L"Software\\Classes\\" ASSOC_PROGID L"\\shell\\open\\command", NULL, RT_SZ, cmd);
+    VerbCommand(exe, L"\" /p \"%1\"", verb, COUNTOF(verb));
+    ok &= Put(L"Software\\Classes\\" ASSOC_PROGID L"\\shell\\print\\command", NULL, RT_SZ, verb);
+    VerbCommand(exe, L"\" /pt \"%1\" \"%2\" \"%3\" \"%4\"", verb, COUNTOF(verb));
+    ok &= Put(L"Software\\Classes\\" ASSOC_PROGID L"\\shell\\printto\\command", NULL, RT_SZ, verb);
     ok &= Put(L"Software\\Classes\\Applications\\notepad-mint.exe", L"FriendlyAppName", RT_SZ, APP_NAME);
     ok &= Put(L"Software\\Classes\\Applications\\notepad-mint.exe\\shell\\open\\command", NULL, RT_SZ, cmd);
     ok &= Put(ASSOC_CAPS, L"ApplicationName", RT_SZ, APP_NAME);

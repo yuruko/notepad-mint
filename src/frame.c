@@ -296,7 +296,14 @@ BOOL FrameMsg(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             FrameInvalidate(hwnd);
             return TRUE;
         }
-        if (InIcon(x, y)) { FrameSysMenu(hwnd, -1, -1); return TRUE; }
+        if (InIcon(x, y)) {
+            RECT icon;
+            SetRect(&icon, 0, 0, IconRight(), FrameHeight());
+            MapWindowPoints(hwnd, NULL, (POINT *)&icon, 2);
+            MenuArmDoubleClose(&icon, (DWORD)GetMessageTime());
+            FrameSysMenu(hwnd, -1, -1);
+            return TRUE;
+        }
         return FALSE;
     case WM_LBUTTONUP:
         if (g_down >= 0) {

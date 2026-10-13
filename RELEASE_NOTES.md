@@ -1,24 +1,34 @@
-notepad mint 1.1.0
+notepad mint 1.2.0
 
-**cleaner source**
-- every comment is gone from `src\`; function braces sit on the same line as the function; statements and conditions are one line each; no blank lines inside functions (10,784 to 9,486 lines)
-- the cleanup was checked to change nothing: the release exe, three probe builds and the unit-test exe come out byte for byte identical (pe timestamps masked)
+**drag and drop like notepad**
+- drop a file on the window and it opens: the first one in this window (after the save prompt), the others in new windows; folders are skipped, and more than 10 files asks first
+- hold shift while dropping to insert the paths at the drop point instead, one per line (what a plain drop did before)
+- drag selected text to move it, hold ctrl to copy it; drag text in from other programs and out to them (a move takes it out of this document); one undo takes a drop back
+- a thin mark shows where the text will land, and the editor scrolls while you hold it near an edge
+- the exe still imports only kernel32 / user32 / gdi32: ole32 is loaded once the window has painted
 
-**faster**
-- the editor's line height is measured once per font, not on every key, scroll bar update and resize
-- the selection highlight in the editor uses the system highlight brush instead of creating and deleting a brush on every draw
-- buttons no longer read their size on every mouse move, only while pressed; help > set as default text editor loads advapi32 once instead of twice
+**windows xp notepad parity**
+- page setup has a header and a footer: `&f` file name, `&p` page number, `&d` date, `&t` time, `&l` / `&c` / `&r` alignment, `&&` an ampersand; defaults `&f` and `page &p`, remembered
+- a small window with a cancel button stays up while a document prints
+- `/pt file printer driver port` prints on a named printer; the `print` and `printto` verbs are registered by the installer and by help > set as default text editor
+- f3 searches in the direction picked in the find dialog, shift+f3 the other way; the search text, the replacement and the direction are remembered across sessions
+- the `&` underlines in the menus, dialogs and buttons stay hidden until you press alt or use the keyboard (always shown if windows is set to); find, replace, go to, font and message box buttons have them
+- a double click on the window icon closes the window; the tilt wheel scrolls sideways; `notepad-mint name` for a missing name without an extension offers to create `name.txt`
+- pasted text gets windows line breaks (lone lf / cr from other programs no longer run lines together)
 
-**cleanup**
-- removed dead code: unreachable `WM_SIZE` cases in the editor, an empty branch and a repeated store in the menus, an unused bevel style and triangle direction, a second `EM_LIMITTEXT`, a redundant scroll bar refresh, unused variables and parameters, an unused list of line ending names, test-only search wrappers (now in the unit tests)
-- one error exit in `DocWrite` instead of eight copies of the cleanup, one `OtherFocus` helper for select all / time and date / clear line, the font dialog uses the shared `ClampInt`
+**saving through links**
+- a symbolic link saves into its target and stays a link
+- a file with several hard links, or in a folder that refuses new files, is written in place, so every name sees the change
 
-Regression coverage: unit 437, gui 820, probe-build gui 179, printing suite (all pass).
+**readable source**
+- cryptic local, parameter and struct member names were renamed (`h, m, w, l` to `hwnd, msg, wParam, lParam` and so on); the exe came out byte for byte identical
+
+Regression coverage: unit 451, gui 839, probe-build gui 217, printing suite 42 (all pass).
 
 **download**
 
-- `notepad-mint-1.1.0-setup.exe`: installer and uninstaller
-- `notepad-mint-1.1.0.exe`: standalone executable
+- `notepad-mint-1.2.0-setup.exe`: installer and uninstaller
+- `notepad-mint-1.2.0.exe`: standalone executable
 - `SHA256SUMS.txt`: download checksums
 
 settings remain in `%appdata%\notepad-mint\settings.ini`.

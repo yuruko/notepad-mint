@@ -35,7 +35,7 @@ void EditCaretRemember(HWND hwnd, HFONT font) {
     g_endCaret.valid = 1;
 }
 
-static int CaretEndX(HWND hwnd, HFONT font, int index, const RECT *formatRect) {
+int EditCaretEndX(HWND hwnd, HFONT font, int index, const RECT *formatRect) {
     void *lock;
     const WCHAR *text;
     int length, start = (int)SendMessageW(hwnd, EM_LINEINDEX, (WPARAM)SendMessageW(hwnd, EM_LINEFROMCHAR, (WPARAM)index, 0), 0);
@@ -116,7 +116,7 @@ void EditCaretFit(HWND hwnd, HFONT font, WNDPROC nativeProc, int *tall) {
     CallWindowProcW(nativeProc, hwnd, EM_SCROLLCARET, 0, 0);
     SendMessageW(hwnd, EM_GETRECT, 0, (LPARAM)&formatRect);
     pos = SendMessageW(hwnd, EM_POSFROMCHAR, (WPARAM)index, 0);
-    x = pos == -1 ? CaretEndX(hwnd, font, index, &formatRect) : (short)LOWORD(pos);
+    x = pos == -1 ? EditCaretEndX(hwnd, font, index, &formatRect) : (short)LOWORD(pos);
     y = pos == -1 ? formatRect.top : (short)HIWORD(pos);
     width = gi.rcCaret.right - gi.rcCaret.left;
     if (width < 1) width = 1;

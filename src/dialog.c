@@ -66,6 +66,7 @@ HWND DlgOpen(DlgBase *base, const WCHAR *className, const WCHAR *title, int clie
         SendMessageW(base->hwnd, WM_SETICON, ICON_BIG, (LPARAM)big);
         SendMessageW(base->hwnd, WM_SETICON, ICON_SMALL, (LPARAM)small_);
         DarkFrame(base->hwnd, 1);
+        SendMessageW(base->hwnd, WM_CHANGEUISTATE, MAKEWPARAM(UIS_INITIALIZE, 0), 0);
     }
     return base->hwnd;
 }

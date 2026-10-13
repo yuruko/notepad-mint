@@ -22,6 +22,10 @@ static BOOL        g_active, g_done, g_cancel;
 static int         g_result;
 static MSG         g_redisp;
 static BOOL        g_haveRedisp;
+static RECT        g_doubleRect;
+static DWORD       g_doubleTime;
+static int         g_doubleArmed;
+static int         g_cues;
 
 static void Strip(const WCHAR *src, WCHAR *dst, int cap) {
     int j = 0;
@@ -33,6 +37,11 @@ static void Strip(const WCHAR *src, WCHAR *dst, int cap) {
         dst[j++] = *src;
     }
     dst[j] = 0;
+}
+
+static UINT CueFormat(void) {
+    BOOL always = FALSE;
+    return g_cues || (SystemParametersInfoW(SPI_GETKEYBOARDCUES, 0, &always, 0) && always) ? 0 : DT_HIDEPREFIX;
 }
 
 static WCHAR Mnem(const WCHAR *label) {
@@ -209,7 +218,7 @@ static void BarPaint(HWND hwnd) {
         rect.left = g_itemL[i]; rect.right = g_itemL[i + 1];
         rect.top = 0; rect.bottom = client.bottom - S(1);
         if (on) FillC(memDc, &rect, C_ACCENT);
-        TextC(memDc, g_menuEntries[i].title, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE, on ? C_ON_ACCENT : C_TEXT);
+        TextC(memDc, g_menuEntries[i].title, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | CueFormat(), on ? C_ON_ACCENT : C_TEXT);
     }
     for (i = 0; i < BT_COUNT; i++) {
         BOOL hot = (i == g_hotBtn);
@@ -385,7 +394,7 @@ static void PopDraw(Pop *pop, HDC hdc) {
                 }
             }
             textRect = itemRect; textRect.left = BW + pop->gutter;
-            TextC(hdc, item->label, -1, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE, fg);
+            TextC(hdc, item->label, -1, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | CueFormat(), fg);
             if (item->accel) {
                 textRect = itemRect; textRect.right = pop->width - BW - S(22);
                 TextC(hdc, item->accel, -1, &textRect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, fg);
@@ -556,7 +565,12 @@ static void MnemonicKey(WCHAR ch) {
 }
 
 static void KeyNav(WPARAM vk) {
-    int level = g_np - 1;
+    int level = g_np - 1, i;
+    if (!g_cues) {
+        g_cues = 1;
+        if (g_bar) InvalidateRect(g_bar, NULL, FALSE);
+        for (i = 0; i < g_np; i++) if (g_pop[i].hwnd) InvalidateRect(g_pop[i].hwnd, NULL, FALSE);
+    }
     switch (vk) {
     case VK_ESCAPE:
         if (g_np > 1) { ClosePops(g_np - 1); }
@@ -641,6 +655,7 @@ static void RunMenu(HWND owner, int barIdx, int openPopup, const MenuDef *root, 
                 if (g_np > 0 && barIndex == g_barIdx) g_done = TRUE;
                 else OpenBarPopup(barIndex, FALSE);
             } else {
+                if (g_doubleArmed && PtInRect(&g_doubleRect, msg.pt) && msg.time - g_doubleTime <= GetDoubleClickTime()) g_result = IDM_SYS_CLOSE;
                 g_done = TRUE;
             }
             break; }
@@ -689,9 +704,17 @@ static void RunMenu(HWND owner, int barIdx, int openPopup, const MenuDef *root, 
     for (i = 0; i < MAXLV; i++) g_pop[i].hwnd = NULL;
     g_open = -1; g_kbd = -1; g_barIdx = -1;
     g_active = FALSE;
+    g_doubleArmed = 0;
+    g_cues = 0;
     if (g_bar) InvalidateRect(g_bar, NULL, FALSE);
     if (g_result) PostMessageW(owner, WM_COMMAND, MAKEWPARAM(g_result, 0), 0);
     if (g_haveRedisp) DispatchMessageW(&g_redisp);
+}
+
+void MenuArmDoubleClose(const RECT *screenRect, DWORD time) {
+    g_doubleRect = *screenRect;
+    g_doubleTime = time;
+    g_doubleArmed = 1;
 }
 
 void MenuCancel(void) {
@@ -700,8 +723,13 @@ void MenuCancel(void) {
     PostMessageW(g_owner, WM_NULL, 0, 0);
 }
 
+void MenuShowCues(void) {
+    g_cues = 1;
+}
+
 void MenuBarActivate(int index, int openPopup) {
     if (index < 0) index = 0;
+    g_cues = 1;
     RunMenu(GetParent(g_bar), index, openPopup, NULL, 0, 0, 0);
 }
 

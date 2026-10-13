@@ -6,20 +6,18 @@ enum { ID_WHAT = 1001, ID_CASE, ID_WRAP, ID_UP, ID_DOWN, ID_WITH, ID_REPLACE, ID
 typedef struct { DlgBase base; int replaceMode; } FindSt;
 typedef struct { DlgBase base; HWND edit; } GotoSt;
 
-static WCHAR  g_findWhat[256], g_findWith[256];
-static int    g_findUp;
 static FindSt g_fd;
 static int    g_switching;
 static RECT   g_pos;
 static int    g_havePos;
 
 HWND FindDlgHwnd(void) { return g_fd.base.hwnd; }
-BOOL FindHasText(void) { return g_findWhat[0] != 0; }
+BOOL FindHasText(void) { return g_pf.findWhat[0] != 0; }
 
 static void NotFound(HWND owner) {
     WCHAR msg[300];
     wcopy(msg, L"cannot find \"", COUNTOF(msg));
-    wcat(msg, g_findWhat, COUNTOF(msg));
+    wcat(msg, g_pf.findWhat, COUNTOF(msg));
     wcat(msg, L"\"", COUNTOF(msg));
     MpNote(owner, APP_NAME, msg);
 }
@@ -49,13 +47,13 @@ static void Dodge(HWND dlg, int index) {
 static void Search(HWND owner, int up) {
     DWORD selStart = 0, selEnd = 0;
     void *lock = NULL;
-    int length = 0, patLen = wlen(g_findWhat), found = -1;
+    int length = 0, patLen = wlen(g_pf.findWhat), found = -1;
     const WCHAR *text;
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
     text = EditLockText(&lock, &length);
     if (text) {
-        found = FindInTextEx(text, length, g_findWhat, patLen, (int)(up ? selStart : selEnd), up, g_pf.matchCase, g_pf.wholeWord);
-        if (found < 0 && g_pf.wrapAround) found = FindInTextEx(text, length, g_findWhat, patLen, up ? length : 0, up, g_pf.matchCase, g_pf.wholeWord);
+        found = FindInTextEx(text, length, g_pf.findWhat, patLen, (int)(up ? selStart : selEnd), up, g_pf.matchCase, g_pf.wholeWord);
+        if (found < 0 && g_pf.wrapAround) found = FindInTextEx(text, length, g_pf.findWhat, patLen, up ? length : 0, up, g_pf.matchCase, g_pf.wholeWord);
     }
     EditUnlockText(lock);
     if (found < 0) { NotFound(owner); return; }
@@ -64,41 +62,41 @@ static void Search(HWND owner, int up) {
     Dodge(g_fd.base.hwnd, found);
 }
 
-void FindNext(int dirUp) {
-    if (!g_findWhat[0]) { FindDlgShow(g_fd.base.hwnd ? g_fd.replaceMode : 0); return; }
-    Search(g_hwnd, dirUp);
+void FindNext(int reverse) {
+    if (!g_pf.findWhat[0]) { FindDlgShow(g_fd.base.hwnd ? g_fd.replaceMode : 0); return; }
+    Search(g_hwnd, reverse ? !g_pf.findUp : g_pf.findUp);
 }
 
 static void Replace(HWND owner) {
     DWORD selStart = 0, selEnd = 0;
     void *lock = NULL;
-    int length = 0, patLen = wlen(g_findWhat), hit = 0;
+    int length = 0, patLen = wlen(g_pf.findWhat), hit = 0;
     const WCHAR *text;
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
     text = EditLockText(&lock, &length);
-    if (text && (int)(selEnd - selStart) == patLen && (int)selEnd <= length) hit = FindInTextEx(text, length, g_findWhat, patLen, (int)selStart, 0, g_pf.matchCase, g_pf.wholeWord) == (int)selStart;
+    if (text && (int)(selEnd - selStart) == patLen && (int)selEnd <= length) hit = FindInTextEx(text, length, g_pf.findWhat, patLen, (int)selStart, 0, g_pf.matchCase, g_pf.wholeWord) == (int)selStart;
     EditUnlockText(lock);
     if (hit) {
-        SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)g_findWith);
-        if (g_findUp) SendMessageW(g_edit, EM_SETSEL, (WPARAM)selStart, (LPARAM)selStart);
+        SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)g_pf.findWith);
+        if (g_pf.findUp) SendMessageW(g_edit, EM_SETSEL, (WPARAM)selStart, (LPARAM)selStart);
     }
-    Search(owner, g_findUp);
+    Search(owner, g_pf.findUp);
 }
 
 static void ReplaceAll(HWND owner) {
     DWORD selStart = 0, selEnd = 0;
     void *lock = NULL;
-    int length = 0, patLen = wlen(g_findWhat), replLen = wlen(g_findWith), outLen = 0, count = 0, before = 0, i, pos, caret, found = 0;
+    int length = 0, patLen = wlen(g_pf.findWhat), replLen = wlen(g_pf.findWith), outLen = 0, count = 0, before = 0, i, pos, caret, found = 0;
     const WCHAR *text;
     WCHAR *out = NULL;
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
     text = EditLockText(&lock, &length);
     if (text) {
-        found = FindInTextEx(text, length, g_findWhat, patLen, 0, 0, g_pf.matchCase, g_pf.wholeWord) >= 0;
+        found = FindInTextEx(text, length, g_pf.findWhat, patLen, 0, 0, g_pf.matchCase, g_pf.wholeWord) >= 0;
         if (found) {
-            out = ReplaceAllTextEx(text, length, g_findWhat, patLen, g_findWith, replLen, g_pf.matchCase, g_pf.wholeWord, &outLen, &count);
+            out = ReplaceAllTextEx(text, length, g_pf.findWhat, patLen, g_pf.findWith, replLen, g_pf.matchCase, g_pf.wholeWord, &outLen, &count);
             if ((int)selStart > length) selStart = (DWORD)length;
-            for (i = 0; (pos = FindInTextEx(text, length, g_findWhat, patLen, i, 0, g_pf.matchCase, g_pf.wholeWord)) >= 0 && pos + patLen <= (int)selStart; i = pos + patLen) before++;
+            for (i = 0; (pos = FindInTextEx(text, length, g_pf.findWhat, patLen, i, 0, g_pf.matchCase, g_pf.wholeWord)) >= 0 && pos + patLen <= (int)selStart; i = pos + patLen) before++;
         }
     }
     EditUnlockText(lock);
@@ -124,12 +122,12 @@ static void Flag(HWND dlg, int id, int *value) {
 
 static void Sync(HWND dlg) {
     HWND control;
-    if ((control = GetDlgItem(dlg, ID_WHAT)) != NULL) GetWindowTextW(control, g_findWhat, 256);
-    if ((control = GetDlgItem(dlg, ID_WITH)) != NULL) GetWindowTextW(control, g_findWith, 256);
+    if ((control = GetDlgItem(dlg, ID_WHAT)) != NULL) GetWindowTextW(control, g_pf.findWhat, FIND_CAP);
+    if ((control = GetDlgItem(dlg, ID_WITH)) != NULL) GetWindowTextW(control, g_pf.findWith, FIND_CAP);
     Flag(dlg, ID_CASE, &g_pf.matchCase);
     Flag(dlg, ID_WRAP, &g_pf.wrapAround);
     Flag(dlg, ID_WORD, &g_pf.wholeWord);
-    Flag(dlg, ID_UP, &g_findUp);
+    Flag(dlg, ID_UP, &g_pf.findUp);
 }
 
 static void Enable(HWND dlg) {
@@ -161,25 +159,25 @@ static void Group(DlgBase *base, const WCHAR *text, int x, int y, int width, int
 static void FindLayout(DlgBase *base, int replaceMode) {
     HWND dlg = base->hwnd, edit;
     int dy = replaceMode ? 32 : 0;
-    UiLabel(dlg, L"find what:", 12, 16, 78, 16, 0, SS_NOPREFIX);
-    edit = UiEdit(base, g_findWhat, 92, 12, 212, 23, ID_WHAT, 0);
+    UiLabel(dlg, L"fi&nd what:", 12, 16, 78, 16, 0, 0);
+    edit = UiEdit(base, g_pf.findWhat, 92, 12, 212, 23, ID_WHAT, 0);
     SendMessageW(edit, EM_LIMITTEXT, 255, 0);
     base->focus = edit;
     if (replaceMode) {
-        UiLabel(dlg, L"replace with:", 12, 48, 78, 16, 0, SS_NOPREFIX);
-        edit = UiEdit(base, g_findWith, 92, 44, 212, 23, ID_WITH, 0);
+        UiLabel(dlg, L"re&place with:", 12, 48, 78, 16, 0, 0);
+        edit = UiEdit(base, g_pf.findWith, 92, 44, 212, 23, ID_WITH, 0);
         SendMessageW(edit, EM_LIMITTEXT, 255, 0);
     }
-    Opt(dlg, L"match case", 12, 66 + dy, 150, ID_CASE, BS_AUTOCHECKBOX, g_pf.matchCase);
-    Opt(dlg, L"wrap around", 12, 90 + dy, 150, ID_WRAP, BS_AUTOCHECKBOX, g_pf.wrapAround);
-    Opt(dlg, L"whole word", 12, 114 + dy, 150, ID_WORD, BS_AUTOCHECKBOX, g_pf.wholeWord);
+    Opt(dlg, L"match &case", 12, 66 + dy, 150, ID_CASE, BS_AUTOCHECKBOX, g_pf.matchCase);
+    Opt(dlg, L"&wrap around", 12, 90 + dy, 150, ID_WRAP, BS_AUTOCHECKBOX, g_pf.wrapAround);
+    Opt(dlg, L"whole w&ord", 12, 114 + dy, 150, ID_WORD, BS_AUTOCHECKBOX, g_pf.wholeWord);
     Group(base, L"direction", 176, 50 + dy, 128, 52);
-    Opt(dlg, L"up", 188, 70 + dy, 46, ID_UP, BS_AUTORADIOBUTTON | WS_GROUP, g_findUp);
-    Opt(dlg, L"down", 240, 70 + dy, 58, ID_DOWN, BS_AUTORADIOBUTTON, !g_findUp);
-    UiButton(dlg, L"find next", 316, 12, 82, 24, IDOK, BS_DEFPUSHBUTTON | WS_GROUP);
+    Opt(dlg, L"&up", 188, 70 + dy, 46, ID_UP, BS_AUTORADIOBUTTON | WS_GROUP, g_pf.findUp);
+    Opt(dlg, L"&down", 240, 70 + dy, 58, ID_DOWN, BS_AUTORADIOBUTTON, !g_pf.findUp);
+    UiButton(dlg, L"&find next", 316, 12, 82, 24, IDOK, BS_DEFPUSHBUTTON | WS_GROUP);
     if (replaceMode) {
-        UiButton(dlg, L"replace", 316, 42, 82, 24, ID_REPLACE, BS_PUSHBUTTON);
-        UiButton(dlg, L"replace all", 316, 72, 82, 24, ID_REPLACEALL, BS_PUSHBUTTON);
+        UiButton(dlg, L"&replace", 316, 42, 82, 24, ID_REPLACE, BS_PUSHBUTTON);
+        UiButton(dlg, L"replace &all", 316, 72, 82, 24, ID_REPLACEALL, BS_PUSHBUTTON);
     }
     UiButton(dlg, L"cancel", 316, replaceMode ? 102 : 42, 82, 24, IDCANCEL, BS_PUSHBUTTON);
     Enable(dlg);
@@ -190,8 +188,8 @@ static void FindCmd(HWND dlg, int id, int code) {
     if ((id == ID_WHAT || id == ID_WITH) && code != EN_CHANGE) return;
     Sync(dlg);
     if (id == ID_WHAT) Enable(dlg);
-    if (!g_findWhat[0]) return;
-    if (id == IDOK) Search(dlg, g_findUp);
+    if (!g_pf.findWhat[0]) return;
+    if (id == IDOK) Search(dlg, g_pf.findUp);
     else if (id == ID_REPLACE) Replace(dlg);
     else if (id == ID_REPLACEALL) ReplaceAll(dlg);
 }
@@ -267,9 +265,9 @@ void FindDlgShow(int replaceMode) {
     if (dlg && !IsWindowEnabled(dlg)) return;
     if (dlg) Sync(dlg);
     prefill = SelText(selection);
-    if (prefill) wcopy(g_findWhat, selection, 256);
+    if (prefill) wcopy(g_pf.findWhat, selection, FIND_CAP);
     if (dlg && g_fd.replaceMode == replacing) {
-        if (prefill) SetWindowTextW(GetDlgItem(dlg, ID_WHAT), g_findWhat);
+        if (prefill) SetWindowTextW(GetDlgItem(dlg, ID_WHAT), g_pf.findWhat);
     } else {
         if (dlg) { g_switching = 1; DestroyWindow(dlg); g_switching = 0; }
         DlgBaseInit(&g_fd.base, g_hwnd);
@@ -296,7 +294,7 @@ static LRESULT CALLBACK GotoProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         int line, col;
         EditCaretPos(&line, &col);
         wsprintfW(num, L"%d", line);
-        UiLabel(hwnd, L"line number:", 12, 14, 276, 16, 0, SS_NOPREFIX);
+        UiLabel(hwnd, L"&line number:", 12, 14, 276, 16, 0, 0);
         state->edit = UiEdit(base, num, 12, 34, 276, 23, ID_LINE, ES_NUMBER);
         SendMessageW(state->edit, EM_LIMITTEXT, 9, 0);
         SendMessageW(state->edit, EM_SETSEL, 0, (LPARAM)-1);

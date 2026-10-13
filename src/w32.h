@@ -50,6 +50,7 @@ typedef HICON     HCURSOR;
 
 typedef LRESULT (CALLBACK *WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 typedef int     (CALLBACK *FONTENUMPROCW)(const void *, const void *, DWORD, LPARAM);
+typedef BOOL    (CALLBACK *ABORTPROC)(HDC, int);
 
 #define LOWORD(l)   ((WORD)((DWORD_PTR)(l) & 0xffff))
 #define HIWORD(l)   ((WORD)(((DWORD_PTR)(l) >> 16) & 0xffff))
@@ -119,6 +120,10 @@ typedef struct {
     DWORD nFileSizeHigh, nFileSizeLow, dwReserved0, dwReserved1;
     WCHAR cFileName[260]; WCHAR cAlternateFileName[14];
 } WIN32_FIND_DATAW;
+typedef struct {
+    DWORD dwFileAttributes; FILETIME ftCreationTime, ftLastAccessTime, ftLastWriteTime;
+    DWORD dwVolumeSerialNumber, nFileSizeHigh, nFileSizeLow, nNumberOfLinks, nFileIndexHigh, nFileIndexLow;
+} BY_HANDLE_FILE_INFORMATION;
 
 typedef struct { int cbSize; LPCWSTR lpszDocName, lpszOutput, lpszDatatype; DWORD fwType; } DOCINFOW;
 
@@ -158,6 +163,14 @@ typedef struct {
     void *pvReserved; DWORD dwReserved, FlagsEx;
 } OPENFILENAMEW;
 #pragma pack(pop)
+
+typedef LONG HRESULT;
+typedef WORD CLIPFORMAT;
+typedef struct { DWORD Data1; WORD Data2, Data3; BYTE Data4[8]; } GUID;
+typedef struct { LONG x, y; } POINTL;
+typedef struct { CLIPFORMAT cfFormat; void *ptd; DWORD dwAspect; LONG lindex; DWORD tymed; } FORMATETC;
+typedef struct { DWORD tymed; HGLOBAL hGlobal; void *pUnkForRelease; } STGMEDIUM;
+typedef struct { ULONG_PTR dwData; DWORD cbData; PVOID lpData; } COPYDATASTRUCT;
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(LONG_PTR)-1)
 #define CW_USEDEFAULT        ((int)0x80000000)
@@ -257,6 +270,34 @@ typedef struct {
 #define WM_RBUTTONUP 0x0205
 #define WM_MOUSEWHEEL 0x020A
 #define MK_CONTROL 0x0008
+#define MK_LBUTTON 0x0001
+#define MK_RBUTTON 0x0002
+#define MK_SHIFT 0x0004
+#define WM_COPYDATA 0x004A
+#define SPI_GETKEYBOARDCUES 0x100A
+#define DT_HIDEPREFIX 0x00100000
+#define WM_CHANGEUISTATE 0x0127
+#define WM_UPDATEUISTATE 0x0128
+#define WM_QUERYUISTATE 0x0129
+#define UIS_INITIALIZE 3
+#define UISF_HIDEACCEL 0x2
+#define WM_INITDIALOG 0x0110
+#define PSD_ENABLEPAGESETUPHOOK 0x00002000
+#define GW_CHILD 5
+#define WS_EX_CLIENTEDGE 0x00000200L
+#define SS_ENDELLIPSIS 0x00004000L
+#define WM_MOUSEHWHEEL 0x020E
+#define SPI_GETWHEELSCROLLCHARS 0x006C
+#define EM_CHARFROMPOS 0x00D7
+#define EM_LINELENGTH 0x00C1
+#define VK_LBUTTON 0x01
+#define WS_EX_LAYERED 0x00080000
+#define WS_EX_TRANSPARENT 0x00000020L
+#define LWA_ALPHA 0x00000002
+#define HTTRANSPARENT (-1)
+#define SPI_GETCARETWIDTH 0x2006
+#define SM_CXDRAG 68
+#define SM_CYDRAG 69
 #define WM_CAPTURECHANGED 0x0215
 #define WM_PRINT 0x0317
 #define WM_PRINTCLIENT 0x0318
@@ -508,6 +549,9 @@ typedef struct {
 #define FILE_ATTRIBUTE_HIDDEN 0x2
 #define FILE_ATTRIBUTE_SYSTEM 0x4
 #define FILE_ATTRIBUTE_DIRECTORY 0x10
+#define FILE_ATTRIBUTE_REPARSE_POINT 0x400
+#define INVALID_SET_FILE_POINTER ((DWORD)-1)
+#define FILE_BEGIN 0
 #define FILE_ATTRIBUTE_ARCHIVE 0x20
 #define FILE_ATTRIBUTE_NORMAL 0x80
 #define FILE_ATTRIBUTE_NOT_CONTENT_INDEXED 0x2000
@@ -528,6 +572,30 @@ typedef struct {
 #define FORMAT_MESSAGE_IGNORE_INSERTS 0x200
 #define FORMAT_MESSAGE_FROM_SYSTEM 0x1000
 #define CF_UNICODETEXT 13
+#define CF_TEXT 1
+#define CF_HDROP 15
+#define GMEM_MOVEABLE 0x0002
+#define GMEM_ZEROINIT 0x0040
+#define GHND (GMEM_MOVEABLE | GMEM_ZEROINIT)
+#define CP_ACP 0
+#define S_OK ((HRESULT)0L)
+#define S_FALSE ((HRESULT)1L)
+#define E_NOTIMPL ((HRESULT)0x80004001L)
+#define E_NOINTERFACE ((HRESULT)0x80004002L)
+#define E_OUTOFMEMORY ((HRESULT)0x8007000EL)
+#define DV_E_FORMATETC ((HRESULT)0x80040064L)
+#define OLE_E_ADVISENOTSUPPORTED ((HRESULT)0x80040003L)
+#define DRAGDROP_S_DROP ((HRESULT)0x00040100L)
+#define DRAGDROP_S_CANCEL ((HRESULT)0x00040101L)
+#define DRAGDROP_S_USEDEFAULTCURSORS ((HRESULT)0x00040102L)
+#define DROPEFFECT_NONE 0
+#define DROPEFFECT_COPY 1
+#define DROPEFFECT_MOVE 2
+#define DROPEFFECT_LINK 4
+#define DVASPECT_CONTENT 1
+#define TYMED_HGLOBAL 1
+#define DATADIR_GET 1
+#define CLSCTX_INPROC_SERVER 0x1
 #define SEM_FAILCRITICALERRORS 0x0001
 #define ERROR_FILE_NOT_FOUND 2L
 #define ERROR_PRINT_CANCELLED 63L
@@ -581,6 +649,10 @@ API BOOL    WINAPI CloseHandle(HANDLE);
 API BOOL    WINAPI FlushFileBuffers(HANDLE);
 API BOOL    WINAPI GetFileSizeEx(HANDLE, __int64 *);
 API BOOL    WINAPI GetFileTime(HANDLE, FILETIME *, FILETIME *, FILETIME *);
+API BOOL    WINAPI GetFileInformationByHandle(HANDLE, BY_HANDLE_FILE_INFORMATION *);
+API BOOL    WINAPI SetEndOfFile(HANDLE);
+API DWORD   WINAPI SetFilePointer(HANDLE, LONG, LONG *, DWORD);
+API DWORD   WINAPI GetFinalPathNameByHandleW(HANDLE, LPWSTR, DWORD, DWORD);
 API DWORD   WINAPI GetFileAttributesW(LPCWSTR);
 API BOOL    WINAPI SetFileAttributesW(LPCWSTR, DWORD);
 API BOOL    WINAPI ReplaceFileW(LPCWSTR, LPCWSTR, LPCWSTR, DWORD, LPVOID, LPVOID);
@@ -617,6 +689,10 @@ API BOOL    WINAPI CreateProcessW(LPCWSTR, LPWSTR, void *, void *, BOOL, DWORD, 
 API DWORD   WINAPI FormatMessageW(DWORD, LPCVOID, DWORD, DWORD, LPWSTR, DWORD, void *);
 API DWORD   WINAPI GetCurrentThreadId(void);
 API HGLOBAL WINAPI GlobalFree(HGLOBAL);
+API HGLOBAL WINAPI GlobalAlloc(UINT, SIZE_T);
+API LPVOID  WINAPI GlobalLock(HGLOBAL);
+API BOOL    WINAPI GlobalUnlock(HGLOBAL);
+API SIZE_T  WINAPI GlobalSize(HGLOBAL);
 API UINT    WINAPI SetErrorMode(UINT);
 
 API LONG    WINAPI SetWindowLongW(HWND, int, LONG);
@@ -690,6 +766,14 @@ API BOOL    WINAPI TrackMouseEvent(TRACKMOUSEEVENT *);
 API HWND    WINAPI GetParent(HWND);
 API HWND    WINAPI GetWindow(HWND, UINT);
 API BOOL    WINAPI IsChild(HWND, HWND);
+API HWND    WINAPI WindowFromPoint(POINT);
+API BOOL    WINAPI MapDialogRect(HWND, RECT *);
+API int     WINAPI GetDlgCtrlID(HWND);
+API int     WINAPI MapWindowPoints(HWND, HWND, POINT *, UINT);
+API BOOL    WINAPI SetLayeredWindowAttributes(HWND, COLORREF, BYTE, DWORD);
+API BOOL    WINAPI OpenClipboard(HWND);
+API HANDLE  WINAPI GetClipboardData(UINT);
+API BOOL    WINAPI CloseClipboard(void);
 API HMONITOR WINAPI MonitorFromWindow(HWND, DWORD);
 API HMONITOR WINAPI MonitorFromPoint(POINT, DWORD);
 API BOOL    WINAPI GetMonitorInfoW(HMONITOR, MONITORINFO *);
@@ -700,6 +784,8 @@ API BOOL    WINAPI SetRect(RECT *, int, int, int, int);
 API BOOL    WINAPI OffsetRect(RECT *, int, int);
 API BOOL    WINAPI InflateRect(RECT *, int, int);
 API BOOL    WINAPI PtInRect(const RECT *, POINT);
+API UINT    WINAPI GetDoubleClickTime(void);
+API LONG    WINAPI GetMessageTime(void);
 API BOOL    WINAPI IntersectRect(RECT *, const RECT *, const RECT *);
 API LPWSTR  WINAPI CharLowerW(LPWSTR);
 API int     WINAPI wsprintfW(LPWSTR, LPCWSTR, ...);
@@ -753,6 +839,9 @@ API int      WINAPI SaveDC(HDC);
 API BOOL     WINAPI RestoreDC(HDC, int);
 API int      WINAPI IntersectClipRect(HDC, int, int, int, int);
 API int      WINAPI ExcludeClipRect(HDC, int, int, int, int);
+API int      WINAPI GetClipBox(HDC, RECT *);
+API HDC      WINAPI CreateDCW(LPCWSTR, LPCWSTR, LPCWSTR, const void *);
+API int      WINAPI SetAbortProc(HDC, ABORTPROC);
 API BOOL     WINAPI SetViewportOrgEx(HDC, int, int, POINT *);
 API int      WINAPI StartDocW(HDC, const DOCINFOW *);
 API int      WINAPI EndDoc(HDC);

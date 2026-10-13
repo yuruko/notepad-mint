@@ -13,5 +13,6 @@ void EditCaretRemember(HWND hwnd, HFONT font);
 void EditCaretInvalidate(void);
 void EditCaretFit(HWND hwnd, HFONT font, WNDPROC nativeProc, int *tall);
 void EditViewRect(HWND hwnd, RECT *viewRect);
+int  EditCaretEndX(HWND hwnd, HFONT font, int index, const RECT *formatRect);
 
 #endif

@@ -13,6 +13,8 @@ static void PrefsDefaults(void) {
     g_pf.tab = 4;
     g_pf.wrapAround = 1;
     g_pf.marginL = 750; g_pf.marginT = 1000; g_pf.marginR = 750; g_pf.marginB = 1000;
+    wcopy(g_pf.header, L"&f", PAGE_TEXT_CAP);
+    wcopy(g_pf.footer, L"page &p", PAGE_TEXT_CAP);
 }
 
 static void IniLocate(void) {
@@ -51,6 +53,16 @@ static void IniPutStr(const WCHAR *section, const WCHAR *key, const WCHAR *value
         if (attempt < 7) Sleep(25);
     }
     retryAfter = GetTickCount() + 1000;
+}
+
+static void IniPutQuoted(const WCHAR *section, const WCHAR *key, const WCHAR *value, BOOL mine) {
+    WCHAR current[PATH_CAP], quoted[PATH_CAP];
+    GetPrivateProfileStringW(section, key, L"", current, COUNTOF(current), g_ini);
+    if (!mine || wcmp(current, value) == 0) return;
+    wcopy(quoted, L"\"", COUNTOF(quoted));
+    wcat(quoted, value, COUNTOF(quoted) - 1);
+    wcat(quoted, L"\"", COUNTOF(quoted));
+    IniPutStr(section, key, quoted, TRUE);
 }
 
 static void IniPutInt(const WCHAR *section, const WCHAR *key, int value, BOOL mine) {
@@ -158,6 +170,11 @@ static void PrefsLoad(void) {
     g_pf.matchCase  = IniGet(L"find", L"matchcase", 0) != 0;
     g_pf.wrapAround = IniGet(L"find", L"wraparound", 1) != 0;
     g_pf.wholeWord  = IniGet(L"find", L"wholeword", 0) != 0;
+    g_pf.findUp     = IniGet(L"find", L"up", 0) != 0;
+    GetPrivateProfileStringW(L"find", L"what", L"", g_pf.findWhat, FIND_CAP, g_ini);
+    GetPrivateProfileStringW(L"find", L"with", L"", g_pf.findWith, FIND_CAP, g_ini);
+    GetPrivateProfileStringW(L"page", L"header", g_pf.header, g_pf.header, PAGE_TEXT_CAP, g_ini);
+    GetPrivateProfileStringW(L"page", L"footer", g_pf.footer, g_pf.footer, PAGE_TEXT_CAP, g_ini);
     g_pf.marginL = IniGet(L"page", L"left", g_pf.marginL);
     g_pf.marginT = IniGet(L"page", L"top", g_pf.marginT);
     g_pf.marginR = IniGet(L"page", L"right", g_pf.marginR);
@@ -197,6 +214,11 @@ void AppSavePrefs(void) {
     IniPutInt(L"find", L"matchcase", g_pf.matchCase, MINE(matchCase));
     IniPutInt(L"find", L"wraparound", g_pf.wrapAround, MINE(wrapAround));
     IniPutInt(L"find", L"wholeword", g_pf.wholeWord, MINE(wholeWord));
+    IniPutInt(L"find", L"up", g_pf.findUp, MINE(findUp));
+    IniPutQuoted(L"find", L"what", g_pf.findWhat, wcmp(g_pf.findWhat, g_saved.findWhat) != 0);
+    IniPutQuoted(L"find", L"with", g_pf.findWith, wcmp(g_pf.findWith, g_saved.findWith) != 0);
+    IniPutQuoted(L"page", L"header", g_pf.header, wcmp(g_pf.header, g_saved.header) != 0);
+    IniPutQuoted(L"page", L"footer", g_pf.footer, wcmp(g_pf.footer, g_saved.footer) != 0);
     IniPutInt(L"page", L"left", g_pf.marginL, MINE(marginL));
     IniPutInt(L"page", L"top", g_pf.marginT, MINE(marginT));
     IniPutInt(L"page", L"right", g_pf.marginR, MINE(marginR));

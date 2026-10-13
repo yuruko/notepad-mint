@@ -8,7 +8,10 @@ HWND g_edit;
 static WNDPROC g_orig;
 static HFONT   g_font;
 static HBRUSH  g_brEdit;
-static int     g_wheel;
+static int     g_wheel, g_hwheel;
+static int     g_dragPress, g_dragBypass;
+static WPARAM  g_dragKeys;
+static LPARAM  g_dragDown;
 static int     g_paintDepth;
 static int     g_shiftDir;
 static int     g_stubW, g_stubMax;
@@ -810,6 +813,99 @@ static void ShotDc(HWND hwnd, int width, int height, int startY) {
 }
 #endif
 
+int EditLineHeight(void) {
+    return LineHeight();
+}
+
+static BOOL IndexPos(int index, POINT *pos) {
+    RECT formatRect;
+    int length = (int)Ctl(g_edit, WM_GETTEXTLENGTH, 0, 0);
+    LRESULT packed = index < length ? Ctl(g_edit, EM_POSFROMCHAR, (WPARAM)index, 0) : -1;
+    if (packed != -1) { pos->x = (short)LOWORD(packed); pos->y = (short)HIWORD(packed); return TRUE; }
+    if (index < length) return FALSE;
+    Ctl(g_edit, EM_GETRECT, 0, (LPARAM)&formatRect);
+    pos->x = EditCaretEndX(g_edit, g_font, length, &formatRect);
+    pos->y = formatRect.top + ((int)Ctl(g_edit, EM_LINEFROMCHAR, (WPARAM)length, 0) - (int)Ctl(g_edit, EM_GETFIRSTVISIBLELINE, 0, 0)) * LineHeight();
+    return TRUE;
+}
+
+int EditIndexFromPoint(POINT pt) {
+    RECT formatRect;
+    int lineHeight = LineHeight(), firstLine, lineCount, row, rowStart, rowLength, index;
+    WORD low;
+    Ctl(g_edit, EM_GETRECT, 0, (LPARAM)&formatRect);
+    firstLine = (int)Ctl(g_edit, EM_GETFIRSTVISIBLELINE, 0, 0);
+    lineCount = (int)Ctl(g_edit, EM_GETLINECOUNT, 0, 0);
+    row = pt.y < formatRect.top ? firstLine : firstLine + (pt.y - formatRect.top) / lineHeight;
+    if (row >= lineCount) row = lineCount - 1;
+    if (row < 0) row = 0;
+    rowStart = (int)Ctl(g_edit, EM_LINEINDEX, (WPARAM)row, 0);
+    rowLength = (int)Ctl(g_edit, EM_LINELENGTH, (WPARAM)rowStart, 0);
+    low = LOWORD(Ctl(g_edit, EM_CHARFROMPOS, 0, MAKELPARAM(pt.x, formatRect.top + (row - firstLine) * lineHeight + lineHeight / 2)));
+    index = rowStart + (int)(WORD)(low - (WORD)rowStart);
+    if (index > rowStart + rowLength) index = rowStart + rowLength;
+    return index < rowStart ? rowStart : index;
+}
+
+BOOL EditCaretRect(int index, RECT *rect) {
+    POINT pos;
+    RECT visible;
+    HDC hdc;
+    int width = 1;
+    if (!g_edit || !IndexPos(index, &pos)) return FALSE;
+    SystemParametersInfoW(SPI_GETCARETWIDTH, 0, &width, 0);
+    if (width < 1) width = 1;
+    rect->left = pos.x;
+    rect->top = pos.y;
+    rect->right = pos.x + width;
+    rect->bottom = pos.y + LineHeight();
+    hdc = GetDC(g_edit);
+    if (!hdc) return FALSE;
+    GetClipBox(hdc, &visible);
+    ReleaseDC(g_edit, hdc);
+    return IntersectRect(rect, rect, &visible);
+}
+
+BOOL EditHitSelection(POINT pt) {
+    DWORD selStart = 0, selEnd = 0;
+    int index, charIndex, lineHeight = LineHeight();
+    POINT charPos, nextPos;
+    if (!g_edit) return FALSE;
+    Ctl(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    if (selEnd <= selStart) return FALSE;
+    index = EditIndexFromPoint(pt);
+    for (charIndex = index - 1; charIndex <= index; charIndex++) {
+        int left, right;
+        if (charIndex < (int)selStart || charIndex >= (int)selEnd || !IndexPos(charIndex, &charPos)) continue;
+        if (pt.y < charPos.y || pt.y >= charPos.y + lineHeight) continue;
+        if (IndexPos(charIndex + 1, &nextPos) && nextPos.y == charPos.y && nextPos.x != charPos.x) {
+            left = nextPos.x < charPos.x ? nextPos.x : charPos.x;
+            right = nextPos.x < charPos.x ? charPos.x : nextPos.x;
+        } else {
+            if (!g_stubW) StubMetrics(g_edit);
+            left = EditIsRtl() ? charPos.x - g_stubW : charPos.x;
+            right = left + g_stubW;
+        }
+        if (pt.x >= left && pt.x < right) return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL PasteText(void) {
+    HANDLE data;
+    const WCHAR *src;
+    WCHAR *text = NULL;
+    if (!IsClipboardFormatAvailable(CF_UNICODETEXT) || !OpenClipboard(g_edit)) return FALSE;
+    data = GetClipboardData(CF_UNICODETEXT);
+    src = data ? (const WCHAR *)GlobalLock(data) : NULL;
+    if (src) { text = TextToCrlf(src, (int)(GlobalSize(data) / sizeof(WCHAR)), NULL); GlobalUnlock(data); }
+    CloseClipboard();
+    if (!text) return FALSE;
+    EditInsert(text);
+    mem_free(text);
+    return TRUE;
+}
+
 static int CaretMoveMessage(UINT msg, WPARAM wParam) {
     switch (msg) {
     case WM_KEYDOWN: case WM_CHAR: case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
@@ -1021,12 +1117,71 @@ static LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             g_shiftDir = 0;
         }
         break;
-    case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_SYSKEYDOWN:
+    case WM_LBUTTONDOWN:
         g_shiftDir = 0;
+        if (!g_dragBypass && !(wParam & MK_SHIFT) && DndReady()) {
+            POINT pt;
+            pt.x = GET_X_LPARAM(lParam);
+            pt.y = GET_Y_LPARAM(lParam);
+            if (EditHitSelection(pt)) {
+                g_dragPress = 1;
+                g_dragKeys = wParam;
+                g_dragDown = lParam;
+                SetFocus(hwnd);
+                SetCapture(hwnd);
+                return 0;
+            }
+        }
         break;
+    case WM_MOUSEMOVE:
+        if (g_dragPress) {
+            int dx = GET_X_LPARAM(lParam) - GET_X_LPARAM(g_dragDown), dy = GET_Y_LPARAM(lParam) - GET_Y_LPARAM(g_dragDown);
+            if ((dx < 0 ? -dx : dx) > GetSystemMetrics(SM_CXDRAG) || (dy < 0 ? -dy : dy) > GetSystemMetrics(SM_CYDRAG)) {
+                g_dragPress = 0;
+                ReleaseCapture();
+                DndDragSelection();
+            }
+            return 0;
+        }
+        break;
+    case WM_LBUTTONUP:
+        if (g_dragPress) {
+            g_dragPress = 0;
+            ReleaseCapture();
+            g_dragBypass = 1;
+            SendMessageW(hwnd, WM_LBUTTONDOWN, g_dragKeys, g_dragDown);
+            g_dragBypass = 0;
+        }
+        break;
+    case WM_CAPTURECHANGED:
+        if ((HWND)lParam != hwnd) g_dragPress = 0;
+        break;
+    case WM_SETCURSOR:
+        if (LOWORD(lParam) == HTCLIENT && DndReady()) {
+            POINT pt;
+            if (GetCursorPos(&pt) && ScreenToClient(hwnd, &pt) && EditHitSelection(pt)) { SetCursor(LoadCursorW(NULL, IDC_ARROW)); return TRUE; }
+        }
+        break;
+    case WM_RBUTTONDOWN: case WM_SYSKEYDOWN:
+        g_shiftDir = 0;
+        if (g_dragPress) { g_dragPress = 0; ReleaseCapture(); }
+        break;
+    case WM_PASTE:
+        if (PasteText()) return 0;
+        break;
+    case WM_MOUSEHWHEEL: {
+        UINT perNotch = 3;
+        int chars;
+        SystemParametersInfoW(SPI_GETWHEELSCROLLCHARS, 0, &perNotch, 0);
+        g_hwheel += GET_WHEEL_DELTA_WPARAM(wParam) * (int)perNotch;
+        chars = g_hwheel / 120;
+        g_hwheel -= chars * 120;
+        if (chars && !g_pf.wrap) SendMessageW(hwnd, EM_LINESCROLL, (WPARAM)(EditIsRtl() ? -chars : chars), 0);
+        return 0; }
     case WM_KEYDOWN:
         if (wParam == VK_SHIFT && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) g_shiftDir = ((lParam >> 16) & 0xFF) == 0x36 ? 2 : 1;
         else if (wParam != VK_SHIFT && wParam != VK_CONTROL) g_shiftDir = 0;
+        if (g_dragPress) { if (wParam == VK_ESCAPE) { g_dragPress = 0; ReleaseCapture(); } return 0; }
         if (wParam == VK_DELETE && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000)) {
             EditDeleteWord(1);
             return 0;
@@ -1042,6 +1197,7 @@ static LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             if (!GetCaretPos(&pt)) { pt.x = 8; pt.y = 8; }
             ClientToScreen(hwnd, &pt);
             x = pt.x; y = pt.y + S(20);
+            MenuShowCues();
         }
         MenuPopup(GetParent(hwnd), &g_mdEditCtx, x, y, 0);
         return 0; }

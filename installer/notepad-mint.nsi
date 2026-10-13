@@ -10,7 +10,7 @@ Unicode true
 SetCompressor /SOLID lzma
 
 !ifndef VERSION
-  !define VERSION "1.1.0"
+  !define VERSION "1.2.0"
 !endif
 !ifndef EXE_PATH
   !error "EXE_PATH is not set (the built notepad-mint.exe)"
@@ -153,6 +153,8 @@ Section "text file types" SecAssoc
   WriteRegStr HKLM "Software\Classes\${PROGID}" "" "text document"
   WriteRegExpandStr HKLM "Software\Classes\${PROGID}\DefaultIcon" "" "%SystemRoot%\system32\imageres.dll,-102"
   WriteRegStr HKLM "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\${APP_EXE}" "%1"'
+  WriteRegStr HKLM "Software\Classes\${PROGID}\shell\print\command" "" '"$INSTDIR\${APP_EXE}" /p "%1"'
+  WriteRegStr HKLM "Software\Classes\${PROGID}\shell\printto\command" "" '"$INSTDIR\${APP_EXE}" /pt "%1" "%2" "%3" "%4"'
   WriteRegStr HKLM "Software\Classes\Applications\${APP_EXE}" "FriendlyAppName" "${APP_NAME}"
   WriteRegStr HKLM "Software\Classes\Applications\${APP_EXE}\shell\open\command" "" '"$INSTDIR\${APP_EXE}" "%1"'
   WriteRegStr HKLM "${CAPS}" "ApplicationName" "${APP_NAME}"

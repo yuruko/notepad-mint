@@ -6,7 +6,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.1.0"
+#define APP_VERSION  L"1.2.0"
 #define PATH_CAP     1024
 
 typedef struct Palette {
@@ -65,6 +65,7 @@ const WCHAR *PathName(const WCHAR *path);
 void   PathDir(const WCHAR *path, WCHAR *out, int cap);
 void   PathJoin(WCHAR *dir, const WCHAR *name, int cap);
 BOOL   IsDir(const WCHAR *path);
+WCHAR *TextToCrlf(const WCHAR *src, int maxLen, int *outLen);
 size_t mp_count_lf(const WCHAR *p, size_t n);
 size_t mp_find3(const WCHAR *p, size_t n, unsigned a, unsigned b, unsigned c);
 int    WordClass(WCHAR ch);
@@ -178,6 +179,8 @@ void  MenuBarActivate(int index, int openPopup);
 int   MenuBarMnemonic(WCHAR ch);
 void  MenuPopup(HWND owner, const MenuDef *def, int x, int y, int anchorBottom);
 void  MenuCancel(void);
+void  MenuArmDoubleClose(const RECT *screenRect, DWORD time);
+void  MenuShowCues(void);
 
 enum { SB_POS, SB_ZOOM, SB_LINES, SB_BYTES, SB_EOL, SB_ENC, SB_COUNT };
 HWND  StatusCreate(HWND parent);
@@ -221,6 +224,8 @@ DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol);
 extern DWORD g_textRev;
 
 #define FONT_MIN 70
+#define FIND_CAP 256
+#define PAGE_TEXT_CAP 128
 #define FONT_MAX 1000
 typedef struct Prefs {
     WCHAR    font[32];
@@ -230,8 +235,10 @@ typedef struct Prefs {
     int      wrap, statusbar;
     int      tab;
     int      winx, winy, winw, winh, maximized;
-    int      matchCase, wrapAround, wholeWord;
+    int      matchCase, wrapAround, wholeWord, findUp;
     int      marginL, marginT, marginR, marginB;
+    WCHAR    findWhat[FIND_CAP], findWith[FIND_CAP];
+    WCHAR    header[PAGE_TEXT_CAP], footer[PAGE_TEXT_CAP];
 } Prefs;
 extern Prefs g_pf;
 extern HWND  g_hwnd, g_edit, g_status;
@@ -243,6 +250,8 @@ typedef struct DocState {
 } DocState;
 extern DocState g_doc;
 const WCHAR *AppDocName(void);
+void  AppOpenFiles(const WCHAR *paths);
+#define WM_APP_OPENFILES (WM_APP + 62)
 
 void  AppApplyPrefs(void);
 void  AppSavePrefs(void);
@@ -278,9 +287,22 @@ BOOL   EditSetRtl(BOOL rtl);
 void   EditDirKeyCancel(void);
 int    EditStrongDir(int limit);
 BOOL   EditIsRtl(void);
+int    EditLineHeight(void);
+int    EditIndexFromPoint(POINT pt);
+BOOL   EditCaretRect(int index, RECT *rect);
+BOOL   EditHitSelection(POINT pt);
+
+void   DndInit(HWND hwnd);
+void   DndShutdown(void);
+BOOL   DndReady(void);
+void   DndDragSelection(void);
+void   DndDropFiles(HANDLE drop);
+#ifdef SHOTDC
+LRESULT DndProbe(const COPYDATASTRUCT *copy);
+#endif
 
 void  FindDlgShow(int replaceMode);
-void  FindNext(int dirUp);
+void  FindNext(int reverse);
 HWND  FindDlgHwnd(void);
 BOOL  FindHasText(void);
 void  GotoDlg(HWND owner);
@@ -290,7 +312,7 @@ BOOL  FontDlg(HWND owner);
 BOOL  EncDlg(HWND owner, int *enc, int reopen);
 BOOL  FileDlgOpen(HWND owner, WCHAR *path, int capacity);
 BOOL  FileDlgSave(HWND owner, WCHAR *path, int capacity);
-void  PrintDoc(HWND owner, int quiet);
+void  PrintDoc(HWND owner, int quiet, const WCHAR *printer);
 void  PageSetup(HWND owner);
 
 #endif

@@ -278,8 +278,7 @@ static void FontLayout(FontSt *state) {
     HWND hwnd = base->hwnd, button;
     WCHAR text[8];
     int i;
-    UiLabel(hwnd, L"font:", 12, 10, 236, 16, 0, SS_NOPREFIX);
-    UiLabel(hwnd, L"size:", 264, 10, 120, 16, 0, SS_NOPREFIX);
+    UiLabel(hwnd, L"&font:", 12, 10, 236, 16, 0, 0);
     UiLabel(hwnd, L"7 to 100 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
     UiLabel(hwnd, L"preview:", 12, 228, 200, 16, 0, SS_NOPREFIX);
     DlgFrame(base, 12, 246, 504, 146, BV_SUNKEN);
@@ -288,7 +287,8 @@ static void FontLayout(FontSt *state) {
     state->list = CreateWindowExW(0, L"LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | WS_VSCROLL | LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT, S(12) + 2, S(28) + 2, S(236) - 4, S(166) - 4, hwnd, (HMENU)(ULONG_PTR)ID_LIST, g_hinst, NULL);
     SendMessageW(state->list, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
     DarkScroll(state->list);
-    Opt(hwnd, L"monospaced fonts only", 12, 200, 236, ID_MONO, WS_GROUP, state->mono);
+    Opt(hwnd, L"&monospaced fonts only", 12, 200, 236, ID_MONO, WS_GROUP, state->mono);
+    UiLabel(hwnd, L"&size:", 264, 10, 120, 16, 0, 0);
     state->edit = UiEdit(base, L"", 264, 28, 56, 23, ID_SIZE, WS_GROUP);
     SendMessageW(state->edit, EM_LIMITTEXT, 5, 0);
     for (i = 0; i < COUNTOF(g_sizes); i++) {
@@ -296,9 +296,9 @@ static void FontLayout(FontSt *state) {
         button = UiButton(hwnd, text, 264 + (i % 6) * 42, 60 + (i / 6) * 26, 40, 22, ID_PRESET + i, BS_PUSHBUTTON | (i ? 0 : WS_GROUP));
         if (i) SetWindowLongPtrW(button, GWL_STYLE, GetWindowLongPtrW(button, GWL_STYLE) & ~WS_TABSTOP);
     }
-    Opt(hwnd, L"bold", 264, 170, 80, ID_BOLD, WS_GROUP, state->bold);
-    Opt(hwnd, L"italic", 352, 170, 80, ID_ITALIC, 0, state->italic);
-    UiButton(hwnd, L"reset", 12, 404, 88, 24, ID_RESET, BS_PUSHBUTTON | WS_GROUP);
+    Opt(hwnd, L"&bold", 264, 170, 80, ID_BOLD, WS_GROUP, state->bold);
+    Opt(hwnd, L"&italic", 352, 170, 80, ID_ITALIC, 0, state->italic);
+    UiButton(hwnd, L"&reset", 12, 404, 88, 24, ID_RESET, BS_PUSHBUTTON | WS_GROUP);
     UiButton(hwnd, L"ok", 336, 404, 86, 24, IDOK, BS_DEFPUSHBUTTON | WS_GROUP);
     UiButton(hwnd, L"cancel", 430, 404, 86, 24, IDCANCEL, BS_PUSHBUTTON);
     FillList(state);

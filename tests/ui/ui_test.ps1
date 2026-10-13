@@ -2018,85 +2018,6 @@ function Test-T23 {
     Ck 'T23.23 the selection collapses: the blocks of the scrolled view are all gone' (-not $any) 'a block is left on the window'
 }
 
-# =========================================================================================================== T24
-# files and folders dropped on the window go into the text as paths, at the caret (replacing a selection), one per line, plain. the drop is a WM_DROPFILES
-# with an HDROP built here (the system hands that handle to the app's process), what the shell posts after a real drop. shift held while dropping keeps the old
-# behaviour (open the files): that reads the real key state, which messages cannot set, so it is not tested here
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public static class Dp {
-    [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint f, UIntPtr n);
-    [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr h);
-    [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr h);
-    public static long Make(string[] paths) {                                    // an HDROP (DROPFILES + a double nul terminated list of wide strings)
-        StringBuilder sb = new StringBuilder();
-        foreach (string q in paths) { sb.Append(q); sb.Append('\0'); }
-        sb.Append('\0');
-        byte[] data = Encoding.Unicode.GetBytes(sb.ToString());
-        IntPtr h = GlobalAlloc(0x2042, new UIntPtr((uint)(20 + data.Length)));    // GHND
-        IntPtr p = GlobalLock(h);
-        Marshal.WriteInt32(p, 0, 20);                                             // pFiles
-        Marshal.WriteInt32(p, 16, 1);                                             // fWide
-        Marshal.Copy(data, 0, new IntPtr(p.ToInt64() + 20), data.Length);
-        GlobalUnlock(h);
-        return h.ToInt64();
-    }
-}
-'@
-function Drop-Paths($app, [string[]]$paths) { [void][U]::Post([long]$app.Main, 0x233, [long][Dp]::Make($paths), 0) }     # WM_DROPFILES
-function Test-T24 {
-    $app = Start-App
-    $ed = Get-Edit $app
-    $title0 = Title $app
-    $exe = 'C:\Windows\notepad.exe'
-    Reset-Doc $app 'ab'
-    [void](Snd $ed $EM_SETSEL 1 1)
-    Drop-Paths $app @($exe)
-    CkEdText 'T24.1 a file dropped on the window: its full path goes into the text at the caret (between "a" and "b")' $app ('a' + $exe + 'b')
-    $e = 1 + $exe.Length
-    CkSel 'T24.2 the caret ends up right after the inserted path' $app $e $e
-    Ck 'T24.3 nothing was opened: the window title is as it was, plus the change mark of the edit' (WaitFor { (Title $app) -match '^\*' } 3000) ('title [' + (Title $app) + '] (was [' + $title0 + '])')
-    [void](Snd $ed $EM_UNDO 0 0)
-    CkEdText 'T24.4 one undo takes the whole drop back' $app 'ab'
-
-    Reset-Doc $app 'axyzb'
-    [void](Snd $ed $EM_SETSEL 1 4)
-    Drop-Paths $app @('C:\Windows')
-    CkEdText 'T24.5 a folder works too, the selection is replaced, no backslash added: a, C:\Windows, b' $app 'aC:\Windowsb'
-
-    Reset-Doc $app ''
-    Drop-Paths $app @('C:\one\a.txt', 'C:\two words\b.txt', 'D:\three')
-    CkEdText 'T24.6 several items: one path per line, plain (no quotes, spaces kept), no line break after the last' $app ("C:\one\a.txt`r`nC:\two words\b.txt`r`nD:\three")
-
-    Reset-Doc $app 'x'
-    $jp = Chars @(0x30C6, 0x30B9, 0x30C8); $jf = Chars @(0x30D5, 0x30A1, 0x30A4, 0x30EB)
-    Reset-Doc $app ''
-    Drop-Paths $app @(('C:\' + $jp + '\' + $jf + '.txt'))
-    CkEdText 'T24.7 a path with non-ascii characters (katakana) comes through intact' $app ('C:\' + $jp + '\' + $jf + '.txt')
-
-    $long = 'C:\' + ('a' * 1500) + '\file.txt'
-    Reset-Doc $app ''
-    Drop-Paths $app @($long)
-    CkEdText ('T24.8 a path of ' + $long.Length + ' characters (longer than the old 1024 limit) is inserted whole') $app $long
-
-    Reset-Doc $app 'keep'
-    Drop-Paths $app @()
-    Start-Sleep -Milliseconds 300
-    CkEdText 'T24.9 an empty drop changes nothing' $app 'keep'
-
-    $sb = New-Object Text.StringBuilder                                           # the inserted text is scrolled into view
-    for ($i = 1; $i -le 150; $i++) { [void]$sb.Append('line ' + $i + "`r`n") }
-    Reset-Doc $app $sb.ToString()
-    [void](Snd $ed $EM_SETSEL 100000 100000)                                      # (the end; a message does not scroll)
-    $f0 = [int](Snd $ed 0xCE 0 0)
-    Drop-Paths $app @('C:\a', 'C:\b')
-    Ck 'T24.10 dropped at the end of a long document: the caret is scrolled into view (the view moved down)' (WaitFor { [int](Snd $ed 0xCE 0 0) -gt $f0 } 3000) ('first visible row stayed ' + $f0)
-    $t = Ed-Text $app
-    Ck 'T24.11 ... and the text ends with the two paths' ($t.EndsWith("C:\a`r`nC:\b")) ('tail [' + (Show $t.Substring([Math]::Max(0, $t.Length - 30))) + ']')
-}
-
 # =========================================================================================================== T25
 # partly visible rows (edit.c "partly visible rows"). the stock control draws whole rows only and rounds its formatting rectangle down to whole rows; below the
 # last whole row is a band (the bottom padding + what is left of the height) in which the app draws the next row(s), cut off at the editor's bottom edge.
@@ -3148,11 +3069,13 @@ function Test-T38 {
 . (Join-Path $PSScriptRoot 'caret_scroll_test.ps1')
 . (Join-Path $PSScriptRoot 'ui_resources_test.ps1')
 . (Join-Path $PSScriptRoot 'rtl_test.ps1')
+. (Join-Path $PSScriptRoot 'dragdrop_test.ps1')
+. (Join-Path $PSScriptRoot 'parity_test.ps1')
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43', 'T44', 'T45')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43', 'T44', 'T45', 'T46', 'T47')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine

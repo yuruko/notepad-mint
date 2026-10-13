@@ -63,13 +63,81 @@ static BOOL CdRun(HWND owner, PRINTDLGW *printDlg, PAGESETUPDLGW *pageDlg) {
     return FALSE;
 }
 
+#define ID_HEADER 0x7F01
+#define ID_FOOTER 0x7F02
+static WCHAR g_newHeader[PAGE_TEXT_CAP], g_newFooter[PAGE_TEXT_CAP];
+
+static HWND PageRow(HWND dlg, HWND after, HFONT font, const WCHAR *label, int id, const WCHAR *text, const RECT *row, int labelWidth) {
+    int height = row->bottom - row->top;
+    HWND caption = CreateWindowExW(0, L"STATIC", label, WS_CHILD | WS_VISIBLE | SS_LEFT, row->left, row->top + height / 5, labelWidth, height, dlg, (HMENU)(LONG_PTR)-1, g_hinst, NULL);
+    HWND edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, row->left + labelWidth, row->top, row->right - row->left - labelWidth, height, dlg, (HMENU)(LONG_PTR)id, g_hinst, NULL);
+    if (!caption || !edit) return after;
+    SendMessageW(caption, WM_SETFONT, (WPARAM)font, FALSE);
+    SendMessageW(edit, WM_SETFONT, (WPARAM)font, FALSE);
+    SendMessageW(edit, EM_LIMITTEXT, PAGE_TEXT_CAP - 1, 0);
+    SetWindowPos(caption, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetWindowPos(edit, caption, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    return edit;
+}
+
+static void PageHookInit(HWND dlg) {
+    static const int buttons[] = { IDOK, IDCANCEL, 0x0402, 0x040E };
+    HFONT font = (HFONT)SendMessageW(dlg, WM_GETFONT, 0, 0);
+    RECT units = { 0, 0, 36, 14 }, rect, window, row;
+    HWND child, after;
+    int contentBottom = 0, contentLeft = 0x7FFFFFFF, contentRight = 0, gap, band, i, isButton;
+    MapDialogRect(dlg, &units);
+    gap = units.bottom / 3;
+    band = 2 * units.bottom + 3 * gap;
+    for (child = GetWindow(dlg, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+        int id = GetDlgCtrlID(child);
+        if (!IsWindowVisible(child)) continue;
+        for (i = 0, isButton = 0; i < COUNTOF(buttons); i++) if (id == buttons[i]) isButton = 1;
+        if (isButton) continue;
+        GetWindowRect(child, &rect);
+        MapWindowPoints(NULL, dlg, (POINT *)&rect, 2);
+        if (rect.bottom > contentBottom) contentBottom = rect.bottom;
+        if (rect.left < contentLeft) contentLeft = rect.left;
+        if (rect.right > contentRight) contentRight = rect.right;
+    }
+    if (contentRight <= contentLeft) return;
+    for (i = 0; i < COUNTOF(buttons); i++) {
+        HWND button = GetDlgItem(dlg, buttons[i]);
+        if (!button) continue;
+        GetWindowRect(button, &rect);
+        MapWindowPoints(NULL, dlg, (POINT *)&rect, 2);
+        if (rect.top >= contentBottom - gap) SetWindowPos(button, NULL, rect.left, rect.top + band, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    GetWindowRect(dlg, &window);
+    SetWindowPos(dlg, NULL, 0, 0, window.right - window.left, window.bottom - window.top + band, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    after = GetWindow(GetDlgItem(dlg, IDOK), GW_HWNDPREV);
+    SetRect(&row, contentLeft, contentBottom + gap, contentRight, contentBottom + gap + units.bottom);
+    after = PageRow(dlg, after ? after : HWND_TOP, font, L"&Header:", ID_HEADER, g_pf.header, &row, units.right);
+    OffsetRect(&row, 0, units.bottom + gap);
+    PageRow(dlg, after, font, L"&Footer:", ID_FOOTER, g_pf.footer, &row, units.right);
+}
+
+static UINT_PTR CALLBACK PageHook(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    (void)lParam;
+    if (msg == WM_INITDIALOG) { PageHookInit(dlg); return TRUE; }
+    if (msg == WM_COMMAND && LOWORD(wParam) == IDOK) {
+        HWND header = GetDlgItem(dlg, ID_HEADER), footer = GetDlgItem(dlg, ID_FOOTER);
+        if (header) GetWindowTextW(header, g_newHeader, PAGE_TEXT_CAP);
+        if (footer) GetWindowTextW(footer, g_newFooter, PAGE_TEXT_CAP);
+    }
+    return 0;
+}
+
 void PageSetup(HWND owner) {
     PAGESETUPDLGW pageDlg;
     if (!CdLoad(owner)) return;
     memset(&pageDlg, 0, sizeof pageDlg);
     pageDlg.lStructSize = sizeof pageDlg;
     pageDlg.hwndOwner = owner;
-    pageDlg.Flags = PSD_MARGINS | PSD_INTHOUSANDTHSOFINCHES;
+    pageDlg.Flags = PSD_MARGINS | PSD_INTHOUSANDTHSOFINCHES | PSD_ENABLEPAGESETUPHOOK;
+    pageDlg.lpfnPageSetupHook = (void *)PageHook;
+    wcopy(g_newHeader, g_pf.header, PAGE_TEXT_CAP);
+    wcopy(g_newFooter, g_pf.footer, PAGE_TEXT_CAP);
     pageDlg.rtMargin.left   = g_pf.marginL > 0 ? g_pf.marginL : 0;
     pageDlg.rtMargin.top    = g_pf.marginT > 0 ? g_pf.marginT : 0;
     pageDlg.rtMargin.right  = g_pf.marginR > 0 ? g_pf.marginR : 0;
@@ -79,6 +147,8 @@ void PageSetup(HWND owner) {
     g_pf.marginT = pageDlg.rtMargin.top;
     g_pf.marginR = pageDlg.rtMargin.right;
     g_pf.marginB = pageDlg.rtMargin.bottom;
+    wcopy(g_pf.header, g_newHeader, PAGE_TEXT_CAP);
+    wcopy(g_pf.footer, g_newFooter, PAGE_TEXT_CAP);
     AppSavePrefs();
 }
 
@@ -205,8 +275,44 @@ static int RowNext(Rows *rows, const WCHAR **rowText, int *rowLen) {
 
 static int Px(int thousandths, int dpi) { return thousandths > 0 ? MulDiv(thousandths, dpi, 1000) : 0; }
 
-static BOOL PageBegin(HDC printDc, HFONT font, const RECT *box, int vertRes, int lineHeight, const WCHAR *name, int page) {
-    WCHAR foot[32];
+static void PageAppend(WCHAR *out, int *length, int cap, const WCHAR *add) {
+    while (*add && *length < cap - 1) out[(*length)++] = *add++;
+    out[*length] = 0;
+}
+
+static void PageLine(HDC printDc, const WCHAR *format, const RECT *area, int page) {
+    static const UINT align[3] = { DT_LEFT, DT_CENTER, DT_RIGHT };
+    WCHAR parts[3][PATH_CAP], piece[64], single[2];
+    int length[3] = { 0, 0, 0 }, part = 1, i;
+    const WCHAR *src;
+    RECT rect;
+    parts[0][0] = parts[1][0] = parts[2][0] = 0;
+    for (src = format; *src; src++) {
+        const WCHAR *add = single;
+        single[0] = *src;
+        single[1] = 0;
+        if (*src == '&' && src[1]) {
+            switch (wlow(src[1])) {
+            case 'l': part = 0; src++; continue;
+            case 'c': part = 1; src++; continue;
+            case 'r': part = 2; src++; continue;
+            case 'f': add = AppDocName(); src++; break;
+            case 'p': wsprintfW(piece, L"%d", page); add = piece; src++; break;
+            case 'd': if (!GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, NULL, NULL, piece, 64)) piece[0] = 0; add = piece; src++; break;
+            case 't': if (!GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, NULL, NULL, piece, 64)) piece[0] = 0; add = piece; src++; break;
+            case '&': src++; break;
+            }
+        }
+        PageAppend(parts[part], &length[part], PATH_CAP, add);
+    }
+    for (i = 0; i < 3; i++) {
+        if (!parts[i][0]) continue;
+        rect = *area;
+        DrawTextW(printDc, parts[i], -1, &rect, align[i] | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+}
+
+static BOOL PageBegin(HDC printDc, HFONT font, const RECT *box, int vertRes, int lineHeight, int page) {
     RECT rect;
     if (StartPage(printDc) <= 0) return FALSE;
     SelectObject(printDc, font);
@@ -215,14 +321,69 @@ static BOOL PageBegin(HDC printDc, HFONT font, const RECT *box, int vertRes, int
     SetBkMode(printDc, TRANSPARENT);
     if (box->top >= lineHeight) {
         SetRect(&rect, box->left, 0, box->right, box->top);
-        DrawTextW(printDc, name, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        PageLine(printDc, g_pf.header, &rect, page);
     }
     if (vertRes - box->bottom >= lineHeight) {
-        wsprintfW(foot, L"page %d", page);
         SetRect(&rect, box->left, box->bottom, box->right, vertRes);
-        DrawTextW(printDc, foot, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        PageLine(printDc, g_pf.footer, &rect, page);
     }
     return TRUE;
+}
+
+static DlgBase g_printing;
+static int g_printAbort;
+
+static BOOL PrintPump(void) {
+    MSG message;
+    while (!g_printAbort && PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
+        if (message.message == WM_QUIT) { PostQuitMessage((int)message.wParam); break; }
+        if (!g_printing.hwnd || !IsDialogMessageW(g_printing.hwnd, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
+    }
+    return !g_printAbort;
+}
+
+static BOOL CALLBACK AbortProc(HDC printDc, int code) {
+    (void)printDc;
+    (void)code;
+    return PrintPump();
+}
+
+static LRESULT CALLBACK PrintingProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    DlgBase *base = DlgFromHwnd(hwnd, msg, lParam);
+    LRESULT result;
+    if (!base) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    switch (msg) {
+    case WM_CREATE: {
+        WCHAR line[PATH_CAP + 16];
+        wcopy(line, L"printing ", COUNTOF(line));
+        wcat(line, AppDocName(), COUNTOF(line));
+        UiLabel(hwnd, line, 20, 20, 300, 20, 0, SS_NOPREFIX | SS_ENDELLIPSIS);
+        base->focus = UiButton(hwnd, L"cancel", 232, 52, 88, 24, IDCANCEL, BS_DEFPUSHBUTTON);
+        return 0; }
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDCANCEL || LOWORD(wParam) == IDOK) { g_printAbort = 1; EnableWindow(GetDlgItem(hwnd, IDCANCEL), FALSE); return 0; }
+        break;
+    case WM_CLOSE:
+        g_printAbort = 1;
+        return 0;
+    }
+    if (DlgCommon(base, msg, wParam, lParam, &result)) return result;
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+static void PrintingOpen(HWND owner) {
+    static BOOL registered;
+    if (!registered) { RegClass(L"mp_printing", PrintingProc, 0, NULL); registered = TRUE; }
+    g_printAbort = 0;
+    DlgBaseInit(&g_printing, owner);
+    if (owner) EnableWindow(owner, FALSE);
+    if (DlgOpen(&g_printing, L"mp_printing", APP_NAME, 340, 92, 1)) ShowWindow(g_printing.hwnd, SW_SHOW);
+}
+
+static void PrintingClose(HWND owner) {
+    if (owner) EnableWindow(owner, TRUE);
+    if (g_printing.hwnd) DestroyWindow(g_printing.hwnd);
+    g_printing.hwnd = NULL;
 }
 
 static BOOL UserCancelled(DWORD err) { return err == ERROR_PRINT_CANCELLED || err == ERROR_CANCELLED; }
@@ -277,6 +438,7 @@ static int PrintJob(HDC printDc, const WCHAR *text, int length, int copies, int 
     memset(&docInfo, 0, sizeof docInfo);
     docInfo.cbSize = (int)sizeof docInfo;
     docInfo.lpszDocName = name;
+    SetAbortProc(printDc, AbortProc);
     started = StartDocW(printDc, &docInfo) > 0;
     ok = started;
     if (!started && UserCancelled(GetLastError())) ok = -1;
@@ -288,7 +450,7 @@ static int PrintJob(HDC printDc, const WCHAR *text, int length, int copies, int 
             if (!rowStatus && page > 1) break;
             inRange = page >= firstPage;
             if (inRange) {
-                ok = PageBegin(printDc, font, &box, vertRes, lineHeight, name, page);
+                ok = PageBegin(printDc, font, &box, vertRes, lineHeight, page);
                 if (!ok) err = GetLastError();
             }
             for (row = 0; ok && rowStatus > 0; ) {
@@ -303,6 +465,7 @@ static int PrintJob(HDC printDc, const WCHAR *text, int length, int copies, int 
                 ok = EndPage(printDc) > 0;
                 if (ok) printed++; else err = GetLastError();
             }
+            if (ok && !PrintPump()) { err = ERROR_CANCELLED; ok = FALSE; }
             if (!rowStatus) break;
         }
     }
@@ -320,13 +483,13 @@ static int PrintJob(HDC printDc, const WCHAR *text, int length, int copies, int 
     return ok;
 }
 
-void PrintDoc(HWND owner, int quiet) {
+void PrintDoc(HWND owner, int quiet, const WCHAR *printer) {
     PRINTDLGW printDlg;
     HCURSOR oldCursor;
     WCHAR *text;
     DWORD selStart = 0, selEnd = 0;
     int length = 0, firstPage = 1, lastPage = 0x7FFFFFFF, ok;
-    if (!CdLoad(owner)) return;
+    if (!printer && !CdLoad(owner)) return;
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
     memset(&printDlg, 0, sizeof printDlg);
     printDlg.lStructSize = sizeof printDlg;
@@ -338,7 +501,13 @@ void PrintDoc(HWND owner, int quiet) {
     printDlg.nMinPage = 1;
     printDlg.nMaxPage = 0xFFFF;
     printDlg.nCopies = 1;
-    if (!CdRun(owner, &printDlg, NULL)) return;
+    if (printer) {
+        printDlg.hDC = CreateDCW(L"WINSPOOL", printer, NULL, NULL);
+        if (!printDlg.hDC) { MpNote(owner, APP_NAME, L"cannot find that printer."); return; }
+        printDlg.Flags &= ~(DWORD)(PD_PAGENUMS | PD_SELECTION);
+    } else if (!CdRun(owner, &printDlg, NULL)) {
+        return;
+    }
     if (printDlg.Flags & PD_PAGENUMS) { firstPage = printDlg.nFromPage; lastPage = printDlg.nToPage; }
     oldCursor = SetCursor(LoadCursorW(NULL, IDC_WAIT));
     if (printDlg.Flags & PD_SELECTION) {
@@ -354,7 +523,9 @@ void PrintDoc(HWND owner, int quiet) {
         }
         EditUnlockText(handle);
     } else text = EditGetDocText(&length);
+    PrintingOpen(owner);
     ok = printDlg.hDC && text ? PrintJob(printDlg.hDC, text, length, printDlg.nCopies > 1 ? printDlg.nCopies : 1, firstPage, lastPage) : 0;
+    PrintingClose(owner);
     SetCursor(oldCursor ? oldCursor : LoadCursorW(NULL, IDC_ARROW));
     mem_free(text);
     if (printDlg.hDC) DeleteDC(printDlg.hDC);

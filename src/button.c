@@ -37,6 +37,7 @@ static void BtnDraw(HWND hwnd, BtnSt *state, HDC hdc, RECT client) {
     BOOL enabled = IsWindowEnabled(hwnd) ? TRUE : FALSE;
     BOOL hot = state->hot && enabled;
     COLORREF textColor = !enabled ? C_DIM : C_TEXT;
+    UINT cues = (SendMessageW(hwnd, WM_QUERYUISTATE, 0, 0) & UISF_HIDEACCEL) ? DT_HIDEPREFIX : 0;
     HGDIOBJ oldFont = SelectObject(hdc, state->font ? state->font : g_fontUI);
     FillC(hdc, &client, C_FACE);
     if (type == BS_PUSHBUTTON || type == BS_DEFPUSHBUTTON) {
@@ -48,7 +49,7 @@ static void BtnDraw(HWND hwnd, BtnSt *state, HDC hdc, RECT client) {
         FillC(hdc, &inner, state->down ? C_FACE : (hot ? C_ACCENT : C_FACE2));
         textRect = inner;
         if (state->down) OffsetRect(&textRect, 1, 1);
-        TextC(hdc, text, length, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE, (hot && !state->down) ? C_ON_ACCENT : textColor);
+        TextC(hdc, text, length, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | cues, (hot && !state->down) ? C_ON_ACCENT : textColor);
         if (state->focus && enabled) {
             RECT focusRect = inner;
             InflateRect(&focusRect, -S(3), -S(3));
@@ -81,15 +82,15 @@ static void BtnDraw(HWND hwnd, BtnSt *state, HDC hdc, RECT client) {
         textRect.left = boxSize + S(7); textRect.top = 0; textRect.right = client.right; textRect.bottom = client.bottom;
         if (hot) {
             RECT highlight = textRect;
-            DrawTextW(hdc, text, length, &highlight, DT_LEFT | DT_SINGLELINE | DT_CALCRECT);
+            DrawTextW(hdc, text, length, &highlight, DT_LEFT | DT_SINGLELINE | DT_CALCRECT | cues);
             highlight.left = textRect.left - S(4); highlight.right = highlight.right + S(4);
             highlight.top = (client.bottom - (highlight.bottom - highlight.top)) / 2 - S(2); highlight.bottom = highlight.top + (highlight.bottom - highlight.top) + S(4);
             FillC(hdc, &highlight, C_ACCENT);
         }
-        TextC(hdc, text, length, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE, hot ? C_ON_ACCENT : textColor);
+        TextC(hdc, text, length, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | cues, hot ? C_ON_ACCENT : textColor);
         if (state->focus && enabled) {
             focusRect = textRect;
-            DrawTextW(hdc, text, length, &focusRect, DT_LEFT | DT_SINGLELINE | DT_CALCRECT);
+            DrawTextW(hdc, text, length, &focusRect, DT_LEFT | DT_SINGLELINE | DT_CALCRECT | cues);
             focusRect.left = textRect.left - S(2); focusRect.right = focusRect.left + (focusRect.right - textRect.left) + S(4);
             focusRect.top = (client.bottom - (focusRect.bottom - focusRect.top)) / 2 - S(1);
             focusRect.bottom = focusRect.top + (focusRect.bottom - focusRect.top) + S(2);
@@ -160,6 +161,9 @@ static LRESULT CALLBACK BtnProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         LRESULT result = DefWindowProcW(hwnd, msg, wParam, lParam);
         InvalidateRect(hwnd, NULL, FALSE);
         return result; }
+    case WM_UPDATEUISTATE:
+        InvalidateRect(hwnd, NULL, FALSE);
+        break;
     case WM_ENABLE:
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;

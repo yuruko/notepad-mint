@@ -425,12 +425,32 @@ static HANDLE SaveSibling(const WCHAR *full, WCHAR *out, const WCHAR *extension)
     return INVALID_HANDLE_VALUE;
 }
 
+static DWORD WriteAll(HANDLE file, const BYTE *out, size_t outLen) {
+    DWORD bytesWritten, err;
+    size_t done;
+    for (done = 0; done < outLen; done += bytesWritten) {
+        if (!DocWriteFile(file, out + done, (DWORD)(outLen - done), &bytesWritten, NULL)) { err = GetLastError(); return err ? err : 29; }
+        if (!bytesWritten || bytesWritten > outLen - done) return 29;
+    }
+    return 0;
+}
+
+static DWORD SaveInPlace(HANDLE file, const BYTE *out, size_t outLen) {
+    DWORD err;
+    if (SetFilePointer(file, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER) return GetLastError();
+    err = WriteAll(file, out, outLen);
+    if (err) return err;
+    if (!SetEndOfFile(file)) return GetLastError();
+    if (!DocFlushFile(file)) { err = GetLastError(); return err ? err : 29; }
+    return 0;
+}
+
 static DWORD SaveBytes(const WCHAR *path, const BYTE *out, size_t outLen) {
     WCHAR full[PATH_CAP], temp[PATH_CAP + 64], backup[PATH_CAP + 64];
     HANDLE file = INVALID_HANDLE_VALUE, guard = INVALID_HANDLE_VALUE;
-    DWORD size, attrs, err = 0, bytesWritten, basicAttrs;
-    size_t done;
-    BOOL existed, haveTemp = FALSE, haveBackup = FALSE;
+    BY_HANDLE_FILE_INFORMATION info;
+    DWORD size, attrs, err = 0, basicAttrs;
+    BOOL existed, inPlace = FALSE, haveTemp = FALSE, haveBackup = FALSE;
     size = GetFullPathNameW(path, PATH_CAP, full, NULL);
     if (!size) return GetLastError();
     if (size >= PATH_CAP) return 206;
@@ -443,15 +463,27 @@ static DWORD SaveBytes(const WCHAR *path, const BYTE *out, size_t outLen) {
         if (attrs & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_DIRECTORY)) return 5;
         guard = CreateFileW(full, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (guard == INVALID_HANDLE_VALUE) return GetLastError();
+        if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) {
+            size = GetFinalPathNameByHandleW(guard, full, PATH_CAP, 0);
+            if (!size || size >= PATH_CAP) { err = size ? 206 : GetLastError(); goto finish; }
+            attrs = GetFileAttributesW(full);
+            if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_DIRECTORY))) { err = 5; goto finish; }
+        }
+        inPlace = GetFileInformationByHandle(guard, &info) && info.nNumberOfLinks > 1;
     }
     err = 0;
-    file = SaveSibling(full, temp, L"tmp");
-    if (file == INVALID_HANDLE_VALUE) { err = GetLastError(); goto finish; }
-    haveTemp = TRUE;
-    for (done = 0; done < outLen; done += bytesWritten) {
-        if (!DocWriteFile(file, out + done, (DWORD)(outLen - done), &bytesWritten, NULL)) { err = GetLastError(); if (!err) err = 29; goto finish; }
-        if (!bytesWritten || bytesWritten > outLen - done) { err = 29; goto finish; }
+    if (!inPlace) {
+        file = SaveSibling(full, temp, L"tmp");
+        if (file == INVALID_HANDLE_VALUE) {
+            err = GetLastError();
+            if (err != 5 || !existed) goto finish;
+            inPlace = TRUE;
+        }
     }
+    if (inPlace) { err = SaveInPlace(guard, out, outLen); goto finish; }
+    haveTemp = TRUE;
+    err = WriteAll(file, out, outLen);
+    if (err) goto finish;
     if (!DocFlushFile(file)) { err = GetLastError(); if (!err) err = 29; goto finish; }
     if (!CloseHandle(file)) { err = GetLastError(); file = INVALID_HANDLE_VALUE; goto finish; }
     file = INVALID_HANDLE_VALUE;

@@ -15,6 +15,8 @@ static WCHAR *ReplaceAllText(const WCHAR *t, int n, const WCHAR *pat, int m, con
 #endif
 API HANDLE WINAPI GetStdHandle(DWORD);
 API DWORD  WINAPI GetTempPathW(DWORD, LPWSTR);
+API BOOL   WINAPI CreateHardLinkW(LPCWSTR, LPCWSTR, void *);
+API BYTE   WINAPI CreateSymbolicLinkW(LPCWSTR, LPCWSTR, DWORD);
 API BOOL   WINAPI RemoveDirectoryW(LPCWSTR);
 API BOOL   WINAPI IsValidCodePage(UINT);
 API UINT   WINAPI GetACP(void);
@@ -234,6 +236,34 @@ static void TestStrings(void)
     Int(L"wtoi empty", wtoi(L""), 0);
     Int(L"wtoi no digits", wtoi(L"abc"), 0);
     Int(L"wtoi huge input doesn't overflow", wtoi(L"99999999999999"), 999999999);
+}
+
+static void CrlfCase(const WCHAR *name, const WCHAR *src, int maxLen, const WCHAR *want)
+{
+    int length = -1;
+    WCHAR *out = TextToCrlf(src, maxLen, &length);
+    Want(out != NULL, L"no memory", 0, 0);
+    if (out) {
+        WantStr(L"text", out, length, want, wlen(want));
+        Want(length == wlen(out), L"length %d does not match the text", length, 0);
+        mem_free(out);
+    }
+    Done(name);
+}
+
+static void TestCrlf(void)
+{
+    Group(L"util.c TextToCrlf (pasted and dropped text: every line break becomes crlf)");
+    CrlfCase(L"lf becomes crlf", L"a\nb", 100, L"a\r\nb");
+    CrlfCase(L"cr becomes crlf", L"a\rb", 100, L"a\r\nb");
+    CrlfCase(L"crlf stays", L"a\r\nb", 100, L"a\r\nb");
+    CrlfCase(L"two lf", L"\n\n", 100, L"\r\n\r\n");
+    CrlfCase(L"cr, crlf, lf mixed", L"\r\r\n\n", 100, L"\r\n\r\n\r\n");
+    CrlfCase(L"a trailing cr", L"a\r", 100, L"a\r\n");
+    CrlfCase(L"stops at a nul", L"ab\0cd", 5, L"ab");
+    CrlfCase(L"stops at maxLen", L"abcdef", 3, L"abc");
+    CrlfCase(L"a cr cut off from its lf by maxLen", L"a\r\nb", 2, L"a\r\n");
+    CrlfCase(L"empty", L"", 10, L"");
 }
 
 /* ------------------------------------------------- default document name -- */
@@ -1307,6 +1337,44 @@ static void TestDocSafety(void)
     Done(L"bounds validation leaves destination untouched");
 }
 
+static void TestDocLinks(void)
+{
+    WCHAR link[PATH_CAP];
+    BYTE *b;
+    int n;
+    DWORD er;
+    Group(L"doc.c saving through links (in place, like notepad)");
+    wcopy(link, g_dir, PATH_CAP);
+    PathJoin(link, L"hard.txt", PATH_CAP);
+    DeleteFileW(link);
+    Want(FilePut(g_file, LIT("original")), L"cannot create original", 0, 0);
+    if (CreateHardLinkW(link, g_file, NULL)) {
+        er = DocWrite(link, WLIT(L"through the link"), ENC_UTF8, EOL_CRLF, NULL);
+        Want(er == 0, L"save returned %d", (int)er, 0);
+        b = FileGet(g_file, &n);
+        WantBytes(L"the other name", b, n, LIT("through the link"));
+        mem_free(b);
+        Want(SaveArtifacts() == 0, L"in-place save leaked a sibling", 0, 0);
+        DeleteFileW(link);
+        Done(L"a hard-linked file is saved in place: every name of it shows the new text");
+    } else Skip(L"a hard-linked file is saved in place", L"the filesystem has no hard links");
+    wcopy(link, g_dir, PATH_CAP);
+    PathJoin(link, L"symbolic.txt", PATH_CAP);
+    DeleteFileW(link);
+    Want(FilePut(g_file, LIT("original")), L"cannot create original", 0, 0);
+    if (CreateSymbolicLinkW(link, g_file, 2)) {
+        er = DocWrite(link, WLIT(L"through the symbolic link"), ENC_UTF8, EOL_CRLF, NULL);
+        Want(er == 0, L"save returned %d", (int)er, 0);
+        b = FileGet(g_file, &n);
+        WantBytes(L"the target", b, n, LIT("through the symbolic link"));
+        mem_free(b);
+        Want((GetFileAttributesW(link) & FILE_ATTRIBUTE_REPARSE_POINT) != 0, L"the link was replaced by a plain file", 0, 0);
+        Want(SaveArtifacts() == 0, L"save leaked a sibling", 0, 0);
+        DeleteFileW(link);
+        Done(L"saving through a symbolic link writes the file it points at and keeps the link");
+    } else Skip(L"saving through a symbolic link", L"creating symbolic links needs developer mode or admin rights here");
+}
+
 static void TestDoc(void)
 {
     if (!TempDir()) {
@@ -1329,6 +1397,7 @@ static void TestDoc(void)
     TestDocBodySize();
     TestDocBig();
     TestDocSafety();
+    TestDocLinks();
     DeleteFileW(g_file);
     RemoveDirectoryW(g_dir);
 }
@@ -1369,6 +1438,12 @@ static void TestAssoc(void)
     cb = sizeof v; v[0] = 0;
     get(hkcu, L"Software\\Classes\\" ASSOC_PROGID L"\\shell\\open\\command", NULL, 2, NULL, v, &cb);
     Str(L"open command: the exe quoted, then \"%1\"", v, L"\"C:\\a dir\\notepad-mint.exe\" \"%1\"");
+    cb = sizeof v; v[0] = 0;
+    get(hkcu, L"Software\\Classes\\" ASSOC_PROGID L"\\shell\\print\\command", NULL, 2, NULL, v, &cb);
+    Str(L"print command (explorer > print): /p like notepad", v, L"\"C:\\a dir\\notepad-mint.exe\" /p \"%1\"");
+    cb = sizeof v; v[0] = 0;
+    get(hkcu, L"Software\\Classes\\" ASSOC_PROGID L"\\shell\\printto\\command", NULL, 2, NULL, v, &cb);
+    Str(L"printto command (a file dropped on a printer): /pt file printer driver port", v, L"\"C:\\a dir\\notepad-mint.exe\" /pt \"%1\" \"%2\" \"%3\" \"%4\"");
     cb = sizeof v; v[0] = 0; type = 0;
     get(hkcu, L"Software\\Classes\\" ASSOC_PROGID L"\\DefaultIcon", NULL, 0x0000FFFF | 0x10000000, &type, v, &cb);   /* RRF_RT_ANY | RRF_NOEXPAND */
     Want(type == 2 && wcmp(v, L"%SystemRoot%\\system32\\imageres.dll,-102") == 0, L"icon type %d", (int)type, 0);
@@ -1403,6 +1478,7 @@ void start(void)
     wsprintfW(b, L"notepad mint unit tests (system ansi code page %u)\r\n", GetACP());
     Out(b);
     TestStrings();
+    TestCrlf();
     TestDocName();
     TestPaths();
     TestRt();

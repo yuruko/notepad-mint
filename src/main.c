@@ -11,6 +11,8 @@ static WCHAR  g_title[PATH_CAP + 64];
 
 #define MIN_WIN_W 320
 #define MIN_WIN_H 140
+#define DROP_ASK  10
+#define DND_TIMER 9
 
 static void Say(const WCHAR *message) {
     MpNote(g_hwnd, APP_NAME, message);
@@ -163,7 +165,7 @@ static BOOL ConfirmOverwrite(const WCHAR *path) {
     if (!g_diskStamp.valid || !g_doc.path[0] || wcmpi(path, g_doc.path) != 0) return TRUE;
     current = DiskStamp(path);
     if (current.valid && current.size == g_diskStamp.size && current.time.dwLowDateTime == g_diskStamp.time.dwLowDateTime && current.time.dwHighDateTime == g_diskStamp.time.dwHighDateTime) return TRUE;
-    return MpAsk(g_hwnd, APP_NAME, L"this file has changed outside notepad mint or is no longer available.\n\noverwrite it with the text in this window?", L"overwrite", L"cancel", NULL, 2) == 1;
+    return MpAsk(g_hwnd, APP_NAME, L"this file has changed outside notepad mint or is no longer available.\n\noverwrite it with the text in this window?", L"&overwrite", L"cancel", NULL, 2) == 1;
 }
 
 static BOOL OpenDoc(const WCHAR *path, int force, BOOL logEntry) {
@@ -175,7 +177,7 @@ static BOOL OpenDoc(const WCHAR *path, int force, BOOL logEntry) {
         WCHAR message[PATH_CAP + 320];
         wcopy(message, path, COUNTOF(message));
         wcat(message, L"\n\nsome bytes of this file are not valid in its encoding (a broken utf-8 sequence, or an odd number of bytes for utf-16). open it anyway? they are shown as \xFFFD, and saving writes them that way. format > encoding > reopen with encoding can pick another encoding.", COUNTOF(message));
-        if (MpAsk(g_hwnd, APP_NAME, message, L"open", L"cancel", NULL, 2) != 1) return FALSE;
+        if (MpAsk(g_hwnd, APP_NAME, message, L"&open", L"cancel", NULL, 2) != 1) return FALSE;
         DocAllowLossy(TRUE);
         err = DocRead(path, &text, &length, &enc, &eol, force);
         DocAllowLossy(FALSE);
@@ -243,7 +245,7 @@ static BOOL Confirm(void) {
     wcopy(message, L"do you want to save changes to ", COUNTOF(message));
     wcat(message, AppDocName(), COUNTOF(message));
     wcat(message, L"?", COUNTOF(message));
-    switch (MpAsk(g_hwnd, APP_NAME, message, L"save", L"don't save", L"cancel", 3)) {
+    switch (MpAsk(g_hwnd, APP_NAME, message, L"&save", L"do&n't save", L"cancel", 3)) {
     case 1:  return FileSave(FALSE);
     case 2:  return TRUE;
     default: return FALSE;
@@ -273,10 +275,6 @@ static void FileOpen(void) {
     OpenDoc(path, -1, TRUE);
 }
 
-static void AppOpenPath(const WCHAR *path) {
-    if (Confirm()) OpenDoc(path, -1, TRUE);
-}
-
 static void OpenCmdFile(const WCHAR *arg, int force) {
     WCHAR full[PATH_CAP], message[PATH_CAP + 128];
     const WCHAR *name;
@@ -292,11 +290,12 @@ static void OpenCmdFile(const WCHAR *arg, int force) {
         wcopy(txtPath, full, PATH_CAP);
         wcat(txtPath, L".txt", PATH_CAP);
         if (GetFileAttributesW(txtPath) != INVALID_FILE_ATTRIBUTES) { OpenDoc(txtPath, force, TRUE); return; }
+        if (wlen(txtPath) < PATH_CAP - 1) wcopy(full, txtPath, PATH_CAP);
     }
     wcopy(message, L"cannot find the ", COUNTOF(message));
     wcat(message, full, COUNTOF(message));
     wcat(message, L" file.\n\ndo you want to create a new file?", COUNTOF(message));
-    result = MpAsk(g_hwnd, APP_NAME, message, L"yes", L"no", L"cancel", 3);
+    result = MpAsk(g_hwnd, APP_NAME, message, L"&yes", L"&no", L"cancel", 3);
     if (result == 1) {
         HANDLE file = CreateFileW(full, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
         if (file == INVALID_HANDLE_VALUE) { FileError(GetLastError(), full, TRUE); return; }
@@ -363,7 +362,7 @@ static void SetEnc(int enc) {
 static void Reopen(void) {
     int enc = g_doc.enc;
     if (!g_doc.path[0]) return;
-    if (AppIsDirty() && MpAsk(g_hwnd, APP_NAME, L"reopening the file will discard your unsaved changes.\n\ndo you want to continue?", L"yes", L"no", NULL, 2) != 1) return;
+    if (AppIsDirty() && MpAsk(g_hwnd, APP_NAME, L"reopening the file will discard your unsaved changes.\n\ndo you want to continue?", L"&yes", L"&no", NULL, 2) != 1) return;
     if (!EncDlg(g_hwnd, &enc, 1)) return;
     OpenDoc(g_doc.path, enc, FALSE);
 }
@@ -425,7 +424,7 @@ static void Cmd(int id) {
     case IDM_FILE_SAVE:     FileSave(FALSE); break;
     case IDM_FILE_SAVEAS:   FileSave(TRUE); break;
     case IDM_FILE_PAGESETUP: PageSetup(g_hwnd); break;
-    case IDM_FILE_PRINT:    PrintDoc(g_hwnd, 0); break;
+    case IDM_FILE_PRINT:    PrintDoc(g_hwnd, 0, NULL); break;
     case IDM_FILE_EXIT:     SendMessageW(g_hwnd, WM_CLOSE, 0, 0); return;
     case IDM_EDIT_UNDO:     SendMessageW(g_edit, EM_UNDO, 0, 0); break;
     case IDM_EDIT_CUT:      SendMessageW(g_edit, WM_CUT, 0, 0); break;
@@ -561,41 +560,30 @@ static unsigned MenuState(int id) {
     return 0;
 }
 
-typedef UINT (WINAPI *DragQueryFn)(HANDLE, UINT, LPWSTR, UINT);
-typedef void (WINAPI *DragFinishFn)(HANDLE);
-
-static void OnDropFiles(HANDLE drop) {
-    HMODULE shell32 = LoadLibraryW(L"shell32.dll");
-    DragQueryFn dragQueryFile = shell32 ? (DragQueryFn)GetProcAddress(shell32, "DragQueryFileW") : NULL;
-    DragFinishFn dragFinish = shell32 ? (DragFinishFn)GetProcAddress(shell32, "DragFinish") : NULL;
-    UINT count, i;
-    if (!dragQueryFile || !dragFinish) return;
-    count = dragQueryFile(drop, 0xFFFFFFFF, NULL, 0);
-    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-        int first = 1;
-        for (i = 0; i < count; i++) {
-            WCHAR path[PATH_CAP];
-            if (!dragQueryFile(drop, i, path, PATH_CAP) || IsDir(path)) continue;
-            if (first) { first = 0; AppOpenPath(path); }
-            else NewWindow(path);
-        }
-    } else if (count) {
-        size_t cap = 1;
-        WCHAR *text, *cursor;
-        for (i = 0; i < count; i++) cap += (size_t)dragQueryFile(drop, i, NULL, 0) + 2;
-        text = (WCHAR *)mem_alloc(cap * sizeof(WCHAR));
-        if (text) {
-            cursor = text;
-            for (i = 0; i < count; i++) {
-                if (i) { *cursor++ = '\r'; *cursor++ = '\n'; }
-                cursor += dragQueryFile(drop, i, cursor, dragQueryFile(drop, i, NULL, 0) + 1);
-            }
-            *cursor = 0;
-            EditInsert(text);
-            mem_free(text);
+void AppOpenFiles(const WCHAR *paths) {
+    static int busy;
+    const WCHAR *path;
+    WCHAR message[128];
+    int files = 0, opened = 0;
+    if (busy) return;
+    for (path = paths; *path; path += wlen(path) + 1) if (!IsDir(path)) files++;
+    if (!files) return;
+    busy = 1;
+    if (files > DROP_ASK) {
+        wsprintfW(message, L"open these %d files? the first one opens in this window, the others in new windows.", files);
+        if (MpAsk(g_hwnd, APP_NAME, message, L"&open", L"cancel", NULL, 2) != 1) { busy = 0; return; }
+    }
+    for (path = paths; *path; path += wlen(path) + 1) {
+        if (IsDir(path)) continue;
+        if (!opened) {
+            opened = 1;
+            if (!Confirm()) break;
+            OpenDoc(path, -1, TRUE);
+        } else {
+            NewWindow(path);
         }
     }
-    dragFinish(drop);
+    busy = 0;
 }
 
 static LRESULT OnCreate(HWND hwnd) {
@@ -637,6 +625,8 @@ static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         return g_dpi; }
     case WM_APP + 61:
         return UiProbeFontAndDialogs(wParam, lParam);
+    case WM_COPYDATA:
+        return DndProbe((const COPYDATASTRUCT *)lParam);
 #endif
     case WM_CREATE:
         return OnCreate(hwnd);
@@ -720,6 +710,7 @@ static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
         break;
     case WM_TIMER:
+        if (wParam == DND_TIMER) { KillTimer(hwnd, DND_TIMER); DndInit(hwnd); return 0; }
         AppStatusTimer(hwnd, wParam);
         return 0;
     case WM_COMMAND:
@@ -744,6 +735,7 @@ static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     case WM_SYSCOMMAND:
         DBG(L"syscmd", wParam, lParam);
         if (FrameEnabled() && (wParam & 0xFFF0) == SC_KEYMENU && lParam == ' ') {
+            MenuShowCues();
             FrameSysMenu(hwnd, -1, -1);
             return 0;
         }
@@ -761,7 +753,11 @@ static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         OnDpiChanged(hwnd, wParam, lParam);
         return 0;
     case WM_DROPFILES:
-        OnDropFiles((HANDLE)wParam);
+        DndDropFiles((HANDLE)wParam);
+        return 0;
+    case WM_APP_OPENFILES:
+        AppOpenFiles((const WCHAR *)lParam);
+        mem_free((void *)lParam);
         return 0;
     case WM_QUERYENDSESSION:
         return Confirm() ? TRUE : FALSE;
@@ -774,6 +770,7 @@ static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
+        DndShutdown();
         g_hwnd = NULL;
         PostQuitMessage(0);
         return 0;
@@ -827,9 +824,26 @@ static void CmdLineFile(WCHAR *out, int cap) {
     out[length] = 0;
 }
 
-static int CmdSwitch(WCHAR *arg) {
-    WCHAR option, *file;
+static WCHAR *CmdToken(WCHAR *text, WCHAR **next) {
+    WCHAR *start;
+    while (*text == ' ' || *text == '\t') text++;
+    if (*text == '"') { start = ++text; while (*text && *text != '"') text++; }
+    else { start = text; while (*text && *text != ' ' && *text != '\t') text++; }
+    if (*text) *text++ = 0;
+    *next = text;
+    return start;
+}
+
+static int CmdSwitch(WCHAR *arg, WCHAR *printer, int cap) {
+    WCHAR option, *file, *rest;
     int length;
+    printer[0] = 0;
+    if (arg[0] == '/' && wlow(arg[1]) == 'p' && wlow(arg[2]) == 't' && (arg[3] == ' ' || arg[3] == '\t')) {
+        file = CmdToken(arg + 4, &rest);
+        wcopy(printer, CmdToken(rest, &rest), cap);
+        memmove(arg, file, ((size_t)wlen(file) + 1) * sizeof(WCHAR));
+        return 't';
+    }
     if (arg[0] != '/' || !arg[1] || (arg[2] != ' ' && arg[2] != '\t')) return 0;
     option = wlow(arg[1]);
     if (option != 'p' && option != 'a' && option != 'w') return 0;
@@ -885,7 +899,7 @@ int mp_main(void) {
     HINSTANCE hInstance = GetModuleHandleW(NULL);
     WNDCLASSEXW windowClass;
     MSG message;
-    WCHAR arg[PATH_CAP];
+    WCHAR arg[PATH_CAP], printer[PATH_CAP];
     int option;
     UiInit(hInstance);
     PrefsInit();
@@ -906,14 +920,15 @@ int mp_main(void) {
     if (!CreateWindowExW(WS_EX_ACCEPTFILES, APP_CLASS, APP_NAME, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, 0, S(900), S(620), NULL, NULL, hInstance, NULL)) return 1;
     if (FrameEnabled()) SetWindowPos(g_hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     CmdLineFile(arg, PATH_CAP);
-    option = CmdSwitch(arg);
-    if (option == 'p') {
+    option = CmdSwitch(arg, printer, PATH_CAP);
+    if (option == 'p' || option == 't') {
         WCHAR full[PATH_CAP];
         DWORD length = arg[0] ? GetFullPathNameW(arg, PATH_CAP, full, NULL) : 0;
-        if (length && length < PATH_CAP && GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES && OpenDoc(full, -1, FALSE)) PrintDoc(g_hwnd, 1);
+        if (length && length < PATH_CAP && GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES && OpenDoc(full, -1, FALSE)) PrintDoc(g_hwnd, 1, option == 't' ? printer : NULL);
         return 0;
     }
     ShowMain();
+    SetTimer(g_hwnd, DND_TIMER, 1, NULL);
     if (arg[0]) OpenCmdFile(arg, option == 'a' ? ENC_ANSI : option == 'w' ? ENC_UTF16LE : -1);
     while (GetMessageW(&message, NULL, 0, 0) > 0) {
         HWND findDlg = FindDlgHwnd();

@@ -148,6 +148,26 @@ void PathJoin(WCHAR *dir, const WCHAR *name, int cap) {
     wcat(dir, name, cap);
 }
 
+WCHAR *TextToCrlf(const WCHAR *src, int maxLen, int *outLen) {
+    int length = 0, extra = 0, i;
+    WCHAR *out, *dst;
+    while (length < maxLen && src[length]) length++;
+    for (i = 0; i < length; i++) {
+        if (src[i] == '\r' && (i + 1 >= length || src[i + 1] != '\n')) extra++;
+        else if (src[i] == '\n' && (i == 0 || src[i - 1] != '\r')) extra++;
+    }
+    out = (WCHAR *)mem_alloc(((size_t)length + extra + 1) * sizeof(WCHAR));
+    if (!out) return NULL;
+    for (i = 0, dst = out; i < length; i++) {
+        if (src[i] == '\n' && (i == 0 || src[i - 1] != '\r')) *dst++ = '\r';
+        *dst++ = src[i];
+        if (src[i] == '\r' && (i + 1 >= length || src[i + 1] != '\n')) *dst++ = '\n';
+    }
+    *dst = 0;
+    if (outLen) *outLen = (int)(dst - out);
+    return out;
+}
+
 BOOL IsDir(const WCHAR *path) {
     DWORD attrs = GetFileAttributesW(path);
     return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);
