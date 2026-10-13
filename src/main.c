@@ -12,29 +12,29 @@ static WCHAR  g_title[PATH_CAP + 64];
 #define MIN_WIN_W 320
 #define MIN_WIN_H 140
 
-static void Say(const WCHAR *msg) {
-    MpNote(g_hwnd, APP_NAME, msg);
+static void Say(const WCHAR *message) {
+    MpNote(g_hwnd, APP_NAME, message);
 }
 
-static void FileError(DWORD er, const WCHAR *path, BOOL saving) {
-    WCHAR sys[256], msg[PATH_CAP + 320];
-    DWORD n;
-    if (er == ERR_BADCP) {
-        wcopy(sys, L"that code page isn't installed on this computer.", 256);
+static void FileError(DWORD err, const WCHAR *path, BOOL saving) {
+    WCHAR reason[256], message[PATH_CAP + 320];
+    DWORD length;
+    if (err == ERR_BADCP) {
+        wcopy(reason, L"that code page isn't installed on this computer.", 256);
     } else {
-        n = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, er, 0, sys, 256, NULL);
-        if (!n) {
-            wsprintfW(sys, L"error %lu", er);
+        length = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, err, 0, reason, 256, NULL);
+        if (!length) {
+            wsprintfW(reason, L"error %lu", err);
         } else {
-            while (n > 0 && (sys[n - 1] == '\r' || sys[n - 1] == '\n' || sys[n - 1] == ' ')) sys[--n] = 0;
-            CharLowerW(sys);
+            while (length > 0 && (reason[length - 1] == '\r' || reason[length - 1] == '\n' || reason[length - 1] == ' ')) reason[--length] = 0;
+            CharLowerW(reason);
         }
     }
-    wcopy(msg, saving ? L"cannot save the " : L"cannot open the ", COUNTOF(msg));
-    wcat(msg, path, COUNTOF(msg));
-    wcat(msg, L" file.\n\n", COUNTOF(msg));
-    wcat(msg, sys, COUNTOF(msg));
-    Say(msg);
+    wcopy(message, saving ? L"cannot save the " : L"cannot open the ", COUNTOF(message));
+    wcat(message, path, COUNTOF(message));
+    wcat(message, L" file.\n\n", COUNTOF(message));
+    wcat(message, reason, COUNTOF(message));
+    Say(message);
 }
 
 static void FocusEdit(void) {
@@ -42,14 +42,14 @@ static void FocusEdit(void) {
 }
 
 static HWND OtherFocus(void) {
-    HWND f = GetFocus();
-    return f && f != g_edit && f != g_hwnd ? f : NULL;
+    HWND focus = GetFocus();
+    return focus && focus != g_edit && focus != g_hwnd ? focus : NULL;
 }
 
 static void NewDocName(void) {
-    SYSTEMTIME st;
-    GetLocalTime(&st);
-    DefaultDocName(PrefsTakeDocName(DocNameClock(&st)), g_doc.name, COUNTOF(g_doc.name));
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    DefaultDocName(PrefsTakeDocName(DocNameClock(&now)), g_doc.name, COUNTOF(g_doc.name));
 }
 
 const WCHAR *AppDocName(void) {
@@ -57,47 +57,47 @@ const WCHAR *AppDocName(void) {
 }
 
 void AppUpdateTitle(void) {
-    WCHAR t[PATH_CAP + 64];
-    t[0] = 0;
-    if (AppIsDirty()) wcopy(t, L"*", COUNTOF(t));
-    wcat(t, AppDocName(), COUNTOF(t));
-    wcat(t, TITLE_TAIL, COUNTOF(t));
-    if (wcmp(t, g_title) != 0) {
-        wcopy(g_title, t, COUNTOF(g_title));
-        SetWindowTextW(g_hwnd, t);
+    WCHAR title[PATH_CAP + 64];
+    title[0] = 0;
+    if (AppIsDirty()) wcopy(title, L"*", COUNTOF(title));
+    wcat(title, AppDocName(), COUNTOF(title));
+    wcat(title, TITLE_TAIL, COUNTOF(title));
+    if (wcmp(title, g_title) != 0) {
+        wcopy(g_title, title, COUNTOF(g_title));
+        SetWindowTextW(g_hwnd, title);
     }
 }
 
-static void EditArea(RECT *r) {
-    RECT cr;
-    int sh = g_pf.statusbar ? StatusHeight() : 0;
-    GetClientRect(g_hwnd, &cr);
-    r->left = 0;
-    r->top = FrameHeight() + MenuBarHeight();
-    r->right = cr.right;
-    r->bottom = cr.bottom - sh;
-    if (r->bottom < r->top + 4) r->bottom = r->top + 4;
-    if (EditIsRtl()) r->left -= S(SBAR_TRIM);
-    else r->right += S(SBAR_TRIM);
-    r->bottom += S(SBAR_TRIM);
+static void EditArea(RECT *area) {
+    RECT client;
+    int statusHeight = g_pf.statusbar ? StatusHeight() : 0;
+    GetClientRect(g_hwnd, &client);
+    area->left = 0;
+    area->top = FrameHeight() + MenuBarHeight();
+    area->right = client.right;
+    area->bottom = client.bottom - statusHeight;
+    if (area->bottom < area->top + 4) area->bottom = area->top + 4;
+    if (EditIsRtl()) area->left -= S(SBAR_TRIM);
+    else area->right += S(SBAR_TRIM);
+    area->bottom += S(SBAR_TRIM);
 }
 
 static void Layout(void) {
-    RECT cr, f;
-    HDWP dp;
-    int sh = g_pf.statusbar ? StatusHeight() : 0;
-    GetClientRect(g_hwnd, &cr);
-    EditArea(&f);
-    dp = BeginDeferWindowPos(3);
-    if (dp && g_bar) dp = DeferWindowPos(dp, g_bar, NULL, 0, FrameHeight(), cr.right, MenuBarHeight(), SWP_NOZORDER | SWP_NOACTIVATE);
-    if (dp && g_edit) dp = DeferWindowPos(dp, g_edit, HWND_BOTTOM, f.left, f.top, f.right - f.left, f.bottom - f.top, SWP_NOACTIVATE);
-    if (dp && g_status && sh) dp = DeferWindowPos(dp, g_status, NULL, 0, cr.bottom - sh, cr.right, sh, SWP_NOZORDER | SWP_NOACTIVATE);
-    if (!dp || !EndDeferWindowPos(dp)) {
-        if (g_bar) MoveWindow(g_bar, 0, FrameHeight(), cr.right, MenuBarHeight(), TRUE);
-        if (g_edit) { SetWindowPos(g_edit, HWND_BOTTOM, f.left, f.top, f.right - f.left, f.bottom - f.top, SWP_NOACTIVATE); InvalidateRect(g_edit, NULL, TRUE); }
-        if (g_status && sh) MoveWindow(g_status, 0, cr.bottom - sh, cr.right, sh, TRUE);
+    RECT client, editRect;
+    HDWP defer;
+    int statusHeight = g_pf.statusbar ? StatusHeight() : 0;
+    GetClientRect(g_hwnd, &client);
+    EditArea(&editRect);
+    defer = BeginDeferWindowPos(3);
+    if (defer && g_bar) defer = DeferWindowPos(defer, g_bar, NULL, 0, FrameHeight(), client.right, MenuBarHeight(), SWP_NOZORDER | SWP_NOACTIVATE);
+    if (defer && g_edit) defer = DeferWindowPos(defer, g_edit, HWND_BOTTOM, editRect.left, editRect.top, editRect.right - editRect.left, editRect.bottom - editRect.top, SWP_NOACTIVATE);
+    if (defer && g_status && statusHeight) defer = DeferWindowPos(defer, g_status, NULL, 0, client.bottom - statusHeight, client.right, statusHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+    if (!defer || !EndDeferWindowPos(defer)) {
+        if (g_bar) MoveWindow(g_bar, 0, FrameHeight(), client.right, MenuBarHeight(), TRUE);
+        if (g_edit) { SetWindowPos(g_edit, HWND_BOTTOM, editRect.left, editRect.top, editRect.right - editRect.left, editRect.bottom - editRect.top, SWP_NOACTIVATE); InvalidateRect(g_edit, NULL, TRUE); }
+        if (g_status && statusHeight) MoveWindow(g_status, 0, client.bottom - statusHeight, client.right, statusHeight, TRUE);
     }
-    if (g_status) ShowWindow(g_status, sh ? SW_SHOW : SW_HIDE);
+    if (g_status) ShowWindow(g_status, statusHeight ? SW_SHOW : SW_HIDE);
     InvalidateRect(g_hwnd, NULL, FALSE);
 }
 
@@ -111,10 +111,10 @@ static void SetRtl(BOOL rtl) {
 }
 
 static void AutoDir(void) {
-    int d;
+    int direction;
     if (g_dirManual) return;
-    d = EditStrongDir(DIR_SCAN);
-    if (d) SetRtl(d == 2);
+    direction = EditStrongDir(DIR_SCAN);
+    if (direction) SetRtl(direction == 2);
 }
 
 static void MarkChanged(void) {
@@ -124,8 +124,8 @@ static void MarkChanged(void) {
 
 static void NewWindow(const WCHAR *file) {
     WCHAR exe[PATH_CAP], cmd[PATH_CAP * 2 + 8];
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
+    STARTUPINFOW startupInfo;
+    PROCESS_INFORMATION processInfo;
     GetModuleFileNameW(NULL, exe, PATH_CAP);
     wcopy(cmd, L"\"", COUNTOF(cmd));
     wcat(cmd, exe, COUNTOF(cmd));
@@ -135,11 +135,11 @@ static void NewWindow(const WCHAR *file) {
         wcat(cmd, file, COUNTOF(cmd));
         wcat(cmd, L"\"", COUNTOF(cmd));
     }
-    memset(&si, 0, sizeof si);
-    si.cb = sizeof si;
-    if (CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
+    memset(&startupInfo, 0, sizeof startupInfo);
+    startupInfo.cb = sizeof startupInfo;
+    if (CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &startupInfo, &processInfo)) {
+        CloseHandle(processInfo.hThread);
+        CloseHandle(processInfo.hProcess);
     }
 }
 
@@ -149,43 +149,43 @@ typedef struct { __int64 size; FILETIME time; int valid; } FileStamp;
 static FileStamp g_diskStamp;
 
 static FileStamp DiskStamp(const WCHAR *path) {
-    FileStamp s = { 0 };
-    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (f != INVALID_HANDLE_VALUE) {
-        s.valid = GetFileSizeEx(f, &s.size) && GetFileTime(f, NULL, NULL, &s.time);
-        CloseHandle(f);
+    FileStamp stamp = { 0 };
+    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE) {
+        stamp.valid = GetFileSizeEx(file, &stamp.size) && GetFileTime(file, NULL, NULL, &stamp.time);
+        CloseHandle(file);
     }
-    return s;
+    return stamp;
 }
 
 static BOOL ConfirmOverwrite(const WCHAR *path) {
-    FileStamp s;
+    FileStamp current;
     if (!g_diskStamp.valid || !g_doc.path[0] || wcmpi(path, g_doc.path) != 0) return TRUE;
-    s = DiskStamp(path);
-    if (s.valid && s.size == g_diskStamp.size && s.time.dwLowDateTime == g_diskStamp.time.dwLowDateTime && s.time.dwHighDateTime == g_diskStamp.time.dwHighDateTime) return TRUE;
+    current = DiskStamp(path);
+    if (current.valid && current.size == g_diskStamp.size && current.time.dwLowDateTime == g_diskStamp.time.dwLowDateTime && current.time.dwHighDateTime == g_diskStamp.time.dwHighDateTime) return TRUE;
     return MpAsk(g_hwnd, APP_NAME, L"this file has changed outside notepad mint or is no longer available.\n\noverwrite it with the text in this window?", L"overwrite", L"cancel", NULL, 2) == 1;
 }
 
 static BOOL OpenDoc(const WCHAR *path, int force, BOOL logEntry) {
-    WCHAR *t;
-    int len, enc, eol, logFile;
+    WCHAR *text;
+    int length, enc, eol, logFile;
     FileStamp stamp = DiskStamp(path);
-    DWORD er = DocRead(path, &t, &len, &enc, &eol, force);
-    if (er == ERR_LOSSY) {
-        WCHAR msg[PATH_CAP + 320];
-        wcopy(msg, path, COUNTOF(msg));
-        wcat(msg, L"\n\nsome bytes of this file are not valid in its encoding (a broken utf-8 sequence, or an odd number of bytes for utf-16). open it anyway? they are shown as \xFFFD, and saving writes them that way. format > encoding > reopen with encoding can pick another encoding.", COUNTOF(msg));
-        if (MpAsk(g_hwnd, APP_NAME, msg, L"open", L"cancel", NULL, 2) != 1) return FALSE;
+    DWORD err = DocRead(path, &text, &length, &enc, &eol, force);
+    if (err == ERR_LOSSY) {
+        WCHAR message[PATH_CAP + 320];
+        wcopy(message, path, COUNTOF(message));
+        wcat(message, L"\n\nsome bytes of this file are not valid in its encoding (a broken utf-8 sequence, or an odd number of bytes for utf-16). open it anyway? they are shown as \xFFFD, and saving writes them that way. format > encoding > reopen with encoding can pick another encoding.", COUNTOF(message));
+        if (MpAsk(g_hwnd, APP_NAME, message, L"open", L"cancel", NULL, 2) != 1) return FALSE;
         DocAllowLossy(TRUE);
-        er = DocRead(path, &t, &len, &enc, &eol, force);
+        err = DocRead(path, &text, &length, &enc, &eol, force);
         DocAllowLossy(FALSE);
     }
-    if (er) { FileError(er, path, FALSE); return FALSE; }
-    if (!EditSetDocText(t)) { mem_free(t); FileError(ERR_NOMEM, path, FALSE); return FALSE; }
+    if (err) { FileError(err, path, FALSE); return FALSE; }
+    if (!EditSetDocText(text)) { mem_free(text); FileError(ERR_NOMEM, path, FALSE); return FALSE; }
     g_dirManual = 0;
     SetRtl(EditStrongDir(DIR_SCAN) == 2);
-    logFile = len >= 4 && t[0] == '.' && t[1] == 'L' && t[2] == 'O' && t[3] == 'G';
-    mem_free(t);
+    logFile = length >= 4 && text[0] == '.' && text[1] == 'L' && text[2] == 'O' && text[3] == 'G';
+    mem_free(text);
     wcopy(g_doc.path, path, PATH_CAP);
     g_doc.enc = enc;
     g_doc.eol = eol;
@@ -199,23 +199,23 @@ static BOOL OpenDoc(const WCHAR *path, int force, BOOL logEntry) {
 }
 
 static BOOL WriteDoc(const WCHAR *path, int enc, int eol) {
-    void *h = NULL;
-    int len = 0;
-    const WCHAR *t;
+    void *lock = NULL;
+    int length = 0;
+    const WCHAR *text;
     BOOL lossy = FALSE;
-    DWORD er;
+    DWORD err;
     if (!ConfirmOverwrite(path)) return FALSE;
-    t = EditLockText(&h, &len);
-    er = t ? DocWrite(path, t, len, enc, eol, &lossy) : ERR_NOMEM;
-    EditUnlockText(h);
-    if (er == ERR_LOSSY) {
+    text = EditLockText(&lock, &length);
+    err = text ? DocWrite(path, text, length, enc, eol, &lossy) : ERR_NOMEM;
+    EditUnlockText(lock);
+    if (err == ERR_LOSSY) {
         if (MpAsk(g_hwnd, APP_NAME, L"this file contains characters in unicode format which will be lost if you save this file in this encoding. to keep the unicode information, click cancel below and then pick one of the unicode options in the encoding menu.\n\ncontinue?", L"ok", L"cancel", NULL, 2) != 1) return FALSE;
         lossy = TRUE;
-        t = EditLockText(&h, &len);
-        er = t ? DocWrite(path, t, len, enc, eol, &lossy) : ERR_NOMEM;
-        EditUnlockText(h);
+        text = EditLockText(&lock, &length);
+        err = text ? DocWrite(path, text, length, enc, eol, &lossy) : ERR_NOMEM;
+        EditUnlockText(lock);
     }
-    if (er) { FileError(er, path, TRUE); return FALSE; }
+    if (err) { FileError(err, path, TRUE); return FALSE; }
     wcopy(g_doc.path, path, PATH_CAP);
     g_doc.enc = enc;
     g_doc.eol = eol;
@@ -238,12 +238,12 @@ static BOOL FileSave(BOOL saveAs) {
 }
 
 static BOOL Confirm(void) {
-    WCHAR msg[PATH_CAP + 64];
+    WCHAR message[PATH_CAP + 64];
     if (!AppIsDirty()) return TRUE;
-    wcopy(msg, L"do you want to save changes to ", COUNTOF(msg));
-    wcat(msg, AppDocName(), COUNTOF(msg));
-    wcat(msg, L"?", COUNTOF(msg));
-    switch (MpAsk(g_hwnd, APP_NAME, msg, L"save", L"don't save", L"cancel", 3)) {
+    wcopy(message, L"do you want to save changes to ", COUNTOF(message));
+    wcat(message, AppDocName(), COUNTOF(message));
+    wcat(message, L"?", COUNTOF(message));
+    switch (MpAsk(g_hwnd, APP_NAME, message, L"save", L"don't save", L"cancel", 3)) {
     case 1:  return FileSave(FALSE);
     case 2:  return TRUE;
     default: return FALSE;
@@ -278,61 +278,61 @@ static void AppOpenPath(const WCHAR *path) {
 }
 
 static void OpenCmdFile(const WCHAR *arg, int force) {
-    WCHAR full[PATH_CAP], msg[PATH_CAP + 128];
-    const WCHAR *nm;
+    WCHAR full[PATH_CAP], message[PATH_CAP + 128];
+    const WCHAR *name;
     BOOL dot = FALSE;
-    int r;
-    r = (int)GetFullPathNameW(arg, PATH_CAP, full, NULL);
-    if (!r || r >= PATH_CAP) { FileError(r >= PATH_CAP ? 206 : GetLastError(), arg, FALSE); return; }
+    int result;
+    result = (int)GetFullPathNameW(arg, PATH_CAP, full, NULL);
+    if (!result || result >= PATH_CAP) { FileError(result >= PATH_CAP ? 206 : GetLastError(), arg, FALSE); return; }
     if (IsDir(full)) return;
     if (GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES) { OpenDoc(full, force, TRUE); return; }
-    for (nm = PathName(arg); *nm; nm++) if (*nm == '.') dot = TRUE;
+    for (name = PathName(arg); *name; name++) if (*name == '.') dot = TRUE;
     if (!dot) {
-        WCHAR t[PATH_CAP];
-        wcopy(t, full, PATH_CAP);
-        wcat(t, L".txt", PATH_CAP);
-        if (GetFileAttributesW(t) != INVALID_FILE_ATTRIBUTES) { OpenDoc(t, force, TRUE); return; }
+        WCHAR txtPath[PATH_CAP];
+        wcopy(txtPath, full, PATH_CAP);
+        wcat(txtPath, L".txt", PATH_CAP);
+        if (GetFileAttributesW(txtPath) != INVALID_FILE_ATTRIBUTES) { OpenDoc(txtPath, force, TRUE); return; }
     }
-    wcopy(msg, L"cannot find the ", COUNTOF(msg));
-    wcat(msg, full, COUNTOF(msg));
-    wcat(msg, L" file.\n\ndo you want to create a new file?", COUNTOF(msg));
-    r = MpAsk(g_hwnd, APP_NAME, msg, L"yes", L"no", L"cancel", 3);
-    if (r == 1) {
-        HANDLE f = CreateFileW(full, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (f == INVALID_HANDLE_VALUE) { FileError(GetLastError(), full, TRUE); return; }
-        CloseHandle(f);
+    wcopy(message, L"cannot find the ", COUNTOF(message));
+    wcat(message, full, COUNTOF(message));
+    wcat(message, L" file.\n\ndo you want to create a new file?", COUNTOF(message));
+    result = MpAsk(g_hwnd, APP_NAME, message, L"yes", L"no", L"cancel", 3);
+    if (result == 1) {
+        HANDLE file = CreateFileW(full, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (file == INVALID_HANDLE_VALUE) { FileError(GetLastError(), full, TRUE); return; }
+        CloseHandle(file);
         wcopy(g_doc.path, full, PATH_CAP);
         g_diskStamp = DiskStamp(full);
         AppUpdateTitle();
         AppUpdateStatus();
-    } else if (r == 3) {
+    } else if (result == 3) {
         PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
     }
 }
 
-static void FormatTimeDate(WCHAR *b) {
-    SYSTEMTIME st;
-    int n;
-    b[0] = 0;
-    GetLocalTime(&st);
-    n = GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, b, 64);
-    if (n > 0) b[n - 1] = ' '; else { b[0] = ' '; n = 1; }
-    GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, b + n, 64);
+static void FormatTimeDate(WCHAR *stamp) {
+    SYSTEMTIME now;
+    int length;
+    stamp[0] = 0;
+    GetLocalTime(&now);
+    length = GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &now, NULL, stamp, 64);
+    if (length > 0) stamp[length - 1] = ' '; else { stamp[0] = ' '; length = 1; }
+    GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &now, NULL, stamp + length, 64);
 }
 
 static void InsertTimeDate(void) {
-    WCHAR b[160] = { 0 };
-    FormatTimeDate(b);
-    EditInsert(b);
+    WCHAR stamp[160] = { 0 };
+    FormatTimeDate(stamp);
+    EditInsert(stamp);
 }
 
 static void AppendLogStamp(void) {
-    WCHAR b[168] = L"\r\n";
+    WCHAR stamp[168] = L"\r\n";
     int end = GetWindowTextLengthW(g_edit);
-    FormatTimeDate(b + 2);
-    wcat(b, L"\r\n", COUNTOF(b));
+    FormatTimeDate(stamp + 2);
+    wcat(stamp, L"\r\n", COUNTOF(stamp));
     SendMessageW(g_edit, EM_SETSEL, (WPARAM)end, (LPARAM)end);
-    EditInsert(b);
+    EditInsert(stamp);
 }
 
 static void ToggleWrap(void) {
@@ -348,33 +348,33 @@ static void ToggleWrap(void) {
     AppUpdateStatus();
 }
 
-static void SetEol(int e) {
-    if (g_doc.eol == e) return;
-    g_doc.eol = e;
+static void SetEol(int eol) {
+    if (g_doc.eol == eol) return;
+    g_doc.eol = eol;
     MarkChanged();
 }
 
-static void SetEnc(int e) {
-    if (g_doc.enc == e) return;
-    g_doc.enc = e;
+static void SetEnc(int enc) {
+    if (g_doc.enc == enc) return;
+    g_doc.enc = enc;
     MarkChanged();
 }
 
 static void Reopen(void) {
-    int e = g_doc.enc;
+    int enc = g_doc.enc;
     if (!g_doc.path[0]) return;
     if (AppIsDirty() && MpAsk(g_hwnd, APP_NAME, L"reopening the file will discard your unsaved changes.\n\ndo you want to continue?", L"yes", L"no", NULL, 2) != 1) return;
-    if (!EncDlg(g_hwnd, &e, 1)) return;
-    OpenDoc(g_doc.path, e, FALSE);
+    if (!EncDlg(g_hwnd, &enc, 1)) return;
+    OpenDoc(g_doc.path, enc, FALSE);
 }
 
-static BOOL CALLBACK RethemeWnd(HWND h, LPARAM l) {
-    WCHAR cn[32];
-    (void)l;
-    if (!GetClassNameW(h, cn, 32)) return TRUE;
-    if (wcmp(cn, APP_CLASS) != 0 && !(cn[0] == 'm' && cn[1] == 'p' && cn[2] == '_')) return TRUE;
-    if ((GetWindowLongPtrW(h, GWL_STYLE) & WS_CAPTION) == WS_CAPTION) DarkFrame(h, h == GetActiveWindow());
-    RedrawWindow(h, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+static BOOL CALLBACK RethemeWnd(HWND hwnd, LPARAM lParam) {
+    WCHAR className[32];
+    (void)lParam;
+    if (!GetClassNameW(hwnd, className, 32)) return TRUE;
+    if (wcmp(className, APP_CLASS) != 0 && !(className[0] == 'm' && className[1] == 'p' && className[2] == '_')) return TRUE;
+    if ((GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CAPTION) == WS_CAPTION) DarkFrame(hwnd, hwnd == GetActiveWindow());
+    RedrawWindow(hwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
     return TRUE;
 }
 
@@ -397,22 +397,22 @@ static void SetDefaultEditor(void) {
     typedef HINSTANCE (WINAPI *ShellExecFn)(HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, int);
     typedef void (WINAPI *ChangeFn)(LONG, UINT, const void *, const void *);
     WCHAR exe[PATH_CAP];
-    HMODULE sh;
+    HMODULE shell32;
     BOOL machine;
-    DWORD n = GetModuleFileNameW(NULL, exe, PATH_CAP);
-    if (!n || n >= PATH_CAP) return;
+    DWORD length = GetModuleFileNameW(NULL, exe, PATH_CAP);
+    if (!length || length >= PATH_CAP) return;
     machine = AssocMachineHas(exe);
     if (!machine && !AssocRegisterUser(exe)) {
         Say(L"windows didn't let notepad mint register itself for text files.");
         return;
     }
-    sh = LoadLibraryW(L"shell32.dll");
-    if (!sh) return;
+    shell32 = LoadLibraryW(L"shell32.dll");
+    if (!shell32) return;
     {
-        ChangeFn ch = (ChangeFn)GetProcAddress(sh, "SHChangeNotify");
-        ShellExecFn ex = (ShellExecFn)GetProcAddress(sh, "ShellExecuteW");
-        if (ch && !machine) ch(0x08000000, 0, NULL, NULL);
-        if (ex) ex(g_hwnd, L"open", machine ? L"ms-settings:defaultapps?registeredAppMachine=" ASSOC_REGAPP : L"ms-settings:defaultapps?registeredAppUser=" ASSOC_REGAPP, NULL, NULL, SW_SHOWNORMAL);
+        ChangeFn changeNotify = (ChangeFn)GetProcAddress(shell32, "SHChangeNotify");
+        ShellExecFn shellExecute = (ShellExecFn)GetProcAddress(shell32, "ShellExecuteW");
+        if (changeNotify && !machine) changeNotify(0x08000000, 0, NULL, NULL);
+        if (shellExecute) shellExecute(g_hwnd, L"open", machine ? L"ms-settings:defaultapps?registeredAppMachine=" ASSOC_REGAPP : L"ms-settings:defaultapps?registeredAppUser=" ASSOC_REGAPP, NULL, NULL, SW_SHOWNORMAL);
     }
 }
 
@@ -438,8 +438,8 @@ static void Cmd(int id) {
     case IDM_EDIT_FINDPREV: FindNext(1); return;
     case IDM_EDIT_GOTO:     GotoDlg(g_hwnd); break;
     case IDM_EDIT_SELALL: {
-        HWND f = OtherFocus();
-        if (f) { SendMessageW(f, EM_SETSEL, 0, (LPARAM)-1); return; }
+        HWND focus = OtherFocus();
+        if (focus) { SendMessageW(focus, EM_SETSEL, 0, (LPARAM)-1); return; }
         SendMessageW(g_edit, EM_SETSEL, 0, (LPARAM)-1);
         break; }
     case IDM_EDIT_TIMEDATE: if (OtherFocus()) return; InsertTimeDate(); break;
@@ -460,8 +460,8 @@ static void Cmd(int id) {
     case IDM_ENC_UTF16BE:   SetEnc(ENC_UTF16BE); break;
     case IDM_ENC_ANSI:      SetEnc(ENC_ANSI); break;
     case IDM_ENC_OTHER: {
-        int e = g_doc.enc;
-        if (EncDlg(g_hwnd, &e, 0)) SetEnc(e);
+        int enc = g_doc.enc;
+        if (EncDlg(g_hwnd, &enc, 0)) SetEnc(enc);
         break; }
     case IDM_ENC_REOPEN:    Reopen(); break;
     case IDM_RTL:           g_dirManual = 1; SetRtl(!EditIsRtl()); break;
@@ -488,14 +488,14 @@ static void Cmd(int id) {
     case IDM_RECENT_CLEAR:  RecentClear(); break;
     default:
         if (id >= IDM_RECENT_BASE && id < IDM_RECENT_BASE + RECENT_MAX) {
-            WCHAR p[PATH_CAP];
-            if (RecentPath(id - IDM_RECENT_BASE, p, COUNTOF(p))) {
-                if (Confirm() && !OpenDoc(p, -1, TRUE) && GetFileAttributesW(p) == INVALID_FILE_ATTRIBUTES) RecentRemove(p);
+            WCHAR path[PATH_CAP];
+            if (RecentPath(id - IDM_RECENT_BASE, path, COUNTOF(path))) {
+                if (Confirm() && !OpenDoc(path, -1, TRUE) && GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) RecentRemove(path);
             }
         } else if (id >= IDM_UCC_BASE && id < IDM_UCC_BASE + 17) {
-            WCHAR s[2];
-            s[0] = g_ucc[id - IDM_UCC_BASE]; s[1] = 0;
-            EditInsert(s);
+            WCHAR text[2];
+            text[0] = g_ucc[id - IDM_UCC_BASE]; text[1] = 0;
+            EditInsert(text);
         }
         break;
     }
@@ -523,7 +523,7 @@ void AppApplyPrefs(void) {
 }
 
 static unsigned MenuState(int id) {
-    unsigned on = MS_CHECK | MS_RADIO;
+    unsigned radio = MS_CHECK | MS_RADIO;
     switch (id) {
     case IDM_EDIT_UNDO:     return SendMessageW(g_edit, EM_CANUNDO, 0, 0) ? 0 : MS_GRAY;
     case IDM_EDIT_CUT:
@@ -536,24 +536,24 @@ static unsigned MenuState(int id) {
     case IDM_VIEW_STATUS:   return g_pf.statusbar ? MS_CHECK : 0;
     case IDM_RTL:           return EditIsRtl() ? MS_CHECK : 0;
     case IDM_RECENT_NONE:   return MS_GRAY;
-    case IDM_TAB_2:         return g_pf.tab == 2 ? on : 0;
-    case IDM_TAB_4:         return g_pf.tab == 4 ? on : 0;
-    case IDM_TAB_8:         return g_pf.tab == 8 ? on : 0;
-    case IDM_EOL_CRLF:      return g_doc.eol == EOL_CRLF ? on : 0;
-    case IDM_EOL_LF:        return g_doc.eol == EOL_LF ? on : 0;
-    case IDM_EOL_CR:        return g_doc.eol == EOL_CR ? on : 0;
-    case IDM_ENC_UTF8:      return g_doc.enc == ENC_UTF8 ? on : 0;
-    case IDM_ENC_UTF8BOM:   return g_doc.enc == ENC_UTF8BOM ? on : 0;
-    case IDM_ENC_UTF16LE:   return g_doc.enc == ENC_UTF16LE ? on : 0;
-    case IDM_ENC_UTF16BE:   return g_doc.enc == ENC_UTF16BE ? on : 0;
-    case IDM_ENC_ANSI:      return g_doc.enc == ENC_ANSI ? on : 0;
-    case IDM_ENC_OTHER:     return g_doc.enc >= ENC_CP_MIN ? on : 0;
+    case IDM_TAB_2:         return g_pf.tab == 2 ? radio : 0;
+    case IDM_TAB_4:         return g_pf.tab == 4 ? radio : 0;
+    case IDM_TAB_8:         return g_pf.tab == 8 ? radio : 0;
+    case IDM_EOL_CRLF:      return g_doc.eol == EOL_CRLF ? radio : 0;
+    case IDM_EOL_LF:        return g_doc.eol == EOL_LF ? radio : 0;
+    case IDM_EOL_CR:        return g_doc.eol == EOL_CR ? radio : 0;
+    case IDM_ENC_UTF8:      return g_doc.enc == ENC_UTF8 ? radio : 0;
+    case IDM_ENC_UTF8BOM:   return g_doc.enc == ENC_UTF8BOM ? radio : 0;
+    case IDM_ENC_UTF16LE:   return g_doc.enc == ENC_UTF16LE ? radio : 0;
+    case IDM_ENC_UTF16BE:   return g_doc.enc == ENC_UTF16BE ? radio : 0;
+    case IDM_ENC_ANSI:      return g_doc.enc == ENC_ANSI ? radio : 0;
+    case IDM_ENC_OTHER:     return g_doc.enc >= ENC_CP_MIN ? radio : 0;
     case IDM_ZOOM_IN:       return EditZoomCan(1) ? 0 : MS_GRAY;
     case IDM_ZOOM_OUT:      return EditZoomCan(-1) ? 0 : MS_GRAY;
     case IDM_ZOOM_RESET:    return g_pf.cur != g_pf.pt ? 0 : MS_GRAY;
     case IDM_ENC_REOPEN:    return g_doc.path[0] ? 0 : MS_GRAY;
-    case IDM_THEME_DARK:    return g_pf.theme == THEME_DARK ? on : 0;
-    case IDM_THEME_LIGHT:   return g_pf.theme == THEME_LIGHT ? on : 0;
+    case IDM_THEME_DARK:    return g_pf.theme == THEME_DARK ? radio : 0;
+    case IDM_THEME_LIGHT:   return g_pf.theme == THEME_LIGHT ? radio : 0;
     case IDM_SYS_RESTORE: case IDM_SYS_MOVE: case IDM_SYS_SIZE:
     case IDM_SYS_MIN: case IDM_SYS_MAX: case IDM_SYS_CLOSE:
         return FrameSysState(id);
@@ -565,48 +565,48 @@ typedef UINT (WINAPI *DragQueryFn)(HANDLE, UINT, LPWSTR, UINT);
 typedef void (WINAPI *DragFinishFn)(HANDLE);
 
 static void OnDropFiles(HANDLE drop) {
-    HMODULE sh = LoadLibraryW(L"shell32.dll");
-    DragQueryFn q = sh ? (DragQueryFn)GetProcAddress(sh, "DragQueryFileW") : NULL;
-    DragFinishFn fin = sh ? (DragFinishFn)GetProcAddress(sh, "DragFinish") : NULL;
-    UINT n, i;
-    if (!q || !fin) return;
-    n = q(drop, 0xFFFFFFFF, NULL, 0);
+    HMODULE shell32 = LoadLibraryW(L"shell32.dll");
+    DragQueryFn dragQueryFile = shell32 ? (DragQueryFn)GetProcAddress(shell32, "DragQueryFileW") : NULL;
+    DragFinishFn dragFinish = shell32 ? (DragFinishFn)GetProcAddress(shell32, "DragFinish") : NULL;
+    UINT count, i;
+    if (!dragQueryFile || !dragFinish) return;
+    count = dragQueryFile(drop, 0xFFFFFFFF, NULL, 0);
     if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
         int first = 1;
-        for (i = 0; i < n; i++) {
-            WCHAR p[PATH_CAP];
-            if (!q(drop, i, p, PATH_CAP) || IsDir(p)) continue;
-            if (first) { first = 0; AppOpenPath(p); }
-            else NewWindow(p);
+        for (i = 0; i < count; i++) {
+            WCHAR path[PATH_CAP];
+            if (!dragQueryFile(drop, i, path, PATH_CAP) || IsDir(path)) continue;
+            if (first) { first = 0; AppOpenPath(path); }
+            else NewWindow(path);
         }
-    } else if (n) {
+    } else if (count) {
         size_t cap = 1;
-        WCHAR *text, *d;
-        for (i = 0; i < n; i++) cap += (size_t)q(drop, i, NULL, 0) + 2;
+        WCHAR *text, *cursor;
+        for (i = 0; i < count; i++) cap += (size_t)dragQueryFile(drop, i, NULL, 0) + 2;
         text = (WCHAR *)mem_alloc(cap * sizeof(WCHAR));
         if (text) {
-            d = text;
-            for (i = 0; i < n; i++) {
-                if (i) { *d++ = '\r'; *d++ = '\n'; }
-                d += q(drop, i, d, q(drop, i, NULL, 0) + 1);
+            cursor = text;
+            for (i = 0; i < count; i++) {
+                if (i) { *cursor++ = '\r'; *cursor++ = '\n'; }
+                cursor += dragQueryFile(drop, i, cursor, dragQueryFile(drop, i, NULL, 0) + 1);
             }
-            *d = 0;
+            *cursor = 0;
             EditInsert(text);
             mem_free(text);
         }
     }
-    fin(drop);
+    dragFinish(drop);
 }
 
-static LRESULT OnCreate(HWND h) {
-    g_hwnd = h;
-    UiSetDpi(UiDpiForWindow(h));
-    DarkFrame(h, 1);
+static LRESULT OnCreate(HWND hwnd) {
+    g_hwnd = hwnd;
+    UiSetDpi(UiDpiForWindow(hwnd));
+    DarkFrame(hwnd, 1);
     FontResolve(g_pf.font);
     UiSetChromeFont(g_pf.font);
-    g_bar = MenuBarCreate(h, MenuState);
-    g_status = StatusCreate(h);
-    if (!EditCreate(h)) return -1;
+    g_bar = MenuBarCreate(hwnd, MenuState);
+    g_status = StatusCreate(hwnd);
+    if (!EditCreate(hwnd)) return -1;
     AppMarkClean();
     Layout();
     AppUpdateTitle();
@@ -614,73 +614,73 @@ static LRESULT OnCreate(HWND h) {
     return 0;
 }
 
-static void OnDpiChanged(HWND h, WPARAM w, LPARAM l) {
-    const RECT *r = (const RECT *)l;
-    UiSetDpi((int)HIWORD(w));
+static void OnDpiChanged(HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    const RECT *suggested = (const RECT *)lParam;
+    UiSetDpi((int)HIWORD(wParam));
     MenuBarRefont(g_bar);
     StatusRefont(g_status);
-    FrameRefont(h);
+    FrameRefont(hwnd);
     EditApplyFont();
     SbarTrim(g_edit, S(SBAR_TRIM), S(SBAR_TRIM));
-    SetWindowPos(h, NULL, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(hwnd, NULL, suggested->left, suggested->top, suggested->right - suggested->left, suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
     Layout();
 }
 
-static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    switch (m) {
+static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
 #ifdef SHOTDC
     case WM_APP + 60: {
         RECT probeRect;
-        int dpi = (int)w;
-        if (dpi < 96 || dpi > 768 || !GetWindowRect(h, &probeRect)) return 0;
-        OnDpiChanged(h, MAKEWPARAM(dpi, dpi), (LPARAM)&probeRect);
+        int dpi = (int)wParam;
+        if (dpi < 96 || dpi > 768 || !GetWindowRect(hwnd, &probeRect)) return 0;
+        OnDpiChanged(hwnd, MAKEWPARAM(dpi, dpi), (LPARAM)&probeRect);
         return g_dpi; }
     case WM_APP + 61:
-        return UiProbeFontAndDialogs(w, l);
+        return UiProbeFontAndDialogs(wParam, lParam);
 #endif
     case WM_CREATE:
-        return OnCreate(h);
+        return OnCreate(hwnd);
     case WM_SIZE:
         MenuCancel();
-        FrameInvalidate(h);
-        if (w != SIZE_MINIMIZED && g_edit) Layout();
+        FrameInvalidate(hwnd);
+        if (wParam != SIZE_MINIMIZED && g_edit) Layout();
         return 0;
     case WM_MOVE:
         MenuCancel();
         return 0;
     case WM_GETMINMAXINFO: {
-        RECT r;
-        MINMAXINFO *mm = (MINMAXINFO *)l;
-        r.left = 0; r.top = 0; r.right = StatusMinWidth(); r.bottom = 0;
-        if (r.right < MenuBarMinWidth()) r.right = MenuBarMinWidth();
-        UiAdjustRect(&r, WS_OVERLAPPEDWINDOW, 0);
-        mm->ptMinTrackSize.x = r.right - r.left;
-        if (mm->ptMinTrackSize.x < S(MIN_WIN_W)) mm->ptMinTrackSize.x = S(MIN_WIN_W);
-        mm->ptMinTrackSize.y = S(MIN_WIN_H);
+        RECT rect;
+        MINMAXINFO *minMaxInfo = (MINMAXINFO *)lParam;
+        rect.left = 0; rect.top = 0; rect.right = StatusMinWidth(); rect.bottom = 0;
+        if (rect.right < MenuBarMinWidth()) rect.right = MenuBarMinWidth();
+        UiAdjustRect(&rect, WS_OVERLAPPEDWINDOW, 0);
+        minMaxInfo->ptMinTrackSize.x = rect.right - rect.left;
+        if (minMaxInfo->ptMinTrackSize.x < S(MIN_WIN_W)) minMaxInfo->ptMinTrackSize.x = S(MIN_WIN_W);
+        minMaxInfo->ptMinTrackSize.y = S(MIN_WIN_H);
         return 0; }
     case WM_SETFOCUS:
         FocusEdit();
         return 0;
     case WM_ACTIVATE:
-        DBG(L"activate", LOWORD(w), l);
-        DarkFrame(h, LOWORD(w) != WA_INACTIVE);
-        FrameActive(h, LOWORD(w) != WA_INACTIVE);
-        if (LOWORD(w) != WA_INACTIVE) RecentLoad();
+        DBG(L"activate", LOWORD(wParam), lParam);
+        DarkFrame(hwnd, LOWORD(wParam) != WA_INACTIVE);
+        FrameActive(hwnd, LOWORD(wParam) != WA_INACTIVE);
+        if (LOWORD(wParam) != WA_INACTIVE) RecentLoad();
         break;
     case WM_NCACTIVATE:
-        if (FrameEnabled()) return DefWindowProcW(h, m, w, (LPARAM)-1);
+        if (FrameEnabled()) return DefWindowProcW(hwnd, msg, wParam, (LPARAM)-1);
         break;
     case WM_NCCALCSIZE:
-        return FrameNcCalc(h, w, l);
+        return FrameNcCalc(hwnd, wParam, lParam);
     case WM_NCHITTEST:
-        return FrameHitTest(h, l);
+        return FrameHitTest(hwnd, lParam);
     case WM_NCRBUTTONUP:
-        if (FrameEnabled() && w == HTCAPTION) { FrameSysMenu(h, GET_X_LPARAM(l), GET_Y_LPARAM(l)); return 0; }
+        if (FrameEnabled() && wParam == HTCAPTION) { FrameSysMenu(hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)); return 0; }
         break;
     case WM_SETTEXT: {
-        LRESULT r = DefWindowProcW(h, m, w, l);
-        FrameInvalidate(h);
-        return r; }
+        LRESULT result = DefWindowProcW(hwnd, msg, wParam, lParam);
+        FrameInvalidate(hwnd);
+        return result; }
     case WM_MOUSEMOVE:
     case WM_MOUSELEAVE:
     case WM_LBUTTONDOWN:
@@ -689,42 +689,42 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_RBUTTONUP:
     case WM_NCRBUTTONDOWN:
     case WM_CAPTURECHANGED:
-        if (FrameMsg(h, m, w, l)) return 0;
+        if (FrameMsg(hwnd, msg, wParam, lParam)) return 0;
         break;
     case WM_ACTIVATEAPP:
-        if (!w) MenuCancel();
+        if (!wParam) MenuCancel();
         break;
     case WM_CANCELMODE:
         MenuCancel();
         break;
     case WM_ERASEBKGND: {
-        HDC dc = (HDC)w;
-        RECT rc;
-        int saved = SaveDC(dc);
-        GetClientRect(h, &rc);
-        ExcludeClipRect(dc, 0, 0, rc.right, FrameHeight());
-        FillRect(dc, &rc, g_brFace);
-        RestoreDC(dc, saved);
+        HDC hdc = (HDC)wParam;
+        RECT client;
+        int saved = SaveDC(hdc);
+        GetClientRect(hwnd, &client);
+        ExcludeClipRect(hdc, 0, 0, client.right, FrameHeight());
+        FillRect(hdc, &client, g_brFace);
+        RestoreDC(hdc, saved);
         return 1; }
     case WM_PAINT: {
         PAINTSTRUCT ps;
-        HDC dc = BeginPaint(h, &ps);
-        FramePaint(h, dc);
-        EndPaint(h, &ps);
+        HDC hdc = BeginPaint(hwnd, &ps);
+        FramePaint(hwnd, hdc);
+        EndPaint(hwnd, &ps);
         return 0; }
     case WM_CTLCOLOREDIT:
-        if ((HWND)l == g_edit) {
-            SetTextColor((HDC)w, C_EDIT_FG);
-            SetBkColor((HDC)w, C_EDIT_BG);
+        if ((HWND)lParam == g_edit) {
+            SetTextColor((HDC)wParam, C_EDIT_FG);
+            SetBkColor((HDC)wParam, C_EDIT_BG);
             return (LRESULT)EditBrush();
         }
         break;
     case WM_TIMER:
-        AppStatusTimer(h, w);
+        AppStatusTimer(hwnd, wParam);
         return 0;
     case WM_COMMAND:
-        if ((HWND)l == g_edit) {
-            switch (HIWORD(w)) {
+        if ((HWND)lParam == g_edit) {
+            switch (HIWORD(wParam)) {
             case EN_CHANGE:
                 g_textRev++;
                 AutoDir();
@@ -739,46 +739,46 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             }
             return 0;
         }
-        Cmd(LOWORD(w));
+        Cmd(LOWORD(wParam));
         return 0;
     case WM_SYSCOMMAND:
-        DBG(L"syscmd", w, l);
-        if (FrameEnabled() && (w & 0xFFF0) == SC_KEYMENU && l == ' ') {
-            FrameSysMenu(h, -1, -1);
+        DBG(L"syscmd", wParam, lParam);
+        if (FrameEnabled() && (wParam & 0xFFF0) == SC_KEYMENU && lParam == ' ') {
+            FrameSysMenu(hwnd, -1, -1);
             return 0;
         }
-        if ((w & 0xFFF0) == SC_KEYMENU && l != ' ') {
-            if (l == 0) {
+        if ((wParam & 0xFFF0) == SC_KEYMENU && lParam != ' ') {
+            if (lParam == 0) {
                 MenuBarActivate(0, 0);
             } else {
-                int i = MenuBarMnemonic((WCHAR)l);
-                if (i >= 0) MenuBarActivate(i, 1);
+                int index = MenuBarMnemonic((WCHAR)lParam);
+                if (index >= 0) MenuBarActivate(index, 1);
             }
             return 0;
         }
         break;
     case WM_DPICHANGED:
-        OnDpiChanged(h, w, l);
+        OnDpiChanged(hwnd, wParam, lParam);
         return 0;
     case WM_DROPFILES:
-        OnDropFiles((HANDLE)w);
+        OnDropFiles((HANDLE)wParam);
         return 0;
     case WM_QUERYENDSESSION:
         return Confirm() ? TRUE : FALSE;
     case WM_ENDSESSION:
-        if (w) AppSavePrefs();
+        if (wParam) AppSavePrefs();
         return 0;
     case WM_CLOSE:
         if (!Confirm()) return 0;
         AppSavePrefs();
-        DestroyWindow(h);
+        DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
         g_hwnd = NULL;
         PostQuitMessage(0);
         return 0;
     }
-    return DefWindowProcW(h, m, w, l);
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 static ACCEL g_acc[] = {
@@ -811,44 +811,44 @@ static ACCEL g_acc[] = {
 };
 
 static void CmdLineFile(WCHAR *out, int cap) {
-    const WCHAR *p = GetCommandLineW();
-    int n = 0;
+    const WCHAR *text = GetCommandLineW();
+    int length = 0;
     out[0] = 0;
-    if (*p == '"') { p++; while (*p && *p != '"') p++; if (*p) p++; }
-    else while (*p && *p != ' ' && *p != '\t') p++;
-    while (*p == ' ' || *p == '\t') p++;
-    if (*p == '"') {
-        p++;
-        while (*p && *p != '"' && n < cap - 1) out[n++] = *p++;
+    if (*text == '"') { text++; while (*text && *text != '"') text++; if (*text) text++; }
+    else while (*text && *text != ' ' && *text != '\t') text++;
+    while (*text == ' ' || *text == '\t') text++;
+    if (*text == '"') {
+        text++;
+        while (*text && *text != '"' && length < cap - 1) out[length++] = *text++;
     } else {
-        while (*p && n < cap - 1) out[n++] = *p++;
-        while (n > 0 && (out[n - 1] == ' ' || out[n - 1] == '\t')) n--;
+        while (*text && length < cap - 1) out[length++] = *text++;
+        while (length > 0 && (out[length - 1] == ' ' || out[length - 1] == '\t')) length--;
     }
-    out[n] = 0;
+    out[length] = 0;
 }
 
 static int CmdSwitch(WCHAR *arg) {
-    WCHAR sw, *f;
-    int n;
+    WCHAR option, *file;
+    int length;
     if (arg[0] != '/' || !arg[1] || (arg[2] != ' ' && arg[2] != '\t')) return 0;
-    sw = wlow(arg[1]);
-    if (sw != 'p' && sw != 'a' && sw != 'w') return 0;
-    f = arg + 3;
-    while (*f == ' ' || *f == '\t') f++;
-    if (*f == '"') { f++; for (n = 0; f[n] && f[n] != '"'; n++) ; f[n] = 0; }
-    memmove(arg, f, ((size_t)wlen(f) + 1) * sizeof(WCHAR));
-    return sw;
+    option = wlow(arg[1]);
+    if (option != 'p' && option != 'a' && option != 'w') return 0;
+    file = arg + 3;
+    while (*file == ' ' || *file == '\t') file++;
+    if (*file == '"') { file++; for (length = 0; file[length] && file[length] != '"'; length++) ; file[length] = 0; }
+    memmove(arg, file, ((size_t)wlen(file) + 1) * sizeof(WCHAR));
+    return option;
 }
 
 static void Cascade(int *x, int *y) {
-    int moved = 1, tries = 0, tol = S(12);
+    int moved = 1, tries = 0, tolerance = S(12);
     while (moved && tries++ < 12) {
-        HWND o = NULL;
+        HWND other = NULL;
         moved = 0;
-        while ((o = FindWindowExW(NULL, o, APP_CLASS, NULL)) != NULL) {
-            RECT r;
-            if (o == g_hwnd || IsZoomed(o) || !GetWindowRect(o, &r)) continue;
-            if (r.left - *x < tol && *x - r.left < tol && r.top - *y < tol && *y - r.top < tol) {
+        while ((other = FindWindowExW(NULL, other, APP_CLASS, NULL)) != NULL) {
+            RECT rect;
+            if (other == g_hwnd || IsZoomed(other) || !GetWindowRect(other, &rect)) continue;
+            if (rect.left - *x < tolerance && *x - rect.left < tolerance && rect.top - *y < tolerance && *y - rect.top < tolerance) {
                 *x += S(32); *y += S(32);
                 moved = 1;
                 break;
@@ -858,71 +858,71 @@ static void Cascade(int *x, int *y) {
 }
 
 static void ShowMain(void) {
-    int have = (g_pf.winw >= 200 && g_pf.winh >= 120);
+    int hasPlacement = (g_pf.winw >= 200 && g_pf.winh >= 120);
     POINT pt;
-    if (have) {
+    if (hasPlacement) {
         pt.x = g_pf.winx + 40; pt.y = g_pf.winy + 12;
-        if (!MonitorFromPoint(pt, MONITOR_DEFAULTTONULL)) have = 0;
+        if (!MonitorFromPoint(pt, MONITOR_DEFAULTTONULL)) hasPlacement = 0;
     }
-    if (have) {
-        WINDOWPLACEMENT wp;
+    if (hasPlacement) {
+        WINDOWPLACEMENT placement;
         int x = g_pf.winx, y = g_pf.winy;
         Cascade(&x, &y);
-        memset(&wp, 0, sizeof wp);
-        wp.length = sizeof wp;
-        wp.showCmd = g_pf.maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
-        wp.rcNormalPosition.left = x;
-        wp.rcNormalPosition.top = y;
-        wp.rcNormalPosition.right = x + g_pf.winw;
-        wp.rcNormalPosition.bottom = y + g_pf.winh;
-        SetWindowPlacement(g_hwnd, &wp);
+        memset(&placement, 0, sizeof placement);
+        placement.length = sizeof placement;
+        placement.showCmd = g_pf.maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+        placement.rcNormalPosition.left = x;
+        placement.rcNormalPosition.top = y;
+        placement.rcNormalPosition.right = x + g_pf.winw;
+        placement.rcNormalPosition.bottom = y + g_pf.winh;
+        SetWindowPlacement(g_hwnd, &placement);
     } else {
         ShowWindow(g_hwnd, SW_SHOWDEFAULT);
     }
 }
 
 int mp_main(void) {
-    HINSTANCE hi = GetModuleHandleW(NULL);
-    WNDCLASSEXW wc;
-    MSG msg;
+    HINSTANCE hInstance = GetModuleHandleW(NULL);
+    WNDCLASSEXW windowClass;
+    MSG message;
     WCHAR arg[PATH_CAP];
-    int sw;
-    UiInit(hi);
+    int option;
+    UiInit(hInstance);
     PrefsInit();
     g_doc.enc = ENC_UTF8;
     g_doc.eol = EOL_CRLF;
     NewDocName();
-    memset(&wc, 0, sizeof wc);
-    wc.cbSize = sizeof wc;
-    wc.lpfnWndProc = MainProc;
-    wc.hInstance = hi;
-    wc.hIcon = LoadIconW(hi, MAKEINTRESOURCEW(1));
-    wc.hIconSm = (HICON)LoadImageW(hi, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
-    wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
-    wc.hbrBackground = g_brFace;
-    wc.lpszClassName = APP_CLASS;
-    if (!RegisterClassExW(&wc)) return 1;
+    memset(&windowClass, 0, sizeof windowClass);
+    windowClass.cbSize = sizeof windowClass;
+    windowClass.lpfnWndProc = MainProc;
+    windowClass.hInstance = hInstance;
+    windowClass.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
+    windowClass.hIconSm = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+    windowClass.hCursor = LoadCursorW(NULL, IDC_ARROW);
+    windowClass.hbrBackground = g_brFace;
+    windowClass.lpszClassName = APP_CLASS;
+    if (!RegisterClassExW(&windowClass)) return 1;
     g_accel = CreateAcceleratorTableW(g_acc, COUNTOF(g_acc));
-    if (!CreateWindowExW(WS_EX_ACCEPTFILES, APP_CLASS, APP_NAME, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, 0, S(900), S(620), NULL, NULL, hi, NULL)) return 1;
+    if (!CreateWindowExW(WS_EX_ACCEPTFILES, APP_CLASS, APP_NAME, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, 0, S(900), S(620), NULL, NULL, hInstance, NULL)) return 1;
     if (FrameEnabled()) SetWindowPos(g_hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     CmdLineFile(arg, PATH_CAP);
-    sw = CmdSwitch(arg);
-    if (sw == 'p') {
+    option = CmdSwitch(arg);
+    if (option == 'p') {
         WCHAR full[PATH_CAP];
-        DWORD r = arg[0] ? GetFullPathNameW(arg, PATH_CAP, full, NULL) : 0;
-        if (r && r < PATH_CAP && GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES && OpenDoc(full, -1, FALSE)) PrintDoc(g_hwnd, 1);
+        DWORD length = arg[0] ? GetFullPathNameW(arg, PATH_CAP, full, NULL) : 0;
+        if (length && length < PATH_CAP && GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES && OpenDoc(full, -1, FALSE)) PrintDoc(g_hwnd, 1);
         return 0;
     }
     ShowMain();
-    if (arg[0]) OpenCmdFile(arg, sw == 'a' ? ENC_ANSI : sw == 'w' ? ENC_UTF16LE : -1);
-    while (GetMessageW(&msg, NULL, 0, 0) > 0) {
-        HWND fd = FindDlgHwnd();
-        if (fd && IsDialogMessageW(fd, &msg)) continue;
-        if (g_hwnd && msg.hwnd && (msg.hwnd == g_hwnd || IsChild(g_hwnd, msg.hwnd) || (fd && (msg.hwnd == fd || IsChild(fd, msg.hwnd)))) && TranslateAcceleratorW(g_hwnd, g_accel, &msg)) continue;
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+    if (arg[0]) OpenCmdFile(arg, option == 'a' ? ENC_ANSI : option == 'w' ? ENC_UTF16LE : -1);
+    while (GetMessageW(&message, NULL, 0, 0) > 0) {
+        HWND findDlg = FindDlgHwnd();
+        if (findDlg && IsDialogMessageW(findDlg, &message)) continue;
+        if (g_hwnd && message.hwnd && (message.hwnd == g_hwnd || IsChild(g_hwnd, message.hwnd) || (findDlg && (message.hwnd == findDlg || IsChild(findDlg, message.hwnd)))) && TranslateAcceleratorW(g_hwnd, g_accel, &message)) continue;
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
     }
-    return (int)msg.wParam;
+    return (int)message.wParam;
 }
 
 void start(void) {

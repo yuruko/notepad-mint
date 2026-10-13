@@ -8,20 +8,20 @@ static int   g_need[SB_COUNT];
 
 static int PadL(void) { return S(8); }
 static int PadR(void) { return S(8); }
-static int TextWidth(HDC dc, const WCHAR *t) { return TextW(dc, t, -1) + PadL() + PadR(); }
-static int PanelW(int i) { return !g_txt[i][0] && i != SB_POS ? 0 : g_need[i] > g_floor[i] ? g_need[i] : g_floor[i]; }
+static int TextWidth(HDC hdc, const WCHAR *text) { return TextW(hdc, text, -1) + PadL() + PadR(); }
+static int PanelW(int index) { return !g_txt[index][0] && index != SB_POS ? 0 : g_need[index] > g_floor[index] ? g_need[index] : g_floor[index]; }
 
 static void Measure(void) {
-    HDC dc = GetDC(NULL);
-    HGDIOBJ of = SelectObject(dc, g_fontMenu);
-    TEXTMETRICW tm;
+    HDC hdc = GetDC(NULL);
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontMenu);
+    TEXTMETRICW metrics;
     int i;
-    GetTextMetricsW(dc, &tm);
-    g_sbH = tm.tmHeight + S(8);
-    g_floor[SB_POS] = TextWidth(dc, L"99999999:99999");
-    for (i = 0; i < SB_COUNT; i++) g_need[i] = TextWidth(dc, g_txt[i]);
-    SelectObject(dc, of);
-    ReleaseDC(NULL, dc);
+    GetTextMetricsW(hdc, &metrics);
+    g_sbH = metrics.tmHeight + S(8);
+    g_floor[SB_POS] = TextWidth(hdc, L"99999999:99999");
+    for (i = 0; i < SB_COUNT; i++) g_need[i] = TextWidth(hdc, g_txt[i]);
+    SelectObject(hdc, oldFont);
+    ReleaseDC(NULL, hdc);
 }
 
 int StatusHeight(void) {
@@ -30,145 +30,145 @@ int StatusHeight(void) {
 }
 
 int StatusMinWidth(void) {
-    int i, w = S(4);
+    int i, width = S(4);
     if (!g_sbH) Measure();
-    for (i = 0; i < SB_COUNT; i++) w += PanelW(i);
-    return w;
+    for (i = 0; i < SB_COUNT; i++) width += PanelW(i);
+    return width;
 }
 
-void StatusRefont(HWND sb) {
+void StatusRefont(HWND hwnd) {
     Measure();
-    InvalidateRect(sb, NULL, FALSE);
+    InvalidateRect(hwnd, NULL, FALSE);
 }
 
-void StatusSet(HWND sb, int idx, const WCHAR *text) {
-    if (idx < 0 || idx >= SB_COUNT) return;
-    if (wcmp(g_txt[idx], text) == 0) return;
-    wcopy(g_txt[idx], text, 64);
+void StatusSet(HWND hwnd, int index, const WCHAR *text) {
+    if (index < 0 || index >= SB_COUNT) return;
+    if (wcmp(g_txt[index], text) == 0) return;
+    wcopy(g_txt[index], text, 64);
     if (g_sbH) {
-        HDC dc = GetDC(NULL);
-        HGDIOBJ of = SelectObject(dc, g_fontMenu);
-        g_need[idx] = TextWidth(dc, g_txt[idx]);
-        SelectObject(dc, of);
-        ReleaseDC(NULL, dc);
+        HDC hdc = GetDC(NULL);
+        HGDIOBJ oldFont = SelectObject(hdc, g_fontMenu);
+        g_need[index] = TextWidth(hdc, g_txt[index]);
+        SelectObject(hdc, oldFont);
+        ReleaseDC(NULL, hdc);
     }
-    InvalidateRect(sb, NULL, FALSE);
+    InvalidateRect(hwnd, NULL, FALSE);
 }
 
-static void Panels(const RECT *rc, RECT out[SB_COUNT]) {
-    int x = rc->right - S(1), i;
+static void Panels(const RECT *client, RECT out[SB_COUNT]) {
+    int x = client->right - S(1), i;
     if (!g_sbH) Measure();
     for (i = SB_COUNT - 1; i > SB_POS; i--) {
         out[i].right = x;
         x -= PanelW(i);
         out[i].left = x;
-        out[i].top = S(2); out[i].bottom = rc->bottom - S(1);
+        out[i].top = S(2); out[i].bottom = client->bottom - S(1);
     }
     out[SB_POS].left = S(1); out[SB_POS].right = x - S(2);
-    out[SB_POS].top = S(2);  out[SB_POS].bottom = rc->bottom - S(1);
+    out[SB_POS].top = S(2);  out[SB_POS].bottom = client->bottom - S(1);
 }
 
-static int PanelAt(HWND h, int px, int py) {
-    RECT rc, p[SB_COUNT];
+static int PanelAt(HWND hwnd, int px, int py) {
+    RECT client, panels[SB_COUNT];
     POINT pt;
     int i;
-    GetClientRect(h, &rc);
-    Panels(&rc, p);
+    GetClientRect(hwnd, &client);
+    Panels(&client, panels);
     pt.x = px; pt.y = py;
-    for (i = 0; i < SB_COUNT; i++) if (PtInRect(&p[i], pt)) return i;
+    for (i = 0; i < SB_COUNT; i++) if (PtInRect(&panels[i], pt)) return i;
     return -1;
 }
 
-static void Paint(HWND h) {
+static void Paint(HWND hwnd) {
     PAINTSTRUCT ps;
-    HDC dc = BeginPaint(h, &ps), mdc;
-    HBITMAP bmp;
-    HGDIOBJ old, of;
-    RECT rc, p[SB_COUNT], r;
+    HDC hdc = BeginPaint(hwnd, &ps), memDc;
+    HBITMAP bitmap;
+    HGDIOBJ oldBitmap, oldFont;
+    RECT client, panels[SB_COUNT], rect;
     int i;
-    GetClientRect(h, &rc);
-    mdc = CreateCompatibleDC(dc);
-    bmp = CreateCompatibleBitmap(dc, rc.right, rc.bottom);
-    old = SelectObject(mdc, bmp);
-    of = SelectObject(mdc, g_fontMenu);
-    FillC(mdc, &rc, C_FACE);
-    Panels(&rc, p);
+    GetClientRect(hwnd, &client);
+    memDc = CreateCompatibleDC(hdc);
+    bitmap = CreateCompatibleBitmap(hdc, client.right, client.bottom);
+    oldBitmap = SelectObject(memDc, bitmap);
+    oldFont = SelectObject(memDc, g_fontMenu);
+    FillC(memDc, &client, C_FACE);
+    Panels(&client, panels);
     for (i = 0; i < SB_COUNT; i++) {
         BOOL hot = (i != SB_POS && i == g_hotp);
-        if (p[i].right <= p[i].left) continue;
-        Bevel(mdc, &p[i], BV_FLAT_DN);
-        if (hot) { r = p[i]; InflateRect(&r, -1, -1); FillC(mdc, &r, C_ACCENT); }
-        r = p[i]; r.left += PadL(); r.right -= PadR();
-        TextC(mdc, g_txt[i], -1, &r, (i != SB_POS && i != SB_EOL ? DT_RIGHT : DT_LEFT) | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, hot ? C_ON_ACCENT : C_TEXT);
+        if (panels[i].right <= panels[i].left) continue;
+        Bevel(memDc, &panels[i], BV_FLAT_DN);
+        if (hot) { rect = panels[i]; InflateRect(&rect, -1, -1); FillC(memDc, &rect, C_ACCENT); }
+        rect = panels[i]; rect.left += PadL(); rect.right -= PadR();
+        TextC(memDc, g_txt[i], -1, &rect, (i != SB_POS && i != SB_EOL ? DT_RIGHT : DT_LEFT) | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, hot ? C_ON_ACCENT : C_TEXT);
     }
-    BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY);
-    SelectObject(mdc, of);
-    SelectObject(mdc, old);
-    DeleteObject(bmp);
-    DeleteDC(mdc);
-    EndPaint(h, &ps);
+    BitBlt(hdc, 0, 0, client.right, client.bottom, memDc, 0, 0, SRCCOPY);
+    SelectObject(memDc, oldFont);
+    SelectObject(memDc, oldBitmap);
+    DeleteObject(bitmap);
+    DeleteDC(memDc);
+    EndPaint(hwnd, &ps);
 }
 
 static int AllText(WCHAR *out, int cap) {
     static const WCHAR sep[] = L" | ";
-    int i, k, n = 0;
+    int i, k, length = 0;
     for (i = 0; i < SB_COUNT; i++) {
         if (i && !g_txt[i][0]) continue;
-        if (i) for (k = 0; sep[k]; k++, n++) if (out && n < cap - 1) out[n] = sep[k];
-        for (k = 0; g_txt[i][k]; k++, n++) if (out && n < cap - 1) out[n] = g_txt[i][k];
+        if (i) for (k = 0; sep[k]; k++, length++) if (out && length < cap - 1) out[length] = sep[k];
+        for (k = 0; g_txt[i][k]; k++, length++) if (out && length < cap - 1) out[length] = g_txt[i][k];
     }
-    if (out && cap > 0) out[n < cap ? n : cap - 1] = 0;
-    return n;
+    if (out && cap > 0) out[length < cap ? length : cap - 1] = 0;
+    return length;
 }
 
-static LRESULT CALLBACK StatusProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    switch (m) {
+static LRESULT CALLBACK StatusProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
     case WM_ERASEBKGND:
         return 1;
     case WM_GETTEXTLENGTH:
         return AllText(NULL, 0);
     case WM_GETTEXT: {
-        int n = AllText((WCHAR *)l, (int)w);
-        return n < (int)w ? n : ((int)w > 0 ? (int)w - 1 : 0); }
+        int length = AllText((WCHAR *)lParam, (int)wParam);
+        return length < (int)wParam ? length : ((int)wParam > 0 ? (int)wParam - 1 : 0); }
     case WM_SIZE:
-        InvalidateRect(h, NULL, FALSE);
+        InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     case WM_PAINT:
-        Paint(h);
+        Paint(hwnd);
         return 0;
     case WM_MOUSEMOVE: {
-        int i = PanelAt(h, GET_X_LPARAM(l), GET_Y_LPARAM(l));
-        if (i != SB_ZOOM && i < SB_EOL) i = -1;
-        if (i != g_hotp) {
-            TRACKMOUSEEVENT te;
-            g_hotp = i;
-            te.cbSize = sizeof te; te.dwFlags = TME_LEAVE; te.hwndTrack = h; te.dwHoverTime = 0;
-            TrackMouseEvent(&te);
-            InvalidateRect(h, NULL, FALSE);
+        int panel = PanelAt(hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+        if (panel != SB_ZOOM && panel < SB_EOL) panel = -1;
+        if (panel != g_hotp) {
+            TRACKMOUSEEVENT trackEvent;
+            g_hotp = panel;
+            trackEvent.cbSize = sizeof trackEvent; trackEvent.dwFlags = TME_LEAVE; trackEvent.hwndTrack = hwnd; trackEvent.dwHoverTime = 0;
+            TrackMouseEvent(&trackEvent);
+            InvalidateRect(hwnd, NULL, FALSE);
         }
         return 0; }
     case WM_MOUSELEAVE:
         g_hotp = -1;
-        InvalidateRect(h, NULL, FALSE);
+        InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     case WM_LBUTTONDOWN: {
-        int i = PanelAt(h, GET_X_LPARAM(l), GET_Y_LPARAM(l));
-        if (i == SB_POS || i == SB_ZOOM) {
+        int panel = PanelAt(hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+        if (panel == SB_POS || panel == SB_ZOOM) {
             g_hotp = -1;
-            PostMessageW(GetParent(h), WM_COMMAND, i == SB_POS ? IDM_EDIT_GOTO : IDM_ZOOM_RESET, 0);
-        } else if (i >= SB_EOL) {
-            RECT rc, p[SB_COUNT];
+            PostMessageW(GetParent(hwnd), WM_COMMAND, panel == SB_POS ? IDM_EDIT_GOTO : IDM_ZOOM_RESET, 0);
+        } else if (panel >= SB_EOL) {
+            RECT client, panels[SB_COUNT];
             POINT pt;
-            GetClientRect(h, &rc);
-            Panels(&rc, p);
-            pt.x = p[i].left; pt.y = 0;
-            ClientToScreen(h, &pt);
+            GetClientRect(hwnd, &client);
+            Panels(&client, panels);
+            pt.x = panels[panel].left; pt.y = 0;
+            ClientToScreen(hwnd, &pt);
             g_hotp = -1;
-            MenuPopup(GetParent(h), i == SB_EOL ? &g_mdEol : &g_mdEnc, pt.x, pt.y, 1);
+            MenuPopup(GetParent(hwnd), panel == SB_EOL ? &g_mdEol : &g_mdEnc, pt.x, pt.y, 1);
         }
         return 0; }
     }
-    return DefWindowProcW(h, m, w, l);
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 HWND StatusCreate(HWND parent) {

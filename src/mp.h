@@ -50,31 +50,31 @@ enum {
     IDM_SYS_RESTORE = 601, IDM_SYS_MOVE, IDM_SYS_SIZE, IDM_SYS_MIN, IDM_SYS_MAX, IDM_SYS_CLOSE
 };
 
-void  *mem_alloc(size_t n);
-void  *mem_zalloc(size_t n);
-void  *mem_realloc(void *p, size_t n);
-void   mem_free(void *p);
-int    wlen(const WCHAR *s);
-void   wcopy(WCHAR *d, const WCHAR *s, int cap);
-void   wcat(WCHAR *d, const WCHAR *s, int cap);
+void  *mem_alloc(size_t size);
+void  *mem_zalloc(size_t size);
+void  *mem_realloc(void *block, size_t size);
+void   mem_free(void *block);
+int    wlen(const WCHAR *text);
+void   wcopy(WCHAR *dst, const WCHAR *src, int cap);
+void   wcat(WCHAR *dst, const WCHAR *src, int cap);
 int    wcmp(const WCHAR *a, const WCHAR *b);
 int    wcmpi(const WCHAR *a, const WCHAR *b);
 WCHAR  wlow(WCHAR c);
-int    wtoi(const WCHAR *s);
+int    wtoi(const WCHAR *text);
 const WCHAR *PathName(const WCHAR *path);
 void   PathDir(const WCHAR *path, WCHAR *out, int cap);
 void   PathJoin(WCHAR *dir, const WCHAR *name, int cap);
 BOOL   IsDir(const WCHAR *path);
 size_t mp_count_lf(const WCHAR *p, size_t n);
 size_t mp_find3(const WCHAR *p, size_t n, unsigned a, unsigned b, unsigned c);
-int    WordClass(WCHAR c);
+int    WordClass(WCHAR ch);
 #define DOCNAME_EPOCH 2026u
 #define DOCNAME_STEPS 45u
 #define DOCNAME_AHEAD (DOCNAME_STEPS * 366u)
 #define DOCNAME_NONE  0xFFFFFFFFu
-unsigned DocNameClock(const SYSTEMTIME *st);
+unsigned DocNameClock(const SYSTEMTIME *time);
 unsigned DocNameNext(unsigned clock, unsigned last);
-void   DefaultDocName(unsigned v, WCHAR *out, int cap);
+void   DefaultDocName(unsigned value, WCHAR *out, int cap);
 
 #define ASSOC_PROGID    L"notepad-mint.text"
 #define ASSOC_REGAPP    L"notepad-mint"
@@ -84,8 +84,8 @@ extern const WCHAR *const g_assocExt[ASSOC_EXT_COUNT];
 BOOL   AssocRegisterUser(const WCHAR *exe);
 BOOL   AssocMachineHas(const WCHAR *exe);
 
-int    FindInTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int up, int matchCase, int wholeWord);
-WCHAR *ReplaceAllTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase, int wholeWord, int *outLen, int *count);
+int    FindInTextEx(const WCHAR *text, int length, const WCHAR *pattern, int patLen, int from, int up, int matchCase, int wholeWord);
+WCHAR *ReplaceAllTextEx(const WCHAR *text, int length, const WCHAR *pattern, int patLen, const WCHAR *replacement, int replLen, int matchCase, int wholeWord, int *outLen, int *count);
 #ifdef DBGLOG
 void   Dbg(const WCHAR *tag, INT_PTR a, INT_PTR b);
 #define DBG(t, a, b) Dbg(t, (INT_PTR)(a), (INT_PTR)(b))
@@ -114,41 +114,41 @@ extern HBRUSH    g_brFace, g_brField;
 
 int   S(int v);
 int   UnS(int px);
-void  UiInit(HINSTANCE hi);
+void  UiInit(HINSTANCE hInstance);
 void  UiSetDpi(int dpi);
 void  ThemeSet(int theme);
 int   ThemeGet(void);
 void  UiSetChromeFont(const WCHAR *face);
 int   UiSystemDpi(void);
-int   UiDpiForWindow(HWND h);
-int   UiMetric(int idx);
-BOOL  UiAdjustRect(RECT *r, DWORD style, DWORD ex);
-void  FillC(HDC dc, const RECT *r, COLORREF c);
-void  Bevel(HDC dc, const RECT *r, int kind);
-void  TextC(HDC dc, const WCHAR *s, int n, RECT *r, UINT fmt, COLORREF c);
-int   TextW(HDC dc, const WCHAR *s, int n);
-void  Tri(HDC dc, int x, int y, int sz, COLORREF c);
-void  CheckGlyph(HDC dc, int x, int y, COLORREF c);
-void  DarkFrame(HWND h, int active);
-void  DarkScroll(HWND h);
+int   UiDpiForWindow(HWND hwnd);
+int   UiMetric(int index);
+BOOL  UiAdjustRect(RECT *rect, DWORD style, DWORD exStyle);
+void  FillC(HDC hdc, const RECT *rect, COLORREF color);
+void  Bevel(HDC hdc, const RECT *rect, int kind);
+void  TextC(HDC hdc, const WCHAR *text, int length, RECT *rect, UINT format, COLORREF color);
+int   TextW(HDC hdc, const WCHAR *text, int length);
+void  Tri(HDC hdc, int x, int y, int size, COLORREF color);
+void  CheckGlyph(HDC hdc, int x, int y, COLORREF color);
+void  DarkFrame(HWND hwnd, int active);
+void  DarkScroll(HWND hwnd);
 void  SbarAttach(HWND target);
 void  SbarTrim(HWND target, int right, int bottom);
 void  SbarSync(HWND target);
 void  SbarDetach(HWND target);
 void  RegClass(const WCHAR *name, WNDPROC proc, UINT style, HBRUSH bg);
 
-DlgBase *DlgFromHwnd(HWND h, UINT m, LPARAM l);
-void  DlgBaseInit(DlgBase *b, HWND owner);
-HWND  DlgOpen(DlgBase *b, const WCHAR *cls, const WCHAR *title, int cw, int ch, int modeless);
-void  DlgRunModal(DlgBase *b);
-BOOL  DlgCommon(DlgBase *b, UINT m, WPARAM w, LPARAM l, LRESULT *ret);
-void  DlgFrame(DlgBase *b, int x, int y, int w, int h, int kind);
-HWND  UiLabel(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWORD extra);
-HWND  UiEdit(DlgBase *b, const WCHAR *text, int x, int y, int w, int h, int id, DWORD extra);
-HWND  UiButton(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWORD style);
-int   MpAsk(HWND owner, const WCHAR *title, const WCHAR *msg, const WCHAR *b1, const WCHAR *b2, const WCHAR *b3, int escIdx);
-void  MpNote(HWND owner, const WCHAR *title, const WCHAR *msg);
-int   ClampInt(int v, int lo, int hi);
+DlgBase *DlgFromHwnd(HWND hwnd, UINT msg, LPARAM lParam);
+void  DlgBaseInit(DlgBase *base, HWND owner);
+HWND  DlgOpen(DlgBase *base, const WCHAR *className, const WCHAR *title, int clientWidth, int clientHeight, int modeless);
+void  DlgRunModal(DlgBase *base);
+BOOL  DlgCommon(DlgBase *base, UINT msg, WPARAM wParam, LPARAM lParam, LRESULT *ret);
+void  DlgFrame(DlgBase *base, int x, int y, int width, int height, int kind);
+HWND  UiLabel(HWND parent, const WCHAR *text, int x, int y, int width, int height, int id, DWORD extra);
+HWND  UiEdit(DlgBase *base, const WCHAR *text, int x, int y, int width, int height, int id, DWORD extra);
+HWND  UiButton(HWND parent, const WCHAR *text, int x, int y, int width, int height, int id, DWORD style);
+int   MpAsk(HWND owner, const WCHAR *title, const WCHAR *message, const WCHAR *label1, const WCHAR *label2, const WCHAR *label3, int escIdx);
+void  MpNote(HWND owner, const WCHAR *title, const WCHAR *message);
+int   ClampInt(int value, int lo, int hi);
 
 #define MS_CHECK 1
 #define MS_RADIO 2
@@ -170,11 +170,11 @@ extern const MenuDef g_mdTab;
 extern MenuDef g_mdRecent;
 #define RECENT_MAX 9
 void  MenuSetRecent(const WCHAR (*paths)[PATH_CAP], int n);
-HWND  MenuBarCreate(HWND parent, MenuStateFn fn);
+HWND  MenuBarCreate(HWND parent, MenuStateFn stateFn);
 int   MenuBarHeight(void);
 int   MenuBarMinWidth(void);
 void  MenuBarRefont(HWND bar);
-void  MenuBarActivate(int idx, int openPopup);
+void  MenuBarActivate(int index, int openPopup);
 int   MenuBarMnemonic(WCHAR ch);
 void  MenuPopup(HWND owner, const MenuDef *def, int x, int y, int anchorBottom);
 void  MenuCancel(void);
@@ -183,21 +183,21 @@ enum { SB_POS, SB_ZOOM, SB_LINES, SB_BYTES, SB_EOL, SB_ENC, SB_COUNT };
 HWND  StatusCreate(HWND parent);
 int   StatusHeight(void);
 int   StatusMinWidth(void);
-void  StatusSet(HWND sb, int idx, const WCHAR *text);
-void  StatusRefont(HWND sb);
+void  StatusSet(HWND hwnd, int index, const WCHAR *text);
+void  StatusRefont(HWND hwnd);
 
 int      FrameEnabled(void);
 int      FrameHeight(void);
-void     FrameRefont(HWND h);
-void     FrameInvalidate(HWND h);
-void     FrameActive(HWND h, int active);
-void     FramePaint(HWND h, HDC dc);
-LRESULT  FrameNcCalc(HWND h, WPARAM w, LPARAM l);
-LRESULT  FrameHitTest(HWND h, LPARAM l);
-BOOL     FrameMsg(HWND h, UINT m, WPARAM w, LPARAM l);
-void     FrameSysMenu(HWND h, int x, int y);
+void     FrameRefont(HWND hwnd);
+void     FrameInvalidate(HWND hwnd);
+void     FrameActive(HWND hwnd, int active);
+void     FramePaint(HWND hwnd, HDC hdc);
+LRESULT  FrameNcCalc(HWND hwnd, WPARAM wParam, LPARAM lParam);
+LRESULT  FrameHitTest(HWND hwnd, LPARAM lParam);
+BOOL     FrameMsg(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+void     FrameSysMenu(HWND hwnd, int x, int y);
 unsigned FrameSysState(int id);
-void     FrameSysCommand(HWND h, int id);
+void     FrameSysCommand(HWND hwnd, int id);
 
 enum { ENC_UTF8, ENC_UTF8BOM, ENC_UTF16LE, ENC_UTF16BE, ENC_ANSI, ENC_COUNT };
 enum { EOL_CRLF, EOL_LF, EOL_CR, EOL_COUNT };
@@ -212,7 +212,7 @@ extern const WCHAR *const g_eolShort[EOL_COUNT];
 void  EncLabel(int enc, WCHAR *out, int cap);
 void  EncShort(int enc, WCHAR *out, int cap);
 int   EncListCount(void);
-int   EncListGet(int i, WCHAR *label, int cap);
+int   EncListGet(int index, WCHAR *label, int cap);
 DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int forceEnc);
 void  DocAllowLossy(BOOL on);
 DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, BOOL *lossy);
@@ -259,13 +259,13 @@ void   EditApplyFont(void);
 void   EditApplyColors(void);
 HBRUSH EditBrush(void);
 void   FontResolve(WCHAR *face);
-BOOL   EditSetDocText(const WCHAR *t);
-WCHAR *EditGetDocText(int *len);
+BOOL   EditSetDocText(const WCHAR *text);
+WCHAR *EditGetDocText(int *length);
 BOOL   EditHasSel(void);
 void   EditApplyTabs(void);
 void   EditScrollSoon(void);
-const WCHAR *EditLockText(void **h, int *n);
-void   EditUnlockText(void *h);
+const WCHAR *EditLockText(void **hText, int *length);
+void   EditUnlockText(void *hText);
 void   EditCaretPos(int *line, int *col);
 BOOL   EditSelStats(int enc, int eol, int *lines, DWORD *bytes);
 BOOL   EditGotoLine(int line);
@@ -273,7 +273,7 @@ void   EditClearLine(void);
 void   EditZoomStep(int dir);
 void   EditZoomReset(void);
 BOOL   EditZoomCan(int dir);
-void   EditInsert(const WCHAR *s);
+void   EditInsert(const WCHAR *text);
 BOOL   EditSetRtl(BOOL rtl);
 void   EditDirKeyCancel(void);
 int    EditStrongDir(int limit);
@@ -288,8 +288,8 @@ void  AboutDlg(HWND owner);
 void  HelpDlg(HWND owner);
 BOOL  FontDlg(HWND owner);
 BOOL  EncDlg(HWND owner, int *enc, int reopen);
-BOOL  FileDlgOpen(HWND owner, WCHAR *path, int cap);
-BOOL  FileDlgSave(HWND owner, WCHAR *path, int cap);
+BOOL  FileDlgOpen(HWND owner, WCHAR *path, int capacity);
+BOOL  FileDlgSave(HWND owner, WCHAR *path, int capacity);
 void  PrintDoc(HWND owner, int quiet);
 void  PageSetup(HWND owner);
 

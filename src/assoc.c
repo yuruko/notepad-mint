@@ -20,14 +20,14 @@ static RegCloseFn  g_regClose;
 static RegGetFn    g_regGet;
 
 static BOOL Load(void) {
-    HMODULE m;
+    HMODULE advapi32;
     if (g_regCreate && g_regSet && g_regClose && g_regGet) return TRUE;
-    m = LoadLibraryW(L"advapi32.dll");
-    if (!m) return FALSE;
-    g_regCreate = (RegCreateFn)GetProcAddress(m, "RegCreateKeyExW");
-    g_regSet = (RegSetFn)GetProcAddress(m, "RegSetValueExW");
-    g_regClose = (RegCloseFn)GetProcAddress(m, "RegCloseKey");
-    g_regGet = (RegGetFn)GetProcAddress(m, "RegGetValueW");
+    advapi32 = LoadLibraryW(L"advapi32.dll");
+    if (!advapi32) return FALSE;
+    g_regCreate = (RegCreateFn)GetProcAddress(advapi32, "RegCreateKeyExW");
+    g_regSet = (RegSetFn)GetProcAddress(advapi32, "RegSetValueExW");
+    g_regClose = (RegCloseFn)GetProcAddress(advapi32, "RegCloseKey");
+    g_regGet = (RegGetFn)GetProcAddress(advapi32, "RegGetValueW");
     return g_regCreate && g_regSet && g_regClose && g_regGet;
 }
 
@@ -37,22 +37,22 @@ static void OpenCommand(const WCHAR *exe, WCHAR *cmd, int cap) {
 
 BOOL AssocMachineHas(const WCHAR *exe) {
     WCHAR want[PATH_CAP + 16], got[PATH_CAP + 16];
-    DWORD cb = sizeof got;
+    DWORD size = sizeof got;
     if (!Load()) return FALSE;
-    if (g_regGet(HKLM_ROOT, L"Software\\RegisteredApplications", ASSOC_REGAPP, RRF_SZ_64, NULL, got, &cb)) return FALSE;
-    cb = sizeof got;
-    if (g_regGet(HKLM_ROOT, L"Software\\Classes\\" ASSOC_PROGID L"\\shell\\open\\command", NULL, RRF_SZ_64, NULL, got, &cb)) return FALSE;
+    if (g_regGet(HKLM_ROOT, L"Software\\RegisteredApplications", ASSOC_REGAPP, RRF_SZ_64, NULL, got, &size)) return FALSE;
+    size = sizeof got;
+    if (g_regGet(HKLM_ROOT, L"Software\\Classes\\" ASSOC_PROGID L"\\shell\\open\\command", NULL, RRF_SZ_64, NULL, got, &size)) return FALSE;
     OpenCommand(exe, want, COUNTOF(want));
     return wcmpi(got, want) == 0;
 }
 
 static BOOL Put(const WCHAR *key, const WCHAR *name, DWORD type, const WCHAR *value) {
-    RegKey k;
-    LONG r;
-    if (g_regCreate(HKCU_ROOT, key, 0, NULL, 0, KEY_SET, NULL, &k, NULL)) return FALSE;
-    r = g_regSet(k, name, 0, type, (const BYTE *)value, (DWORD)(wlen(value) + 1) * sizeof(WCHAR));
-    g_regClose(k);
-    return r == 0;
+    RegKey keyHandle;
+    LONG result;
+    if (g_regCreate(HKCU_ROOT, key, 0, NULL, 0, KEY_SET, NULL, &keyHandle, NULL)) return FALSE;
+    result = g_regSet(keyHandle, name, 0, type, (const BYTE *)value, (DWORD)(wlen(value) + 1) * sizeof(WCHAR));
+    g_regClose(keyHandle);
+    return result == 0;
 }
 
 BOOL AssocRegisterUser(const WCHAR *exe) {

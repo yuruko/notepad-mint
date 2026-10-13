@@ -25,41 +25,41 @@ void EditScrollSoon(void) {
 static int LineHeight(void) {
     static int lh;
     static HFONT lf;
-    HDC dc;
-    HGDIOBJ of;
+    HDC hdc;
+    HGDIOBJ oldFont;
     TEXTMETRICW tm;
     if (lh && lf == g_font) return lh;
-    dc = GetDC(g_edit);
-    if (!dc) return 1;
+    hdc = GetDC(g_edit);
+    if (!hdc) return 1;
     memset(&tm, 0, sizeof tm);
-    of = SelectObject(dc, g_font);
-    GetTextMetricsW(dc, &tm);
-    SelectObject(dc, of);
-    ReleaseDC(g_edit, dc);
+    oldFont = SelectObject(hdc, g_font);
+    GetTextMetricsW(hdc, &tm);
+    SelectObject(hdc, oldFont);
+    ReleaseDC(g_edit, hdc);
     lf = g_font;
     return lh = tm.tmHeight + tm.tmExternalLeading > 0 ? tm.tmHeight + tm.tmExternalLeading : 1;
 }
 
-static void FitTallCaret(HWND h) {
+static void FitTallCaret(HWND hwnd) {
     if (!g_allowTallReveal || g_inBars || g_revealing) return;
     g_revealing = 1;
-    EditCaretFit(h, g_font, g_orig, &g_tallCaret);
+    EditCaretFit(hwnd, g_font, g_orig, &g_tallCaret);
     g_revealing = 0;
 }
 
-static void RevealCaret(HWND h) {
+static void RevealCaret(HWND hwnd) {
     if (g_revealPending && !g_inBars && !g_sizeDeferred) {
-        SendMessageW(h, EM_SCROLLCARET, 0, 0);
+        SendMessageW(hwnd, EM_SCROLLCARET, 0, 0);
     }
 }
 
 static int VNeeded(void) {
-    RECT r;
-    int lines = (int)SendMessageW(g_edit, EM_GETLINECOUNT, 0, 0), vis;
-    SendMessageW(g_edit, EM_GETRECT, 0, (LPARAM)&r);
-    vis = (r.bottom - r.top) / LineHeight();
-    if (vis < 1) vis = 1;
-    return lines > vis;
+    RECT formatRect;
+    int lines = (int)SendMessageW(g_edit, EM_GETLINECOUNT, 0, 0), visibleLines;
+    SendMessageW(g_edit, EM_GETRECT, 0, (LPARAM)&formatRect);
+    visibleLines = (formatRect.bottom - formatRect.top) / LineHeight();
+    if (visibleLines < 1) visibleLines = 1;
+    return lines > visibleLines;
 }
 
 static int HNeeded(void) {
@@ -82,25 +82,25 @@ static void UpdateBars(void) {
     g_inBars = 1;
     SendMessageW(g_edit, WM_SETREDRAW, FALSE, 0);
     for (pass = 0; pass < 4; pass++) {
-        int changed = 0, v = VNeeded(), hadV = (GetWindowLongPtrW(g_edit, GWL_STYLE) & WS_VSCROLL) != 0;
-        if (v != hadV) {
-            if (!v) {
-                int first = (int)SendMessageW(g_edit, EM_GETFIRSTVISIBLELINE, 0, 0);
-                if (first) SendMessageW(g_edit, EM_LINESCROLL, 0, (LPARAM)-first);
+        int changed = 0, needV = VNeeded(), hadV = (GetWindowLongPtrW(g_edit, GWL_STYLE) & WS_VSCROLL) != 0;
+        if (needV != hadV) {
+            if (!needV) {
+                int firstLine = (int)SendMessageW(g_edit, EM_GETFIRSTVISIBLELINE, 0, 0);
+                if (firstLine) SendMessageW(g_edit, EM_LINESCROLL, 0, (LPARAM)-firstLine);
             }
-            ShowScrollBar(g_edit, SB_VERT, v);
+            ShowScrollBar(g_edit, SB_VERT, needV);
             changed = 1;
         }
         if (!g_pf.wrap) {
-            int hadH = (GetWindowLongPtrW(g_edit, GWL_STYLE) & WS_HSCROLL) != 0, h;
+            int hadH = (GetWindowLongPtrW(g_edit, GWL_STYLE) & WS_HSCROLL) != 0, needH;
             if (!hadH) ShowScrollBar(g_edit, SB_HORZ, TRUE);
-            h = HNeeded();
-            DBG(L"bars pass v/h", v, h);
-            if (!h) {
+            needH = HNeeded();
+            DBG(L"bars pass v/h", needV, needH);
+            if (!needH) {
                 SendMessageW(g_edit, EM_LINESCROLL, (WPARAM)-100000, 0);
                 ShowScrollBar(g_edit, SB_HORZ, FALSE);
             }
-            if (h != hadH) changed = 1;
+            if (needH != hadH) changed = 1;
         }
         if (!changed) break;
     }
@@ -112,21 +112,21 @@ static void UpdateBars(void) {
     SbarSync(g_edit);
 }
 
-static int CALLBACK FoundCb(const void *lf, const void *tm, DWORD type, LPARAM lp) {
-    (void)lf; (void)tm; (void)type;
-    *(int *)lp = 1;
+static int CALLBACK FoundCb(const void *logFont, const void *textMetric, DWORD fontType, LPARAM lParam) {
+    (void)logFont; (void)textMetric; (void)fontType;
+    *(int *)lParam = 1;
     return 0;
 }
 
 static BOOL FontInstalled(const WCHAR *face) {
     LOGFONTW lf;
     int found = 0;
-    HDC dc = GetDC(NULL);
+    HDC hdc = GetDC(NULL);
     memset(&lf, 0, sizeof lf);
     lf.lfCharSet = DEFAULT_CHARSET;
     wcopy(lf.lfFaceName, face, 32);
-    EnumFontFamiliesExW(dc, &lf, FoundCb, (LPARAM)&found, 0);
-    ReleaseDC(NULL, dc);
+    EnumFontFamiliesExW(hdc, &lf, FoundCb, (LPARAM)&found, 0);
+    ReleaseDC(NULL, hdc);
     return found != 0;
 }
 
@@ -140,57 +140,57 @@ void FontResolve(WCHAR *face) {
     wcopy(face, L"Courier New", 32);
 }
 
-void EditViewRect(HWND h, RECT *r) {
-    LONG_PTR st = GetWindowLongPtrW(h, GWL_STYLE);
-    GetClientRect(h, r);
-    if (!(st & WS_VSCROLL)) {
-        if (GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_LEFTSCROLLBAR) r->left += S(SBAR_TRIM);
-        else r->right -= S(SBAR_TRIM);
+void EditViewRect(HWND hwnd, RECT *viewRect) {
+    LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    GetClientRect(hwnd, viewRect);
+    if (!(style & WS_VSCROLL)) {
+        if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LEFTSCROLLBAR) viewRect->left += S(SBAR_TRIM);
+        else viewRect->right -= S(SBAR_TRIM);
     }
-    if (!(st & WS_HSCROLL)) r->bottom -= S(SBAR_TRIM);
+    if (!(style & WS_HSCROLL)) viewRect->bottom -= S(SBAR_TRIM);
 }
 
-static void EditPad2(HWND h, int margins) {
-    RECT r;
+static void EditPad2(HWND hwnd, int margins) {
+    RECT formatRect;
     int pad = S(EDIT_PAD), top = S(EDIT_PAD_TOP), height = LineHeight(), visibleBottom;
-    if (margins) SendMessageW(h, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(pad, pad));
-    EditViewRect(h, &r);
-    visibleBottom = r.bottom;
-    if (r.bottom - r.top > top + pad + 8 && r.right - r.left > 2 * pad + 8) {
-        r.left += pad;
-        if (g_pf.wrap || EditIsRtl()) r.right -= pad;
-        r.top += top; r.bottom -= pad;
+    if (margins) SendMessageW(hwnd, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(pad, pad));
+    EditViewRect(hwnd, &formatRect);
+    visibleBottom = formatRect.bottom;
+    if (formatRect.bottom - formatRect.top > top + pad + 8 && formatRect.right - formatRect.left > 2 * pad + 8) {
+        formatRect.left += pad;
+        if (g_pf.wrap || EditIsRtl()) formatRect.right -= pad;
+        formatRect.top += top; formatRect.bottom -= pad;
     }
-    if (r.right <= r.left) r.right = r.left + 1;
-    if (r.bottom <= r.top) r.bottom = r.top + 1;
-    if (r.bottom - r.top < height) {
-        r.top = 0;
-        r.bottom = visibleBottom > height ? visibleBottom : height;
+    if (formatRect.right <= formatRect.left) formatRect.right = formatRect.left + 1;
+    if (formatRect.bottom <= formatRect.top) formatRect.bottom = formatRect.top + 1;
+    if (formatRect.bottom - formatRect.top < height) {
+        formatRect.top = 0;
+        formatRect.bottom = visibleBottom > height ? visibleBottom : height;
     }
-    SendMessageW(h, EM_SETRECTNP, 0, (LPARAM)&r);
+    SendMessageW(hwnd, EM_SETRECTNP, 0, (LPARAM)&formatRect);
 }
 
-static void EditPad(HWND h) { EditPad2(h, 1); }
+static void EditPad(HWND hwnd) { EditPad2(hwnd, 1); }
 
 static int g_tabPx;
 
 void EditApplyTabs(void) {
-    HDC dc;
-    HGDIOBJ of;
+    HDC hdc;
+    HGDIOBJ oldFont;
     TEXTMETRICW tm;
-    UINT u = 4u * (UINT)g_pf.tab;
+    UINT tabStop = 4u * (UINT)g_pf.tab;
     if (!g_edit || !g_font) return;
     g_allowTallReveal = 1;
     EditCaretInvalidate();
     KillTimer(g_edit, SIZE_TIMER);
     g_sizeDeferred = 0;
-    dc = GetDC(g_edit);
-    of = SelectObject(dc, g_font);
-    GetTextMetricsW(dc, &tm);
-    SelectObject(dc, of);
-    ReleaseDC(g_edit, dc);
+    hdc = GetDC(g_edit);
+    oldFont = SelectObject(hdc, g_font);
+    GetTextMetricsW(hdc, &tm);
+    SelectObject(hdc, oldFont);
+    ReleaseDC(g_edit, hdc);
     g_tabPx = g_pf.tab * tm.tmAveCharWidth;
-    SendMessageW(g_edit, EM_SETTABSTOPS, 1, (LPARAM)&u);
+    SendMessageW(g_edit, EM_SETTABSTOPS, 1, (LPARAM)&tabStop);
     EditPad(g_edit);
     g_revealPending = 1;
     RevealCaret(g_edit);
@@ -200,7 +200,7 @@ void EditApplyTabs(void) {
 
 void EditApplyFont(void) {
     LOGFONTW lf;
-    HFONT nf, old = g_font;
+    HFONT newFont, oldFont = g_font;
     int px = MulDiv(g_pf.cur, g_dpi, 720);
     if (px < 1) px = 1;
     memset(&lf, 0, sizeof lf);
@@ -213,16 +213,16 @@ void EditApplyFont(void) {
     lf.lfQuality = CLEARTYPE_QUALITY;
     lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
     wcopy(lf.lfFaceName, g_pf.font, 32);
-    nf = CreateFontIndirectW(&lf);
-    if (!nf) return;
+    newFont = CreateFontIndirectW(&lf);
+    if (!newFont) return;
     if (g_edit) EditCaretRemember(g_edit, g_font);
-    g_font = nf;
+    g_font = newFont;
     g_stubW = 0;
     if (g_edit) {
-        SendMessageW(g_edit, WM_SETFONT, (WPARAM)nf, TRUE);
+        SendMessageW(g_edit, WM_SETFONT, (WPARAM)newFont, TRUE);
         EditApplyTabs();
     }
-    if (old) DeleteObject(old);
+    if (oldFont) DeleteObject(oldFont);
 }
 
 HBRUSH EditBrush(void) {
@@ -231,23 +231,23 @@ HBRUSH EditBrush(void) {
 }
 
 void EditApplyColors(void) {
-    HBRUSH old = g_brEdit;
+    HBRUSH oldBrush = g_brEdit;
     g_brEdit = CreateSolidBrush(C_EDIT_BG);
     if (g_edit) InvalidateRect(g_edit, NULL, TRUE);
-    if (old) DeleteObject(old);
+    if (oldBrush) DeleteObject(oldBrush);
 }
 
 static const int g_ladder[] = { 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 220, 240, 260, 280, 300, 320, 340, 360,
                                 400, 440, 480 };
 
-static int Ladder(int cur, int dir) {
+static int Ladder(int current, int dir) {
     int i;
     if (dir > 0) {
-        for (i = 0; i < COUNTOF(g_ladder); i++) if (g_ladder[i] > cur) return g_ladder[i];
+        for (i = 0; i < COUNTOF(g_ladder); i++) if (g_ladder[i] > current) return g_ladder[i];
     } else {
-        for (i = COUNTOF(g_ladder) - 1; i >= 0; i--) if (g_ladder[i] < cur) return g_ladder[i];
+        for (i = COUNTOF(g_ladder) - 1; i >= 0; i--) if (g_ladder[i] < current) return g_ladder[i];
     }
-    return cur;
+    return current;
 }
 
 BOOL EditZoomCan(int dir) {
@@ -255,9 +255,9 @@ BOOL EditZoomCan(int dir) {
 }
 
 void EditZoomStep(int dir) {
-    int n = Ladder(g_pf.cur, dir);
-    if (n == g_pf.cur) return;
-    g_pf.cur = n;
+    int newSize = Ladder(g_pf.cur, dir);
+    if (newSize == g_pf.cur) return;
+    g_pf.cur = newSize;
     EditApplyFont();
     AppUpdateStatus();
 }
@@ -271,19 +271,19 @@ void EditZoomReset(void) {
 
 #define RTL_BITS (WS_EX_RTLREADING | WS_EX_RIGHT | WS_EX_LEFTSCROLLBAR)
 
-static void StubSync(HWND h);
-static void BandSync(HWND h);
+static void StubSync(HWND hwnd);
+static void BandSync(HWND hwnd);
 
 BOOL EditIsRtl(void) {
     return (GetWindowLongPtrW(g_edit, GWL_EXSTYLE) & WS_EX_RTLREADING) != 0;
 }
 
 BOOL EditSetRtl(BOOL rtl) {
-    LONG_PTR ex;
+    LONG_PTR exStyle;
     if (!g_edit || !rtl == !EditIsRtl()) return FALSE;
-    ex = GetWindowLongPtrW(g_edit, GWL_EXSTYLE);
+    exStyle = GetWindowLongPtrW(g_edit, GWL_EXSTYLE);
     EditCaretInvalidate();
-    SetWindowLongPtrW(g_edit, GWL_EXSTYLE, rtl ? (ex | RTL_BITS) : (ex & ~(LONG_PTR)RTL_BITS));
+    SetWindowLongPtrW(g_edit, GWL_EXSTYLE, rtl ? (exStyle | RTL_BITS) : (exStyle & ~(LONG_PTR)RTL_BITS));
     SetWindowPos(g_edit, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     EditPad(g_edit);
     g_revealPending = 1;
@@ -299,16 +299,16 @@ void EditDirKeyCancel(void) { g_shiftDir = 0; }
 
 int EditStrongDir(int limit) {
     void *lock;
-    const WCHAR *t;
-    WORD ty[64];
-    int n, i, j, k, dir = 0;
-    t = EditLockText(&lock, &n);
-    if (!t) return 0;
-    if (n > limit) n = limit;
-    for (i = 0; i < n && !dir; i += k) {
-        k = n - i < COUNTOF(ty) ? n - i : COUNTOF(ty);
-        if (!GetStringTypeW(2, t + i, k, ty)) break;
-        for (j = 0; j < k; j++) if (ty[j] == 1 || ty[j] == 2) { dir = ty[j]; break; }
+    const WCHAR *text;
+    WORD types[64];
+    int length, i, j, chunk, dir = 0;
+    text = EditLockText(&lock, &length);
+    if (!text) return 0;
+    if (length > limit) length = limit;
+    for (i = 0; i < length && !dir; i += chunk) {
+        chunk = length - i < COUNTOF(types) ? length - i : COUNTOF(types);
+        if (!GetStringTypeW(2, text + i, chunk, types)) break;
+        for (j = 0; j < chunk; j++) if (types[j] == 1 || types[j] == 2) { dir = types[j]; break; }
     }
     EditUnlockText(lock);
     return dir;
@@ -320,174 +320,174 @@ static int g_shotWiped, g_shotKept;
 #endif
 
 typedef struct StubGeom {
-    RECT fr;
-    int  first, total;
-    int  y0, pitch, hoff;
-    int  w;
+    RECT formatRect;
+    int  firstLine, lineCount;
+    int  originY, pitch, scrollX;
+    int  stubWidth;
     int  maxRow;
 } StubGeom;
 
 typedef struct Stub { int row, x, y, dir; } Stub;
 
-static struct { int n, row[STUB_MAX], xd[STUB_MAX], dir[STUB_MAX]; } g_stub;
+static struct { int count, row[STUB_MAX], docX[STUB_MAX], dir[STUB_MAX]; } g_stub;
 
-static LRESULT Ctl(HWND h, UINT m, WPARAM w, LPARAM l) {
-    return CallWindowProcW(g_orig, h, m, w, l);
+static LRESULT Ctl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    return CallWindowProcW(g_orig, hwnd, msg, wParam, lParam);
 }
 
-static int StubHasSel(HWND h) {
-    DWORD s = 0, e = 0;
-    Ctl(h, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    return e > s;
+static int StubHasSel(HWND hwnd) {
+    DWORD selStart = 0, selEnd = 0;
+    Ctl(hwnd, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    return selEnd > selStart;
 }
 
-static void StubMetrics(HWND h) {
-    HDC dc = GetDC(h);
+static void StubMetrics(HWND hwnd) {
+    HDC hdc = GetDC(hwnd);
     SIZE sz;
     TEXTMETRICW tm;
     sz.cx = 0; sz.cy = 0;
     memset(&tm, 0, sizeof tm);
-    if (dc) {
-        HGDIOBJ of = SelectObject(dc, g_font);
-        GetTextExtentPoint32W(dc, L" ", 1, &sz);
-        GetTextMetricsW(dc, &tm);
-        SelectObject(dc, of);
-        ReleaseDC(h, dc);
+    if (hdc) {
+        HGDIOBJ oldFont = SelectObject(hdc, g_font);
+        GetTextExtentPoint32W(hdc, L" ", 1, &sz);
+        GetTextMetricsW(hdc, &tm);
+        SelectObject(hdc, oldFont);
+        ReleaseDC(hwnd, hdc);
     }
     g_stubW = sz.cx > 3 ? (int)sz.cx : 3;
     g_stubMax = tm.tmMaxCharWidth > g_stubW ? (int)tm.tmMaxCharWidth : g_stubW;
 }
 
-static int StubGeomGet(HWND h, StubGeom *g) {
-    int s0, s1;
-    LRESULT p0, p1;
-    Ctl(h, EM_GETRECT, 0, (LPARAM)&g->fr);
-    g->total = (int)Ctl(h, EM_GETLINECOUNT, 0, 0);
-    g->first = (int)Ctl(h, EM_GETFIRSTVISIBLELINE, 0, 0);
-    if (g->first < 0 || g->first + 1 >= g->total) return 0;
-    s0 = (int)Ctl(h, EM_LINEINDEX, (WPARAM)g->first, 0);
-    s1 = (int)Ctl(h, EM_LINEINDEX, (WPARAM)(g->first + 1), 0);
-    if (s0 < 0 || s1 < 0) return 0;
-    p0 = Ctl(h, EM_POSFROMCHAR, (WPARAM)s0, 0);
-    p1 = Ctl(h, EM_POSFROMCHAR, (WPARAM)s1, 0);
-    g->y0 = (short)HIWORD(p0);
-    g->pitch = (short)HIWORD(p1) - g->y0;
-    if (g->pitch <= 0) g->pitch = LineHeight();
-    g->hoff = EditIsRtl() ? 0 : g->fr.left - (short)LOWORD(p0);
-    if (!g_stubW) StubMetrics(h);
-    g->w = g_stubW;
-    g->maxRow = 30000 / g_stubMax;
+static int StubGeomGet(HWND hwnd, StubGeom *geom) {
+    int firstIndex, nextIndex;
+    LRESULT firstPos, nextPos;
+    Ctl(hwnd, EM_GETRECT, 0, (LPARAM)&geom->formatRect);
+    geom->lineCount = (int)Ctl(hwnd, EM_GETLINECOUNT, 0, 0);
+    geom->firstLine = (int)Ctl(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0);
+    if (geom->firstLine < 0 || geom->firstLine + 1 >= geom->lineCount) return 0;
+    firstIndex = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)geom->firstLine, 0);
+    nextIndex = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)(geom->firstLine + 1), 0);
+    if (firstIndex < 0 || nextIndex < 0) return 0;
+    firstPos = Ctl(hwnd, EM_POSFROMCHAR, (WPARAM)firstIndex, 0);
+    nextPos = Ctl(hwnd, EM_POSFROMCHAR, (WPARAM)nextIndex, 0);
+    geom->originY = (short)HIWORD(firstPos);
+    geom->pitch = (short)HIWORD(nextPos) - geom->originY;
+    if (geom->pitch <= 0) geom->pitch = LineHeight();
+    geom->scrollX = EditIsRtl() ? 0 : geom->formatRect.left - (short)LOWORD(firstPos);
+    if (!g_stubW) StubMetrics(hwnd);
+    geom->stubWidth = g_stubW;
+    geom->maxRow = 30000 / g_stubMax;
     return 1;
 }
 
-static void StubRect(RECT *r, const StubGeom *g, int x, int y, int dir) {
-    r->left = dir > 0 ? x : x - g->w;
-    r->right = dir > 0 ? x + g->w : x;
-    r->top = y;
-    r->bottom = y + g->pitch;
+static void StubRect(RECT *rect, const StubGeom *geom, int x, int y, int dir) {
+    rect->left = dir > 0 ? x : x - geom->stubWidth;
+    rect->right = dir > 0 ? x + geom->stubWidth : x;
+    rect->top = y;
+    rect->bottom = y + geom->pitch;
 }
 
-static int StubList(HWND h, const StubGeom *g, Stub *out, int cap) {
-    DWORD s = 0, e = 0;
-    HLOCAL hl;
-    const WCHAR *t;
-    int n = 0, r, last, cur, nxt, rtl = EditIsRtl();
-    Ctl(h, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    if (e <= s) return 0;
-    hl = (HLOCAL)Ctl(h, EM_GETHANDLE, 0, 0);
-    t = hl ? (const WCHAR *)LocalLock(hl) : NULL;
-    if (!t) return 0;
-    last = g->first + (g->fr.bottom - g->fr.top + g->pitch - 1) / g->pitch - 1;
-    if (last > g->total - 2) last = g->total - 2;
-    cur = (int)Ctl(h, EM_LINEINDEX, (WPARAM)g->first, 0);
-    for (r = g->first; r <= last && n < cap; r++) {
-        int b;
-        nxt = (int)Ctl(h, EM_LINEINDEX, (WPARAM)(r + 1), 0);
-        if (nxt < 2) break;
-        b = nxt - 2;
-        if (b >= cur && b - cur <= g->maxRow && t[b] == '\r' && t[b + 1] == '\n' && (int)s <= b && (int)e > b) {
-            LRESULT p = Ctl(h, EM_POSFROMCHAR, (WPARAM)b, 0);
-            out[n].row = r;
-            out[n].x = (short)LOWORD(p);
-            out[n].y = (short)HIWORD(p);
-            out[n].dir = 1;
+static int StubList(HWND hwnd, const StubGeom *geom, Stub *out, int cap) {
+    DWORD selStart = 0, selEnd = 0;
+    HLOCAL hText;
+    const WCHAR *text;
+    int count = 0, row, lastRow, lineStart, nextStart, rtl = EditIsRtl();
+    Ctl(hwnd, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    if (selEnd <= selStart) return 0;
+    hText = (HLOCAL)Ctl(hwnd, EM_GETHANDLE, 0, 0);
+    text = hText ? (const WCHAR *)LocalLock(hText) : NULL;
+    if (!text) return 0;
+    lastRow = geom->firstLine + (geom->formatRect.bottom - geom->formatRect.top + geom->pitch - 1) / geom->pitch - 1;
+    if (lastRow > geom->lineCount - 2) lastRow = geom->lineCount - 2;
+    lineStart = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)geom->firstLine, 0);
+    for (row = geom->firstLine; row <= lastRow && count < cap; row++) {
+        int breakIndex;
+        nextStart = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)(row + 1), 0);
+        if (nextStart < 2) break;
+        breakIndex = nextStart - 2;
+        if (breakIndex >= lineStart && breakIndex - lineStart <= geom->maxRow && text[breakIndex] == '\r' && text[breakIndex + 1] == '\n' && (int)selStart <= breakIndex && (int)selEnd > breakIndex) {
+            LRESULT breakPos = Ctl(hwnd, EM_POSFROMCHAR, (WPARAM)breakIndex, 0);
+            out[count].row = row;
+            out[count].x = (short)LOWORD(breakPos);
+            out[count].y = (short)HIWORD(breakPos);
+            out[count].dir = 1;
             if (rtl) {
-                LRESULT q = Ctl(h, EM_POSFROMCHAR, (WPARAM)cur, 0);
-                if (out[n].x <= (short)LOWORD(q)) out[n].dir = -1;
+                LRESULT startPos = Ctl(hwnd, EM_POSFROMCHAR, (WPARAM)lineStart, 0);
+                if (out[count].x <= (short)LOWORD(startPos)) out[count].dir = -1;
             }
-            n++;
+            count++;
         }
-        cur = nxt;
+        lineStart = nextStart;
     }
-    LocalUnlock(hl);
-    return n;
+    LocalUnlock(hText);
+    return count;
 }
 
-static void StubDrawAll(HWND h, HDC dc, const StubGeom *g, const Stub *s, int n, const RECT *clip) {
-    int i, hid = 0;
-    HDC own = NULL;
-    if (!dc) {
-        own = dc = GetDC(h);
-        if (!dc) return;
-        hid = GetFocus() == h && HideCaret(h);
+static void StubDrawAll(HWND hwnd, HDC hdc, const StubGeom *geom, const Stub *stubs, int count, const RECT *clip) {
+    int i, caretHidden = 0;
+    HDC ownDc = NULL;
+    if (!hdc) {
+        ownDc = hdc = GetDC(hwnd);
+        if (!hdc) return;
+        caretHidden = GetFocus() == hwnd && HideCaret(hwnd);
     }
-    for (i = 0; i < n; i++) {
-        RECT r;
-        StubRect(&r, g, s[i].x, s[i].y, s[i].dir);
-        if (!IntersectRect(&r, &r, &g->fr)) continue;
-        if (clip && !IntersectRect(&r, &r, clip)) continue;
-        FillRect(dc, &r, (HBRUSH)(COLOR_HIGHLIGHT + 1));
+    for (i = 0; i < count; i++) {
+        RECT rect;
+        StubRect(&rect, geom, stubs[i].x, stubs[i].y, stubs[i].dir);
+        if (!IntersectRect(&rect, &rect, &geom->formatRect)) continue;
+        if (clip && !IntersectRect(&rect, &rect, clip)) continue;
+        FillRect(hdc, &rect, (HBRUSH)(COLOR_HIGHLIGHT + 1));
     }
-    if (hid) ShowCaret(h);
-    if (own) ReleaseDC(h, own);
+    if (caretHidden) ShowCaret(hwnd);
+    if (ownDc) ReleaseDC(hwnd, ownDc);
 }
 
-static void StubPaint(HWND h, HDC dc, const RECT *clip) {
-    StubGeom g;
-    Stub cur[STUB_MAX];
-    int n;
-    if (h != g_edit || !StubHasSel(h) || !StubGeomGet(h, &g)) return;
-    n = StubList(h, &g, cur, STUB_MAX);
-    if (n) StubDrawAll(h, dc, &g, cur, n, clip);
+static void StubPaint(HWND hwnd, HDC hdc, const RECT *clip) {
+    StubGeom geom;
+    Stub stubs[STUB_MAX];
+    int count;
+    if (hwnd != g_edit || !StubHasSel(hwnd) || !StubGeomGet(hwnd, &geom)) return;
+    count = StubList(hwnd, &geom, stubs, STUB_MAX);
+    if (count) StubDrawAll(hwnd, hdc, &geom, stubs, count, clip);
 }
 
-static void StubSync(HWND h) {
-    StubGeom g;
-    Stub cur[STUB_MAX];
-    int n = 0, i, j, any = 0, vis;
-    if (h != g_edit || !(GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) return;
-    if (!StubHasSel(h) && !g_stub.n) return;
-    if (!StubGeomGet(h, &g)) { g_stub.n = 0; return; }
-    n = StubList(h, &g, cur, STUB_MAX);
-    vis = (g.fr.bottom - g.fr.top + g.pitch - 1) / g.pitch;
-    for (i = 0, j = 0; i < g_stub.n; i++) {
+static void StubSync(HWND hwnd) {
+    StubGeom geom;
+    Stub stubs[STUB_MAX];
+    int count = 0, i, j, invalidated = 0, visibleRows;
+    if (hwnd != g_edit || !(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE)) return;
+    if (!StubHasSel(hwnd) && !g_stub.count) return;
+    if (!StubGeomGet(hwnd, &geom)) { g_stub.count = 0; return; }
+    count = StubList(hwnd, &geom, stubs, STUB_MAX);
+    visibleRows = (geom.formatRect.bottom - geom.formatRect.top + geom.pitch - 1) / geom.pitch;
+    for (i = 0, j = 0; i < g_stub.count; i++) {
         int row = g_stub.row[i];
-        RECT r;
-        while (j < n && cur[j].row < row) j++;
-        if (j < n && cur[j].row == row && cur[j].dir == g_stub.dir[i] && cur[j].x - g.fr.left + g.hoff == g_stub.xd[i]) {
+        RECT rect;
+        while (j < count && stubs[j].row < row) j++;
+        if (j < count && stubs[j].row == row && stubs[j].dir == g_stub.dir[i] && stubs[j].x - geom.formatRect.left + geom.scrollX == g_stub.docX[i]) {
 #ifdef SHOTDC
-            HDC pdc = GetDC(h);
-            if (pdc) {
-                int px = cur[j].dir > 0 ? cur[j].x + 2 : cur[j].x - 3, py = cur[j].y + g.pitch / 2;
-                if (px < g.fr.right && GetPixel(pdc, px, py) != GetSysColor(COLOR_HIGHLIGHT)) g_shotWiped++;
+            HDC probeDc = GetDC(hwnd);
+            if (probeDc) {
+                int probeX = stubs[j].dir > 0 ? stubs[j].x + 2 : stubs[j].x - 3, probeY = stubs[j].y + geom.pitch / 2;
+                if (probeX < geom.formatRect.right && GetPixel(probeDc, probeX, probeY) != GetSysColor(COLOR_HIGHLIGHT)) g_shotWiped++;
                 g_shotKept++;
-                ReleaseDC(h, pdc);
+                ReleaseDC(hwnd, probeDc);
             }
 #endif
             continue;
         }
-        if (row < g.first || row >= g.first + vis) continue;
-        StubRect(&r, &g, g.fr.left - g.hoff + g_stub.xd[i], g.y0 + (row - g.first) * g.pitch, g_stub.dir[i]);
-        if (IntersectRect(&r, &r, &g.fr)) { InvalidateRect(h, &r, TRUE); any = 1; }
+        if (row < geom.firstLine || row >= geom.firstLine + visibleRows) continue;
+        StubRect(&rect, &geom, geom.formatRect.left - geom.scrollX + g_stub.docX[i], geom.originY + (row - geom.firstLine) * geom.pitch, g_stub.dir[i]);
+        if (IntersectRect(&rect, &rect, &geom.formatRect)) { InvalidateRect(hwnd, &rect, TRUE); invalidated = 1; }
     }
-    if (any) UpdateWindow(h);
-    if (n) StubDrawAll(h, NULL, &g, cur, n, NULL);
-    g_stub.n = n;
-    for (i = 0; i < n; i++) { g_stub.row[i] = cur[i].row; g_stub.xd[i] = cur[i].x - g.fr.left + g.hoff; g_stub.dir[i] = cur[i].dir; }
+    if (invalidated) UpdateWindow(hwnd);
+    if (count) StubDrawAll(hwnd, NULL, &geom, stubs, count, NULL);
+    g_stub.count = count;
+    for (i = 0; i < count; i++) { g_stub.row[i] = stubs[i].row; g_stub.docX[i] = stubs[i].x - geom.formatRect.left + geom.scrollX; g_stub.dir[i] = stubs[i].dir; }
 }
 
-static int StubWatch(UINT m, WPARAM w) {
-    switch (m) {
+static int StubWatch(UINT msg, WPARAM wParam) {
+    switch (msg) {
     case WM_KEYDOWN: case WM_KEYUP: case WM_CHAR:
     case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK: case WM_TIMER:
     case WM_SETFOCUS: case WM_KILLFOCUS:
@@ -499,7 +499,7 @@ static int StubWatch(UINT m, WPARAM w) {
     case WM_IME_COMPOSITION: case WM_IME_CHAR: case WM_IME_ENDCOMPOSITION:
         return 1;
     case WM_MOUSEMOVE:
-        return (w & 1) != 0;
+        return (wParam & 1) != 0;
     }
     return 0;
 }
@@ -507,257 +507,257 @@ static int StubWatch(UINT m, WPARAM w) {
 #define BAND_SEL_EXTRA 1
 
 typedef struct BandGeom {
-    RECT fr, band;
+    RECT formatRect, band;
     RECT top, left;
-    int  first, total, rows;
-    int  y0, x0, pitch;
-    int  text;
+    int  firstLine, lineCount, rows;
+    int  originY, originX, pitch;
+    int  bottomText;
     int  topText;
     int  leftText;
 } BandGeom;
 
-static int BandRect(HWND h, BandGeom *g) {
-    RECT cr, f;
+static int BandRect(HWND hwnd, BandGeom *geom) {
+    RECT client, formatRect;
     if (EditIsRtl()) return 0;
-    GetClientRect(h, &cr);
-    Ctl(h, EM_GETRECT, 0, (LPARAM)&f);
-    g->fr = f;
-    g->band.left = cr.left;
-    g->band.right = cr.right;
-    g->band.top = f.bottom;
-    g->band.bottom = cr.bottom - S(EDIT_BAND_INSET);
-    g->top.left = cr.left; g->top.right = cr.right;
-    g->top.top = cr.top; g->top.bottom = f.top;
-    g->left.left = cr.left; g->left.right = f.left;
-    g->left.top = f.top; g->left.bottom = f.bottom;
-    return g->band.bottom > g->band.top && g->band.right > g->band.left;
+    GetClientRect(hwnd, &client);
+    Ctl(hwnd, EM_GETRECT, 0, (LPARAM)&formatRect);
+    geom->formatRect = formatRect;
+    geom->band.left = client.left;
+    geom->band.right = client.right;
+    geom->band.top = formatRect.bottom;
+    geom->band.bottom = client.bottom - S(EDIT_BAND_INSET);
+    geom->top.left = client.left; geom->top.right = client.right;
+    geom->top.top = client.top; geom->top.bottom = formatRect.top;
+    geom->left.left = client.left; geom->left.right = formatRect.left;
+    geom->left.top = formatRect.top; geom->left.bottom = formatRect.bottom;
+    return geom->band.bottom > geom->band.top && geom->band.right > geom->band.left;
 }
 
-static int BandGeomGet(HWND h, BandGeom *g) {
-    int s0, s1;
-    LRESULT p0, p1;
-    memset(g, 0, sizeof *g);
-    if (!BandRect(h, g)) return 0;
-    g->total = (int)Ctl(h, EM_GETLINECOUNT, 0, 0);
-    g->first = (int)Ctl(h, EM_GETFIRSTVISIBLELINE, 0, 0);
-    if (g->first < 0) return 1;
-    s0 = (int)Ctl(h, EM_LINEINDEX, (WPARAM)g->first, 0);
-    s1 = g->first + 1 < g->total ? (int)Ctl(h, EM_LINEINDEX, (WPARAM)(g->first + 1), 0) : -1;
-    if (s0 < 0) return 1;
-    p0 = Ctl(h, EM_POSFROMCHAR, (WPARAM)s0, 0);
-    p1 = s1 >= 0 ? Ctl(h, EM_POSFROMCHAR, (WPARAM)s1, 0) : -1;
-    g->y0 = (short)HIWORD(p0);
-    g->x0 = (short)LOWORD(p0);
-    g->pitch = (short)HIWORD(p1) - g->y0;
-    if (g->pitch <= 0) g->pitch = LineHeight();
-    g->rows = (g->fr.bottom - g->y0) / g->pitch;
-    if (g->x0 > g->fr.left || g->fr.left - g->x0 > 30000) return 1;
-    g->topText = g->first >= 1 && g->top.bottom > g->top.top;
-    g->leftText = g->x0 < g->fr.left && g->left.right > g->left.left;
-    if (g->rows < 1 || g->first + 1 >= g->total || g->first + g->rows >= g->total) return 1;
-    g->text = 1;
+static int BandGeomGet(HWND hwnd, BandGeom *geom) {
+    int firstIndex, nextIndex;
+    LRESULT firstPos, nextPos;
+    memset(geom, 0, sizeof *geom);
+    if (!BandRect(hwnd, geom)) return 0;
+    geom->lineCount = (int)Ctl(hwnd, EM_GETLINECOUNT, 0, 0);
+    geom->firstLine = (int)Ctl(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0);
+    if (geom->firstLine < 0) return 1;
+    firstIndex = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)geom->firstLine, 0);
+    nextIndex = geom->firstLine + 1 < geom->lineCount ? (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)(geom->firstLine + 1), 0) : -1;
+    if (firstIndex < 0) return 1;
+    firstPos = Ctl(hwnd, EM_POSFROMCHAR, (WPARAM)firstIndex, 0);
+    nextPos = nextIndex >= 0 ? Ctl(hwnd, EM_POSFROMCHAR, (WPARAM)nextIndex, 0) : -1;
+    geom->originY = (short)HIWORD(firstPos);
+    geom->originX = (short)LOWORD(firstPos);
+    geom->pitch = (short)HIWORD(nextPos) - geom->originY;
+    if (geom->pitch <= 0) geom->pitch = LineHeight();
+    geom->rows = (geom->formatRect.bottom - geom->originY) / geom->pitch;
+    if (geom->originX > geom->formatRect.left || geom->formatRect.left - geom->originX > 30000) return 1;
+    geom->topText = geom->firstLine >= 1 && geom->top.bottom > geom->top.top;
+    geom->leftText = geom->originX < geom->formatRect.left && geom->left.right > geom->left.left;
+    if (geom->rows < 1 || geom->firstLine + 1 >= geom->lineCount || geom->firstLine + geom->rows >= geom->lineCount) return 1;
+    geom->bottomText = 1;
     return 1;
 }
 
-static int BandKind(WCHAR c) {
-    if ((c >= 0xFB1D && c < 0xFE00) || (c >= 0xFE70 && c < 0xFF00)) return 2;
-    if ((c >= 0x0590 && c < 0x0900) || (c >= 0x200E && c <= 0x200F) || (c >= 0x202A && c <= 0x202E) || (c >= 0x2066 && c <= 0x2069)) return 1;
+static int BandKind(WCHAR ch) {
+    if ((ch >= 0xFB1D && ch < 0xFE00) || (ch >= 0xFE70 && ch < 0xFF00)) return 2;
+    if ((ch >= 0x0590 && ch < 0x0900) || (ch >= 0x200E && ch <= 0x200F) || (ch >= 0x202A && ch <= 0x202E) || (ch >= 0x2066 && ch <= 0x2069)) return 1;
     return 0;
 }
 
-static int BandWidth(HDC dc, const WCHAR *p, int n) {
-    return n > 0 ? (int)LOWORD(GetTabbedTextExtentW(dc, p, n, g_tabPx > 0, &g_tabPx)) : 0;
+static int BandWidth(HDC hdc, const WCHAR *text, int length) {
+    return length > 0 ? (int)LOWORD(GetTabbedTextExtentW(hdc, text, length, g_tabPx > 0, &g_tabPx)) : 0;
 }
 
-static int BandText(HDC dc, int x, int y, const WCHAR *p, int n, int x0) {
-    return n > 0 ? x + (int)LOWORD(TabbedTextOutW(dc, x, y, p, n, g_tabPx > 0, &g_tabPx, x0)) : x;
+static int BandText(HDC hdc, int x, int y, const WCHAR *text, int length, int tabOrigin) {
+    return length > 0 ? x + (int)LOWORD(TabbedTextOutW(hdc, x, y, text, length, g_tabPx > 0, &g_tabPx, tabOrigin)) : x;
 }
 
-static void BandRows(HWND h, HDC dc, const BandGeom *g, int r0, int r1, const RECT *cut) {
-    DWORD ss = 0, se = 0;
-    HLOCAL hl;
-    const WCHAR *t;
-    HGDIOBJ of;
-    COLORREF hit = GetSysColor(COLOR_HIGHLIGHTTEXT);
-    int n, r, s, maxRow;
-    hl = (HLOCAL)Ctl(h, EM_GETHANDLE, 0, 0);
-    t = hl ? (const WCHAR *)LocalLock(hl) : NULL;
-    if (!t) return;
-    if (!g_stubW) StubMetrics(h);
+static void BandRows(HWND hwnd, HDC hdc, const BandGeom *geom, int firstRow, int endRow, const RECT *cut) {
+    DWORD selStart = 0, selEnd = 0;
+    HLOCAL hText;
+    const WCHAR *text;
+    HGDIOBJ oldFont;
+    COLORREF selTextColor = GetSysColor(COLOR_HIGHLIGHTTEXT);
+    int length, row, lineStart, maxRow;
+    hText = (HLOCAL)Ctl(hwnd, EM_GETHANDLE, 0, 0);
+    text = hText ? (const WCHAR *)LocalLock(hText) : NULL;
+    if (!text) return;
+    if (!g_stubW) StubMetrics(hwnd);
     maxRow = 30000 / g_stubMax;
-    n = (int)Ctl(h, WM_GETTEXTLENGTH, 0, 0);
-    Ctl(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se);
-    of = SelectObject(dc, g_font);
-    SetBkMode(dc, TRANSPARENT);
-    IntersectClipRect(dc, cut->left, cut->top, g->fr.right < cut->right ? g->fr.right : cut->right, cut->bottom);
-    r = r0;
-    if (r1 > g->total) r1 = g->total;
-    s = r >= 0 && r < g->total ? (int)Ctl(h, EM_LINEINDEX, (WPARAM)r, 0) : -1;
-    for (; r < r1 && s >= 0 && s <= n; r++) {
-        int y = g->y0 + (r - g->first) * g->pitch, e, rs, re, a, b, i, cost, kind = 0, hard = 0;
-        RECT q;
+    length = (int)Ctl(hwnd, WM_GETTEXTLENGTH, 0, 0);
+    Ctl(hwnd, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    oldFont = SelectObject(hdc, g_font);
+    SetBkMode(hdc, TRANSPARENT);
+    IntersectClipRect(hdc, cut->left, cut->top, geom->formatRect.right < cut->right ? geom->formatRect.right : cut->right, cut->bottom);
+    row = firstRow;
+    if (endRow > geom->lineCount) endRow = geom->lineCount;
+    lineStart = row >= 0 && row < geom->lineCount ? (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)row, 0) : -1;
+    for (; row < endRow && lineStart >= 0 && lineStart <= length; row++) {
+        int y = geom->originY + (row - geom->firstLine) * geom->pitch, lineEnd, rowStart, rowEnd, rowSelStart, rowSelEnd, i, cost, kind = 0, hardBreak = 0;
+        RECT selRect;
         if (y >= cut->bottom) break;
-        e = r + 1 < g->total ? (int)Ctl(h, EM_LINEINDEX, (WPARAM)(r + 1), 0) : n;
-        if (e < s || e > n) break;
-        rs = s; re = e;
-        s = e;
-        if (r + 1 < g->total && re - rs >= 2 && t[re - 2] == '\r' && t[re - 1] == '\n') { re -= 2; hard = 1; }
-        if (re - rs > maxRow) continue;
-        for (i = rs, cost = 0; i < re && kind < 2; i++) {
-            int k = BandKind(t[i]);
-            if (k > kind) kind = k;
-            cost += t[i] == '\t' ? 8 : 1;
+        lineEnd = row + 1 < geom->lineCount ? (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)(row + 1), 0) : length;
+        if (lineEnd < lineStart || lineEnd > length) break;
+        rowStart = lineStart; rowEnd = lineEnd;
+        lineStart = lineEnd;
+        if (row + 1 < geom->lineCount && rowEnd - rowStart >= 2 && text[rowEnd - 2] == '\r' && text[rowEnd - 1] == '\n') { rowEnd -= 2; hardBreak = 1; }
+        if (rowEnd - rowStart > maxRow) continue;
+        for (i = rowStart, cost = 0; i < rowEnd && kind < 2; i++) {
+            int charKind = BandKind(text[i]);
+            if (charKind > kind) kind = charKind;
+            cost += text[i] == '\t' ? 8 : 1;
         }
         if (cost > maxRow || kind == 2) continue;
-        if (kind == 1 && se > ss && (int)ss < e && (int)se > rs) continue;
-        a = (int)ss < rs ? rs : ((int)ss > re ? re : (int)ss);
-        b = (int)se < rs ? rs : ((int)se > re ? re : (int)se);
-        q.top = y; q.bottom = y + g->pitch;
-        if (b > a) {
-            q.left = g->x0 + BandWidth(dc, t + rs, a - rs);
-            q.right = g->x0 + BandWidth(dc, t + rs, b - rs) + BAND_SEL_EXTRA;
-            FillRect(dc, &q, (HBRUSH)(COLOR_HIGHLIGHT + 1));
+        if (kind == 1 && selEnd > selStart && (int)selStart < lineEnd && (int)selEnd > rowStart) continue;
+        rowSelStart = (int)selStart < rowStart ? rowStart : ((int)selStart > rowEnd ? rowEnd : (int)selStart);
+        rowSelEnd = (int)selEnd < rowStart ? rowStart : ((int)selEnd > rowEnd ? rowEnd : (int)selEnd);
+        selRect.top = y; selRect.bottom = y + geom->pitch;
+        if (rowSelEnd > rowSelStart) {
+            selRect.left = geom->originX + BandWidth(hdc, text + rowStart, rowSelStart - rowStart);
+            selRect.right = geom->originX + BandWidth(hdc, text + rowStart, rowSelEnd - rowStart) + BAND_SEL_EXTRA;
+            FillRect(hdc, &selRect, (HBRUSH)(COLOR_HIGHLIGHT + 1));
         }
-        if (hard && (int)ss <= re && (int)se > re) {
-            q.left = g->x0 + BandWidth(dc, t + rs, re - rs);
-            q.right = q.left + g_stubW;
-            FillRect(dc, &q, (HBRUSH)(COLOR_HIGHLIGHT + 1));
+        if (hardBreak && (int)selStart <= rowEnd && (int)selEnd > rowEnd) {
+            selRect.left = geom->originX + BandWidth(hdc, text + rowStart, rowEnd - rowStart);
+            selRect.right = selRect.left + g_stubW;
+            FillRect(hdc, &selRect, (HBRUSH)(COLOR_HIGHLIGHT + 1));
         }
         {
-            int x = g->x0;
-            SetTextColor(dc, C_EDIT_FG);
-            x = BandText(dc, x, y, t + rs, a - rs, g->x0);
-            SetTextColor(dc, hit);
-            x = BandText(dc, x, y, t + a, b - a, g->x0);
-            SetTextColor(dc, C_EDIT_FG);
-            BandText(dc, x, y, t + b, re - b, g->x0);
+            int x = geom->originX;
+            SetTextColor(hdc, C_EDIT_FG);
+            x = BandText(hdc, x, y, text + rowStart, rowSelStart - rowStart, geom->originX);
+            SetTextColor(hdc, selTextColor);
+            x = BandText(hdc, x, y, text + rowSelStart, rowSelEnd - rowSelStart, geom->originX);
+            SetTextColor(hdc, C_EDIT_FG);
+            BandText(hdc, x, y, text + rowSelEnd, rowEnd - rowSelEnd, geom->originX);
         }
     }
-    SelectObject(dc, of);
-    LocalUnlock(hl);
+    SelectObject(hdc, oldFont);
+    LocalUnlock(hText);
 }
 
-static void BandStrip(HWND h, HDC dc, const BandGeom *g, const RECT *area, int text, int r0, int r1, const RECT *clip) {
-    RECT v = *area;
-    HDC mdc;
+static void BandStrip(HWND hwnd, HDC hdc, const BandGeom *geom, const RECT *area, int hasText, int firstRow, int endRow, const RECT *clip) {
+    RECT blitRect = *area;
+    HDC memDc;
     HBITMAP bmp;
-    HGDIOBJ ob = NULL;
+    HGDIOBJ oldBitmap = NULL;
     if (area->right <= area->left || area->bottom <= area->top) return;
-    if (clip && !IntersectRect(&v, &v, clip)) return;
-    mdc = CreateCompatibleDC(dc);
-    bmp = CreateCompatibleBitmap(dc, area->right - area->left, area->bottom - area->top);
-    if (mdc && bmp) {
-        ob = SelectObject(mdc, bmp);
-        SetViewportOrgEx(mdc, -area->left, -area->top, NULL);
-        FillRect(mdc, area, EditBrush());
-        if (text) BandRows(h, mdc, g, r0, r1, area);
-        BitBlt(dc, v.left, v.top, v.right - v.left, v.bottom - v.top, mdc, v.left, v.top, SRCCOPY);
-        SelectObject(mdc, ob);
+    if (clip && !IntersectRect(&blitRect, &blitRect, clip)) return;
+    memDc = CreateCompatibleDC(hdc);
+    bmp = CreateCompatibleBitmap(hdc, area->right - area->left, area->bottom - area->top);
+    if (memDc && bmp) {
+        oldBitmap = SelectObject(memDc, bmp);
+        SetViewportOrgEx(memDc, -area->left, -area->top, NULL);
+        FillRect(memDc, area, EditBrush());
+        if (hasText) BandRows(hwnd, memDc, geom, firstRow, endRow, area);
+        BitBlt(hdc, blitRect.left, blitRect.top, blitRect.right - blitRect.left, blitRect.bottom - blitRect.top, memDc, blitRect.left, blitRect.top, SRCCOPY);
+        SelectObject(memDc, oldBitmap);
     }
     if (bmp) DeleteObject(bmp);
-    if (mdc) DeleteDC(mdc);
+    if (memDc) DeleteDC(memDc);
 }
 
-static void BandDraw(HWND h, HDC dc, const BandGeom *g, const RECT *clip) {
-    BandStrip(h, dc, g, &g->band, g->text, g->first + g->rows, g->total, clip);
-    BandStrip(h, dc, g, &g->top, g->topText, g->first - 1, g->first, clip);
-    BandStrip(h, dc, g, &g->left, g->leftText, g->first, g->first + g->rows, clip);
+static void BandDraw(HWND hwnd, HDC hdc, const BandGeom *geom, const RECT *clip) {
+    BandStrip(hwnd, hdc, geom, &geom->band, geom->bottomText, geom->firstLine + geom->rows, geom->lineCount, clip);
+    BandStrip(hwnd, hdc, geom, &geom->top, geom->topText, geom->firstLine - 1, geom->firstLine, clip);
+    BandStrip(hwnd, hdc, geom, &geom->left, geom->leftText, geom->firstLine, geom->firstLine + geom->rows, clip);
 }
 
-static void BandPaint(HWND h, HDC dc, const RECT *clip) {
-    BandGeom g;
-    RECT t;
-    HDC own = NULL;
-    if (h != g_edit || !BandRect(h, &g)) return;
-    if (clip && !IntersectRect(&t, &g.band, clip) && !IntersectRect(&t, &g.top, clip) && !IntersectRect(&t, &g.left, clip)) return;
-    if (!BandGeomGet(h, &g)) return;
-    if (!dc) {
-        own = dc = GetDC(h);
-        if (!dc) return;
+static void BandPaint(HWND hwnd, HDC hdc, const RECT *clip) {
+    BandGeom geom;
+    RECT overlap;
+    HDC ownDc = NULL;
+    if (hwnd != g_edit || !BandRect(hwnd, &geom)) return;
+    if (clip && !IntersectRect(&overlap, &geom.band, clip) && !IntersectRect(&overlap, &geom.top, clip) && !IntersectRect(&overlap, &geom.left, clip)) return;
+    if (!BandGeomGet(hwnd, &geom)) return;
+    if (!hdc) {
+        ownDc = hdc = GetDC(hwnd);
+        if (!hdc) return;
     }
-    BandDraw(h, dc, &g, clip);
-    if (own) ReleaseDC(h, own);
+    BandDraw(hwnd, hdc, &geom, clip);
+    if (ownDc) ReleaseDC(hwnd, ownDc);
 }
 
-static void BandSync(HWND h) {
-    if (h != g_edit || !(GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) return;
-    BandPaint(h, NULL, NULL);
+static void BandSync(HWND hwnd) {
+    if (hwnd != g_edit || !(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE)) return;
+    BandPaint(hwnd, NULL, NULL);
 }
 
-static LRESULT BandErase(HWND h, WPARAM w, LPARAM l) {
-    BandGeom g;
-    HDC dc = (HDC)w;
+static LRESULT BandErase(HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    BandGeom geom;
+    HDC hdc = (HDC)wParam;
     int saved;
-    LRESULT r;
-    if (h != g_edit || !BandRect(h, &g)) return Ctl(h, WM_ERASEBKGND, w, l);
-    saved = SaveDC(dc);
-    ExcludeClipRect(dc, g.band.left, g.band.top, g.band.right, g.band.bottom);
-    ExcludeClipRect(dc, g.top.left, g.top.top, g.top.right, g.top.bottom);
-    ExcludeClipRect(dc, g.left.left, g.left.top, g.left.right, g.left.bottom);
-    r = Ctl(h, WM_ERASEBKGND, w, l);
-    RestoreDC(dc, saved);
-    return r;
+    LRESULT result;
+    if (hwnd != g_edit || !BandRect(hwnd, &geom)) return Ctl(hwnd, WM_ERASEBKGND, wParam, lParam);
+    saved = SaveDC(hdc);
+    ExcludeClipRect(hdc, geom.band.left, geom.band.top, geom.band.right, geom.band.bottom);
+    ExcludeClipRect(hdc, geom.top.left, geom.top.top, geom.top.right, geom.top.bottom);
+    ExcludeClipRect(hdc, geom.left.left, geom.left.top, geom.left.right, geom.left.bottom);
+    result = Ctl(hwnd, WM_ERASEBKGND, wParam, lParam);
+    RestoreDC(hdc, saved);
+    return result;
 }
 
-static int EditPaintBuffered(HWND h, const RECT *dirty) {
-    RECT cr;
+static int EditPaintBuffered(HWND hwnd, const RECT *dirty) {
+    RECT client;
     PAINTSTRUCT ps;
-    HDC own = NULL, mdc = NULL, dc;
+    HDC ownDc = NULL, memDc = NULL, hdc;
     HBITMAP bmp = NULL;
-    HGDIOBJ ob = NULL;
+    HGDIOBJ oldBitmap = NULL;
     int saved = 0, depth, done = 0, copied = 0;
-    if (!GetClientRect(h, &cr) || cr.right <= 0 || cr.bottom <= 0) return 0;
-    own = GetDC(h);
-    if (!own) return 0;
-    mdc = CreateCompatibleDC(own);
-    if (!mdc) goto cleanup;
-    bmp = CreateCompatibleBitmap(own, cr.right, cr.bottom);
+    if (!GetClientRect(hwnd, &client) || client.right <= 0 || client.bottom <= 0) return 0;
+    ownDc = GetDC(hwnd);
+    if (!ownDc) return 0;
+    memDc = CreateCompatibleDC(ownDc);
+    if (!memDc) goto cleanup;
+    bmp = CreateCompatibleBitmap(ownDc, client.right, client.bottom);
     if (!bmp) goto cleanup;
-    ob = SelectObject(mdc, bmp);
-    if (!ob) goto cleanup;
-    IntersectClipRect(mdc, dirty->left, dirty->top, dirty->right, dirty->bottom);
-    saved = SaveDC(mdc);
-    if (!saved || !FillRect(mdc, &cr, EditBrush())) goto cleanup;
-    ReleaseDC(h, own);
-    own = NULL;
+    oldBitmap = SelectObject(memDc, bmp);
+    if (!oldBitmap) goto cleanup;
+    IntersectClipRect(memDc, dirty->left, dirty->top, dirty->right, dirty->bottom);
+    saved = SaveDC(memDc);
+    if (!saved || !FillRect(memDc, &client, EditBrush())) goto cleanup;
+    ReleaseDC(hwnd, ownDc);
+    ownDc = NULL;
     memset(&ps, 0, sizeof ps);
     depth = g_paintDepth;
     g_paintDepth = 0;
-    dc = BeginPaint(h, &ps);
+    hdc = BeginPaint(hwnd, &ps);
     g_paintDepth = depth;
-    if (!dc) {
-        EndPaint(h, &ps);
-        InvalidateRect(h, dirty, TRUE);
+    if (!hdc) {
+        EndPaint(hwnd, &ps);
+        InvalidateRect(hwnd, dirty, TRUE);
         goto cleanup;
     }
     g_paintDepth++;
-    SendMessageW(h, WM_ERASEBKGND, (WPARAM)mdc, 0);
-    Ctl(h, WM_PRINTCLIENT, (WPARAM)mdc, PRF_CLIENT | PRF_ERASEBKGND);
+    SendMessageW(hwnd, WM_ERASEBKGND, (WPARAM)memDc, 0);
+    Ctl(hwnd, WM_PRINTCLIENT, (WPARAM)memDc, PRF_CLIENT | PRF_ERASEBKGND);
     g_paintDepth--;
-    if (RestoreDC(mdc, saved)) {
-        StubPaint(h, mdc, NULL);
-        BandPaint(h, mdc, NULL);
-        copied = BitBlt(dc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top, mdc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+    if (RestoreDC(memDc, saved)) {
+        StubPaint(hwnd, memDc, NULL);
+        BandPaint(hwnd, memDc, NULL);
+        copied = BitBlt(hdc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top, memDc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
     }
     saved = 0;
     if (!copied) {
-        int state = SaveDC(dc);
+        int state = SaveDC(hdc);
         g_paintDepth++;
-        SendMessageW(h, WM_ERASEBKGND, (WPARAM)dc, 0);
-        Ctl(h, WM_PRINTCLIENT, (WPARAM)dc, PRF_CLIENT | PRF_ERASEBKGND);
+        SendMessageW(hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0);
+        Ctl(hwnd, WM_PRINTCLIENT, (WPARAM)hdc, PRF_CLIENT | PRF_ERASEBKGND);
         g_paintDepth--;
-        if (state) RestoreDC(dc, state);
-        StubPaint(h, dc, &ps.rcPaint);
-        BandPaint(h, dc, &ps.rcPaint);
+        if (state) RestoreDC(hdc, state);
+        StubPaint(hwnd, hdc, &ps.rcPaint);
+        BandPaint(hwnd, hdc, &ps.rcPaint);
     }
-    EndPaint(h, &ps);
+    EndPaint(hwnd, &ps);
     done = 1;
 cleanup:
-    if (saved) RestoreDC(mdc, saved);
-    if (ob) SelectObject(mdc, ob);
-    if (mdc) DeleteDC(mdc);
+    if (saved) RestoreDC(memDc, saved);
+    if (oldBitmap) SelectObject(memDc, oldBitmap);
+    if (memDc) DeleteDC(memDc);
     if (bmp) DeleteObject(bmp);
-    if (own) ReleaseDC(h, own);
+    if (ownDc) ReleaseDC(hwnd, ownDc);
     return done;
 }
 
@@ -765,237 +765,237 @@ cleanup:
 API DWORD WINAPI GetTempPathW(DWORD, LPWSTR);
 static int g_shotPaintW, g_shotPaintH, g_shotPaintY, g_shotPaintHit;
 
-static int ShotInt(char *d, int v) {
-    char t[12];
-    int n = 0, i = 0;
-    do { t[n++] = (char)('0' + v % 10); v /= 10; } while (v);
-    while (n) d[i++] = t[--n];
+static int ShotInt(char *dst, int value) {
+    char digits[12];
+    int count = 0, i = 0;
+    do { digits[count++] = (char)('0' + value % 10); value /= 10; } while (value);
+    while (count) dst[i++] = digits[--count];
     return i;
 }
 
-static void ShotDc(HWND h, int w, int ht, int y0) {
+static void ShotDc(HWND hwnd, int width, int height, int startY) {
     WCHAR path[300];
-    char hdr[40];
-    int n = 0, x, y;
-    BYTE *buf;
-    HDC dc;
-    HANDLE f;
-    DWORD got;
+    char header[40];
+    int headerLength = 0, x, y;
+    BYTE *buffer;
+    HDC hdc;
+    HANDLE file;
+    DWORD written;
     BOOL caretHidden;
-    if (w < 1 || ht < 1) return;
-    dc = GetDC(h);
-    if (!dc) return;
-    hdr[n++] = 'P'; hdr[n++] = '6'; hdr[n++] = '\n';
-    n += ShotInt(hdr + n, w); hdr[n++] = ' '; n += ShotInt(hdr + n, ht);
-    hdr[n++] = '\n'; hdr[n++] = '2'; hdr[n++] = '5'; hdr[n++] = '5'; hdr[n++] = '\n';
-    buf = (BYTE *)mem_alloc((size_t)w * ht * 3);
-    if (!buf) { ReleaseDC(h, dc); return; }
-    caretHidden = HideCaret(h);
-    for (y = 0; y < ht; y++) for (x = 0; x < w; x++) {
-            COLORREF c = GetPixel(dc, x, y0 + y);
-            BYTE *p = buf + ((size_t)y * w + x) * 3;
-            p[0] = (BYTE)(c & 255); p[1] = (BYTE)((c >> 8) & 255); p[2] = (BYTE)((c >> 16) & 255);
+    if (width < 1 || height < 1) return;
+    hdc = GetDC(hwnd);
+    if (!hdc) return;
+    header[headerLength++] = 'P'; header[headerLength++] = '6'; header[headerLength++] = '\n';
+    headerLength += ShotInt(header + headerLength, width); header[headerLength++] = ' '; headerLength += ShotInt(header + headerLength, height);
+    header[headerLength++] = '\n'; header[headerLength++] = '2'; header[headerLength++] = '5'; header[headerLength++] = '5'; header[headerLength++] = '\n';
+    buffer = (BYTE *)mem_alloc((size_t)width * height * 3);
+    if (!buffer) { ReleaseDC(hwnd, hdc); return; }
+    caretHidden = HideCaret(hwnd);
+    for (y = 0; y < height; y++) for (x = 0; x < width; x++) {
+            COLORREF color = GetPixel(hdc, x, startY + y);
+            BYTE *pixel = buffer + ((size_t)y * width + x) * 3;
+            pixel[0] = (BYTE)(color & 255); pixel[1] = (BYTE)((color >> 8) & 255); pixel[2] = (BYTE)((color >> 16) & 255);
         }
-    if (caretHidden) ShowCaret(h);
-    ReleaseDC(h, dc);
+    if (caretHidden) ShowCaret(hwnd);
+    ReleaseDC(hwnd, hdc);
     GetTempPathW(250, path);
     wcat(path, L"mint_dc.ppm", 300);
-    f = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (f != INVALID_HANDLE_VALUE) {
-        WriteFile(f, hdr, (DWORD)n, &got, NULL);
-        WriteFile(f, buf, (DWORD)((size_t)w * ht * 3), &got, NULL);
-        CloseHandle(f);
+    file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE) {
+        WriteFile(file, header, (DWORD)headerLength, &written, NULL);
+        WriteFile(file, buffer, (DWORD)((size_t)width * height * 3), &written, NULL);
+        CloseHandle(file);
     }
-    mem_free(buf);
+    mem_free(buffer);
 }
 #endif
 
-static int CaretMoveMessage(UINT m, WPARAM w) {
-    switch (m) {
+static int CaretMoveMessage(UINT msg, WPARAM wParam) {
+    switch (msg) {
     case WM_KEYDOWN: case WM_CHAR: case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
     case WM_CUT: case WM_PASTE: case WM_CLEAR: case WM_UNDO: case WM_TIMER:
     case EM_SETSEL: case EM_REPLACESEL: case EM_UNDO:
         return 1;
     case WM_MOUSEMOVE:
-        return (w & 1) != 0;
+        return (wParam & 1) != 0;
     }
     return 0;
 }
 
-static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    LRESULT r;
+static LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    LRESULT result;
     int anchor = -1;
     int wasRevealing;
-    if (CaretMoveMessage(m, w)) {
-        DWORD ss = 0, se = 0;
+    if (CaretMoveMessage(msg, wParam)) {
+        DWORD selStart = 0, selEnd = 0;
         int active = EditCaretIndex();
-        SendMessageW(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se);
-        anchor = active == (int)ss ? (int)se : (int)ss;
-        if (m != WM_TIMER) g_allowTallReveal = 1;
+        SendMessageW(hwnd, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+        anchor = active == (int)selStart ? (int)selEnd : (int)selStart;
+        if (msg != WM_TIMER) g_allowTallReveal = 1;
     }
-    if (m == EM_SCROLLCARET) g_allowTallReveal = 1;
-    switch (m) {
+    if (msg == EM_SCROLLCARET) g_allowTallReveal = 1;
+    switch (msg) {
 #ifdef SHOTDC
     case WM_APP + 90:
-        ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
+        ShotDc(hwnd, (int)wParam, (int)(lParam & 0xFFFF), (int)((lParam >> 16) & 0xFFFF));
         return 0;
     case WM_APP + 97:
-        return w ? ShowCaret(h) : HideCaret(h);
+        return wParam ? ShowCaret(hwnd) : HideCaret(hwnd);
     case WM_APP + 91: {
-        LRESULT v = (LRESULT)((g_shotWiped << 16) | g_shotKept);
+        LRESULT packed = (LRESULT)((g_shotWiped << 16) | g_shotKept);
         g_shotWiped = g_shotKept = 0;
-        return v; }
+        return packed; }
     case WM_APP + 92: {
-        HDC dc;
-        if (!w) return PROBE_ID;
-        dc = GetDC(h);
-        if (dc) {
-            SendMessageW(h, WM_ERASEBKGND, (WPARAM)dc, 0);
-            ReleaseDC(h, dc);
+        HDC hdc;
+        if (!wParam) return PROBE_ID;
+        hdc = GetDC(hwnd);
+        if (hdc) {
+            SendMessageW(hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0);
+            ReleaseDC(hwnd, hdc);
         }
-        ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
+        ShotDc(hwnd, (int)wParam, (int)(lParam & 0xFFFF), (int)((lParam >> 16) & 0xFFFF));
         return 0; }
     case WM_APP + 93: {
-        HDC dc = GetDC(h);
-        HBRUSH br = CreateSolidBrush(0x00FF00FF);
-        RECT cr;
-        if (dc && br && GetClientRect(h, &cr)) FillRect(dc, &cr, br);
-        if (br) DeleteObject(br);
-        if (dc) ReleaseDC(h, dc);
-        InvalidateRect(h, NULL, TRUE);
-        UpdateWindow(h);
-        ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
+        HDC hdc = GetDC(hwnd);
+        HBRUSH brush = CreateSolidBrush(0x00FF00FF);
+        RECT client;
+        if (hdc && brush && GetClientRect(hwnd, &client)) FillRect(hdc, &client, brush);
+        if (brush) DeleteObject(brush);
+        if (hdc) ReleaseDC(hwnd, hdc);
+        InvalidateRect(hwnd, NULL, TRUE);
+        UpdateWindow(hwnd);
+        ShotDc(hwnd, (int)wParam, (int)(lParam & 0xFFFF), (int)((lParam >> 16) & 0xFFFF));
         return 0; }
     case WM_APP + 94:
-        if (!w) return PROBE_ID;
-        g_shotPaintW = (int)w;
-        g_shotPaintH = (int)(l & 0xFFFF);
-        g_shotPaintY = (int)((l >> 16) & 0xFFFF);
+        if (!wParam) return PROBE_ID;
+        g_shotPaintW = (int)wParam;
+        g_shotPaintH = (int)(lParam & 0xFFFF);
+        g_shotPaintY = (int)((lParam >> 16) & 0xFFFF);
         g_shotPaintHit = 0;
-        InvalidateRect(h, NULL, TRUE);
-        UpdateWindow(h);
+        InvalidateRect(hwnd, NULL, TRUE);
+        UpdateWindow(hwnd);
         g_shotPaintW = 0;
         return g_shotPaintHit;
     case WM_APP + 95: {
         RECT dirty = { 17, 19, 157, 51 };
-        HDC dc;
-        int ht = (int)(l & 0xFFFF), y0 = (int)((l >> 16) & 0xFFFF);
-        if (!w) return PROBE_ID;
-        dc = GetDC(h);
-        if (dc) {
-            SetPixelV(dc, (int)w - 4, y0 + ht - 4, 0x00FF00FF);
-            ReleaseDC(h, dc);
+        HDC hdc;
+        int height = (int)(lParam & 0xFFFF), startY = (int)((lParam >> 16) & 0xFFFF);
+        if (!wParam) return PROBE_ID;
+        hdc = GetDC(hwnd);
+        if (hdc) {
+            SetPixelV(hdc, (int)wParam - 4, startY + height - 4, 0x00FF00FF);
+            ReleaseDC(hwnd, hdc);
         }
-        InvalidateRect(h, &dirty, TRUE);
-        UpdateWindow(h);
-        ShotDc(h, (int)w, ht, y0);
+        InvalidateRect(hwnd, &dirty, TRUE);
+        UpdateWindow(hwnd);
+        ShotDc(hwnd, (int)wParam, height, startY);
         return 0; }
     case WM_APP + 96: {
-        DWORD ss = 0, se = 0, now, elapsed;
-        int n, i, a, b, line, col;
-        if (!w) return PROBE_ID;
-        n = GetWindowTextLengthW(h);
-        b = n > 16 ? n - 16 : n;
-        a = b > (int)l ? b - (int)l : 0;
-        Ctl(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se);
-        SendMessageW(h, WM_SETREDRAW, FALSE, 0);
-        Ctl(h, EM_SETSEL, (WPARAM)a, (LPARAM)a);
+        DWORD selStart = 0, selEnd = 0, now, elapsed;
+        int length, i, startPos, endPos, line, col;
+        if (!wParam) return PROBE_ID;
+        length = GetWindowTextLengthW(hwnd);
+        endPos = length > 16 ? length - 16 : length;
+        startPos = endPos > (int)lParam ? endPos - (int)lParam : 0;
+        Ctl(hwnd, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+        SendMessageW(hwnd, WM_SETREDRAW, FALSE, 0);
+        Ctl(hwnd, EM_SETSEL, (WPARAM)startPos, (LPARAM)startPos);
         EditCaretPos(&line, &col);
         now = GetTickCount();
-        for (i = 0; i < (int)w; i++) {
-            int idx = (i & 1) ? a : b;
-            Ctl(h, EM_SETSEL, (WPARAM)idx, (LPARAM)idx);
+        for (i = 0; i < (int)wParam; i++) {
+            int index = (i & 1) ? startPos : endPos;
+            Ctl(hwnd, EM_SETSEL, (WPARAM)index, (LPARAM)index);
             EditCaretPos(&line, &col);
         }
         elapsed = GetTickCount() - now;
-        Ctl(h, EM_SETSEL, ss, se);
-        SendMessageW(h, WM_SETREDRAW, TRUE, 0);
-        InvalidateRect(h, NULL, TRUE);
+        Ctl(hwnd, EM_SETSEL, selStart, selEnd);
+        SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);
+        InvalidateRect(hwnd, NULL, TRUE);
         AppUpdateStatus();
         return (LRESULT)elapsed; }
 #endif
     case WM_ERASEBKGND:
         if (!g_paintDepth) return 0;
-        r = BandErase(h, w, l);
+        result = BandErase(hwnd, wParam, lParam);
 #ifdef SHOTDC
         if (g_shotPaintW && !g_shotPaintHit) {
             g_shotPaintHit = 1;
-            ShotDc(h, g_shotPaintW, g_shotPaintH, g_shotPaintY);
+            ShotDc(hwnd, g_shotPaintW, g_shotPaintH, g_shotPaintY);
         }
 #endif
 #ifdef FLICKER_PROBE
         Sleep(8);
 #endif
-        return r;
+        return result;
     case WM_SIZE: {
         static HWND szH;
         static LPARAM szL;
         static DWORD lastAt, lastCost;
         DWORD now = GetTickCount();
-        if (h == szH && l == szL) return 0;
-        szH = h; szL = l;
-        EditCaretRemember(h, g_font);
+        if (hwnd == szH && lParam == szL) return 0;
+        szH = hwnd; szL = lParam;
+        EditCaretRemember(hwnd, g_font);
         if (!g_inBars) { g_revealPending = 1; g_allowTallReveal = 1; }
-        if (!g_inBars && lastCost > 25 && now - lastAt < 2 * lastCost && EditCaretInView(h, LineHeight())) {
+        if (!g_inBars && lastCost > 25 && now - lastAt < 2 * lastCost && EditCaretInView(hwnd, LineHeight())) {
             g_sizeDeferred = 1;
-            SetTimer(h, SIZE_TIMER, 40, NULL);
+            SetTimer(hwnd, SIZE_TIMER, 40, NULL);
             return 0;
         }
-        KillTimer(h, SIZE_TIMER);
+        KillTimer(hwnd, SIZE_TIMER);
         g_sizeDeferred = 0;
-        EditPad2(h, 0);
+        EditPad2(hwnd, 0);
         lastAt = GetTickCount(); lastCost = lastAt - now;
-        RevealCaret(h);
+        RevealCaret(hwnd);
         EditScrollSoon();
-        SbarSync(h);
-        StubSync(h);
-        BandSync(h);
+        SbarSync(hwnd);
+        StubSync(hwnd);
+        BandSync(hwnd);
         return 0; }
     case WM_TIMER:
-        if (w == SIZE_TIMER) {
-            KillTimer(h, SIZE_TIMER);
+        if (wParam == SIZE_TIMER) {
+            KillTimer(hwnd, SIZE_TIMER);
             g_sizeDeferred = 0;
-            EditPad2(h, 0);
-            RevealCaret(h);
+            EditPad2(hwnd, 0);
+            RevealCaret(hwnd);
             EditScrollSoon();
-            SbarSync(h);
-            StubSync(h);
-            BandSync(h);
+            SbarSync(hwnd);
+            StubSync(hwnd);
+            BandSync(hwnd);
             return 0;
         }
         break;
     case WM_PAINT: {
-        RECT ur;
-        int have = !w && GetUpdateRect(h, &ur, FALSE);
-        if (have && EditPaintBuffered(h, &ur)) { FitTallCaret(h); return 0; }
+        RECT updateRect;
+        int hasUpdate = !wParam && GetUpdateRect(hwnd, &updateRect, FALSE);
+        if (hasUpdate && EditPaintBuffered(hwnd, &updateRect)) { FitTallCaret(hwnd); return 0; }
         g_paintDepth++;
-        r = CallWindowProcW(g_orig, h, m, w, l);
+        result = CallWindowProcW(g_orig, hwnd, msg, wParam, lParam);
         g_paintDepth--;
-        if (w) { StubPaint(h, (HDC)w, NULL); BandPaint(h, (HDC)w, NULL); }
-        else if (have) { StubPaint(h, NULL, &ur); BandPaint(h, NULL, &ur); }
-        FitTallCaret(h);
-        return r; }
+        if (wParam) { StubPaint(hwnd, (HDC)wParam, NULL); BandPaint(hwnd, (HDC)wParam, NULL); }
+        else if (hasUpdate) { StubPaint(hwnd, NULL, &updateRect); BandPaint(hwnd, NULL, &updateRect); }
+        FitTallCaret(hwnd);
+        return result; }
     case WM_PRINTCLIENT:
         g_paintDepth++;
-        r = CallWindowProcW(g_orig, h, m, w, l);
+        result = CallWindowProcW(g_orig, hwnd, msg, wParam, lParam);
         g_paintDepth--;
-        StubPaint(h, (HDC)w, NULL);
-        BandPaint(h, (HDC)w, NULL);
-        return r;
+        StubPaint(hwnd, (HDC)wParam, NULL);
+        BandPaint(hwnd, (HDC)wParam, NULL);
+        return result;
     case WM_PRINT:
         g_paintDepth++;
-        r = CallWindowProcW(g_orig, h, m, w, l);
+        result = CallWindowProcW(g_orig, hwnd, msg, wParam, lParam);
         g_paintDepth--;
-        return r;
+        return result;
     case WM_BARS:
         g_barsPending = 0;
         UpdateBars();
-        if (g_tallCaret) FitTallCaret(h);
+        if (g_tallCaret) FitTallCaret(hwnd);
         return 0;
     case WM_MOUSEWHEEL:
         g_shiftDir = 0;
-        if (w & MK_CONTROL) {
-            g_wheel += GET_WHEEL_DELTA_WPARAM(w);
+        if (wParam & MK_CONTROL) {
+            g_wheel += GET_WHEEL_DELTA_WPARAM(wParam);
             while (g_wheel >= 120)  { g_wheel -= 120; EditZoomStep(1); }
             while (g_wheel <= -120) { g_wheel += 120; EditZoomStep(-1); }
             return 0;
@@ -1007,17 +1007,17 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (!g_inBars && !g_revealing) { g_revealPending = 0; g_allowTallReveal = 0; }
         break;
     case WM_CHAR:
-        if (w == 0x7F) { EditDeleteWord(-1); return 0; }
+        if (wParam == 0x7F) { EditDeleteWord(-1); return 0; }
         break;
     case WM_SYSCHAR:
-        if (w != ' ' && w != VK_BACK && MenuBarMnemonic((WCHAR)w) >= 0) {
-            SendMessageW(GetParent(h), WM_SYSCOMMAND, SC_KEYMENU, (LPARAM)w);
+        if (wParam != ' ' && wParam != VK_BACK && MenuBarMnemonic((WCHAR)wParam) >= 0) {
+            SendMessageW(GetParent(hwnd), WM_SYSCOMMAND, SC_KEYMENU, (LPARAM)wParam);
             return 0;
         }
         break;
     case WM_KEYUP:
-        if ((w == VK_SHIFT || w == VK_CONTROL) && g_shiftDir) {
-            PostMessageW(GetParent(h), WM_COMMAND, g_shiftDir == 2 ? IDM_DIR_RTL : IDM_DIR_LTR, 0);
+        if ((wParam == VK_SHIFT || wParam == VK_CONTROL) && g_shiftDir) {
+            PostMessageW(GetParent(hwnd), WM_COMMAND, g_shiftDir == 2 ? IDM_DIR_RTL : IDM_DIR_LTR, 0);
             g_shiftDir = 0;
         }
         break;
@@ -1025,59 +1025,59 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         g_shiftDir = 0;
         break;
     case WM_KEYDOWN:
-        if (w == VK_SHIFT && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) g_shiftDir = ((l >> 16) & 0xFF) == 0x36 ? 2 : 1;
-        else if (w != VK_SHIFT && w != VK_CONTROL) g_shiftDir = 0;
-        if (w == VK_DELETE && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000)) {
+        if (wParam == VK_SHIFT && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) g_shiftDir = ((lParam >> 16) & 0xFF) == 0x36 ? 2 : 1;
+        else if (wParam != VK_SHIFT && wParam != VK_CONTROL) g_shiftDir = 0;
+        if (wParam == VK_DELETE && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000)) {
             EditDeleteWord(1);
             return 0;
         }
-        if (w >= VK_PRIOR && w <= VK_DOWN && !((w == VK_UP || w == VK_DOWN) && (GetKeyState(VK_CONTROL) & 0x8000)) && !EditCaretInView(h, LineHeight())) {
-            SendMessageW(h, EM_SCROLLCARET, 0, 0);
+        if (wParam >= VK_PRIOR && wParam <= VK_DOWN && !((wParam == VK_UP || wParam == VK_DOWN) && (GetKeyState(VK_CONTROL) & 0x8000)) && !EditCaretInView(hwnd, LineHeight())) {
+            SendMessageW(hwnd, EM_SCROLLCARET, 0, 0);
         }
         break;
     case WM_CONTEXTMENU: {
-        int x = GET_X_LPARAM(l), y = GET_Y_LPARAM(l);
+        int x = GET_X_LPARAM(lParam), y = GET_Y_LPARAM(lParam);
         if (x == -1 && y == -1) {
-            POINT p;
-            if (!GetCaretPos(&p)) { p.x = 8; p.y = 8; }
-            ClientToScreen(h, &p);
-            x = p.x; y = p.y + S(20);
+            POINT pt;
+            if (!GetCaretPos(&pt)) { pt.x = 8; pt.y = 8; }
+            ClientToScreen(hwnd, &pt);
+            x = pt.x; y = pt.y + S(20);
         }
-        MenuPopup(GetParent(h), &g_mdEditCtx, x, y, 0);
+        MenuPopup(GetParent(hwnd), &g_mdEditCtx, x, y, 0);
         return 0; }
     }
     wasRevealing = g_revealing;
-    if (anchor >= 0 || m == EM_SCROLLCARET || m == WM_SETFONT || m == EM_SETRECTNP || m == EM_SETTABSTOPS || m == EM_SETMARGINS) g_revealing = 1;
-    r = CallWindowProcW(g_orig, h, m, w, l);
+    if (anchor >= 0 || msg == EM_SCROLLCARET || msg == WM_SETFONT || msg == EM_SETRECTNP || msg == EM_SETTABSTOPS || msg == EM_SETMARGINS) g_revealing = 1;
+    result = CallWindowProcW(g_orig, hwnd, msg, wParam, lParam);
     g_revealing = wasRevealing;
-    if (m == WM_SETTEXT) { g_textRev++; g_stub.n = 0; }
+    if (msg == WM_SETTEXT) { g_textRev++; g_stub.count = 0; }
     if (anchor >= 0) {
-        DWORD ss = 0, se = 0;
-        Ctl(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se);
-        if (m == EM_SETSEL && (int)w >= 0) EditCaretHint(l >= 0 && (int)w > l ? (int)ss : (int)se);
-        else if (ss == se || (int)se == anchor) EditCaretHint((int)ss);
-        else if ((int)ss == anchor) EditCaretHint((int)se);
+        DWORD selStart = 0, selEnd = 0;
+        Ctl(hwnd, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+        if (msg == EM_SETSEL && (int)wParam >= 0) EditCaretHint(lParam >= 0 && (int)wParam > lParam ? (int)selStart : (int)selEnd);
+        else if (selStart == selEnd || (int)selEnd == anchor) EditCaretHint((int)selStart);
+        else if ((int)selStart == anchor) EditCaretHint((int)selEnd);
     }
-    if (anchor >= 0 || m == WM_SETFOCUS || m == WM_KEYUP || m == EM_SCROLLCARET) FitTallCaret(h);
-    switch (m) {
+    if (anchor >= 0 || msg == WM_SETFOCUS || msg == WM_KEYUP || msg == EM_SCROLLCARET) FitTallCaret(hwnd);
+    switch (msg) {
     case WM_SETFONT: case WM_SETTEXT:
-        if (m != WM_SETTEXT) EditPad(h);
+        if (msg != WM_SETTEXT) EditPad(hwnd);
         EditScrollSoon();
         break;
     }
-    if (!g_inBars) switch (m) {
+    if (!g_inBars) switch (msg) {
     case WM_KEYDOWN: case WM_CHAR: case WM_MOUSEWHEEL: case WM_VSCROLL: case WM_HSCROLL: case WM_SETTEXT:
     case WM_PASTE: case WM_CUT: case WM_CLEAR: case WM_UNDO: case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_TIMER: case WM_SETFONT:
-        SbarSync(h);
+        SbarSync(hwnd);
         break;
     case WM_MOUSEMOVE:
-        if (w & 1) SbarSync(h);
+        if (wParam & 1) SbarSync(hwnd);
         break;
     default:
-        if (m >= 0x00B0 && m <= 0x00D8) SbarSync(h);
+        if (msg >= 0x00B0 && msg <= 0x00D8) SbarSync(hwnd);
         break;
     }
-    switch (m) {
+    switch (msg) {
     case WM_KEYDOWN: case WM_KEYUP: case WM_CHAR:
     case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_TIMER:
     case WM_SETFOCUS: case WM_KILLFOCUS:
@@ -1086,45 +1086,45 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         AppUpdateStatus();
         break;
     case WM_MOUSEMOVE:
-        if (w & 1) AppUpdateStatus();
+        if (wParam & 1) AppUpdateStatus();
         break;
     }
-    if (StubWatch(m, w)) {
-        StubSync(h);
-        BandSync(h);
+    if (StubWatch(msg, wParam)) {
+        StubSync(hwnd);
+        BandSync(hwnd);
     }
-    if (g_tallCaret) FitTallCaret(h);
-    return r;
+    if (g_tallCaret) FitTallCaret(hwnd);
+    return result;
 }
 
 HWND EditCreate(HWND parent) {
-    HWND old = g_edit, e;
+    HWND oldEdit = g_edit, edit;
     WCHAR *text = NULL;
-    DWORD s = 0, en = 0, st = WS_CHILD | WS_CLIPSIBLINGS | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_NOHIDESEL;
-    LONG_PTR ex = 0;
-    int mod = 0, focus = 0, x = 0, y = 0, w = 0, h = 0, back = 0;
-    if (!g_pf.wrap) st |= WS_HSCROLL | ES_AUTOHSCROLL;
-    if (old) {
-        RECT rc;
-        POINT a, b;
+    DWORD selStart = 0, selEnd = 0, style = WS_CHILD | WS_CLIPSIBLINGS | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_NOHIDESEL;
+    LONG_PTR exStyle = 0;
+    int modified = 0, hadFocus = 0, x = 0, y = 0, width = 0, height = 0, backward = 0;
+    if (!g_pf.wrap) style |= WS_HSCROLL | ES_AUTOHSCROLL;
+    if (oldEdit) {
+        RECT windowRect;
+        POINT topLeft, bottomRight;
         text = EditGetDocText(NULL);
         if (!text) return NULL;
-        SendMessageW(old, EM_GETSEL, (WPARAM)&s, (LPARAM)&en);
-        back = en > s && EditCaretIndex() == (int)s;
-        mod = (int)SendMessageW(old, EM_GETMODIFY, 0, 0);
-        ex = GetWindowLongPtrW(old, GWL_EXSTYLE) & RTL_BITS;
-        focus = (GetFocus() == old);
-        GetWindowRect(old, &rc);
-        a.x = rc.left; a.y = rc.top; b.x = rc.right; b.y = rc.bottom;
-        ScreenToClient(parent, &a);
-        ScreenToClient(parent, &b);
-        x = a.x; y = a.y; w = b.x - a.x; h = b.y - a.y;
+        SendMessageW(oldEdit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+        backward = selEnd > selStart && EditCaretIndex() == (int)selStart;
+        modified = (int)SendMessageW(oldEdit, EM_GETMODIFY, 0, 0);
+        exStyle = GetWindowLongPtrW(oldEdit, GWL_EXSTYLE) & RTL_BITS;
+        hadFocus = (GetFocus() == oldEdit);
+        GetWindowRect(oldEdit, &windowRect);
+        topLeft.x = windowRect.left; topLeft.y = windowRect.top; bottomRight.x = windowRect.right; bottomRight.y = windowRect.bottom;
+        ScreenToClient(parent, &topLeft);
+        ScreenToClient(parent, &bottomRight);
+        x = topLeft.x; y = topLeft.y; width = bottomRight.x - topLeft.x; height = bottomRight.y - topLeft.y;
     }
-    e = CreateWindowExW((DWORD)ex, L"EDIT", NULL, st, x, y, w, h, parent, (HMENU)(ULONG_PTR)IDC_EDIT, g_hinst, NULL);
-    if (!e) { mem_free(text); return NULL; }
-    SendMessageW(e, EM_LIMITTEXT, 0, 0);
-    if (text && !SetWindowTextW(e, text)) { DestroyWindow(e); mem_free(text); return NULL; }
-    g_edit = e;
+    edit = CreateWindowExW((DWORD)exStyle, L"EDIT", NULL, style, x, y, width, height, parent, (HMENU)(ULONG_PTR)IDC_EDIT, g_hinst, NULL);
+    if (!edit) { mem_free(text); return NULL; }
+    SendMessageW(edit, EM_LIMITTEXT, 0, 0);
+    if (text && !SetWindowTextW(edit, text)) { DestroyWindow(edit); mem_free(text); return NULL; }
+    g_edit = edit;
     g_barsPending = 0;
     g_revealPending = g_sizeDeferred = 0;
     g_allowTallReveal = 1;
@@ -1132,26 +1132,26 @@ HWND EditCreate(HWND parent) {
     EditCaretInvalidate();
     EditCaretHint(0);
     EditCaretDisplayAdjusted(FALSE);
-    SetWindowPos(e, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    g_stub.n = 0;
-    g_orig = (WNDPROC)SetWindowLongPtrW(e, GWLP_WNDPROC, (LONG_PTR)EditProc);
-    DarkScroll(e);
-    SbarTrim(e, S(SBAR_TRIM), S(SBAR_TRIM));
+    SetWindowPos(edit, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    g_stub.count = 0;
+    g_orig = (WNDPROC)SetWindowLongPtrW(edit, GWLP_WNDPROC, (LONG_PTR)EditProc);
+    DarkScroll(edit);
+    SbarTrim(edit, S(SBAR_TRIM), S(SBAR_TRIM));
     EditApplyFont();
     if (text) {
-        SendMessageW(e, WM_SETREDRAW, FALSE, 0);
-        SendMessageW(e, EM_SETSEL, back ? en : s, back ? s : en);
-        SendMessageW(e, EM_SCROLLCARET, 0, 0);
-        SendMessageW(e, EM_EMPTYUNDOBUFFER, 0, 0);
-        SendMessageW(e, EM_SETMODIFY, (WPARAM)mod, 0);
-        SendMessageW(e, WM_SETREDRAW, TRUE, 0);
+        SendMessageW(edit, WM_SETREDRAW, FALSE, 0);
+        SendMessageW(edit, EM_SETSEL, backward ? selEnd : selStart, backward ? selStart : selEnd);
+        SendMessageW(edit, EM_SCROLLCARET, 0, 0);
+        SendMessageW(edit, EM_EMPTYUNDOBUFFER, 0, 0);
+        SendMessageW(edit, EM_SETMODIFY, (WPARAM)modified, 0);
+        SendMessageW(edit, WM_SETREDRAW, TRUE, 0);
         mem_free(text);
     }
     UpdateBars();
     EditScrollSoon();
-    ShowWindow(e, SW_SHOW);
-    SbarSync(e);
-    if (old) { SbarDetach(old); DestroyWindow(old); }
-    if (focus || !old) SetFocus(e);
-    return e;
+    ShowWindow(edit, SW_SHOW);
+    SbarSync(edit);
+    if (oldEdit) { SbarDetach(oldEdit); DestroyWindow(oldEdit); }
+    if (hadFocus || !oldEdit) SetFocus(edit);
+    return edit;
 }

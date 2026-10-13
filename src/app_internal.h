@@ -13,5 +13,5 @@ unsigned PrefsTakeDocName(unsigned clock);
 
 void AppMarkClean(void);
 
-void AppStatusTimer(HWND h, WPARAM timer);
+void AppStatusTimer(HWND hwnd, WPARAM timer);
 #endif

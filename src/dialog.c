@@ -1,274 +1,274 @@
 #include "ui_internal.h"
 
 HWND DialogHoldFind(void) {
-    HWND h = FindDlgHwnd();
-    if (!h || !IsWindow(h) || !IsWindowEnabled(h)) return NULL;
-    EnableWindow(h, FALSE);
-    return h;
+    HWND hwnd = FindDlgHwnd();
+    if (!hwnd || !IsWindow(hwnd) || !IsWindowEnabled(hwnd)) return NULL;
+    EnableWindow(hwnd, FALSE);
+    return hwnd;
 }
 
 void DialogReleaseFind(HWND held) {
     if (held && IsWindow(held)) EnableWindow(held, TRUE);
 }
 
-DlgBase *DlgFromHwnd(HWND h, UINT m, LPARAM l) {
-    if (m == WM_NCCREATE) {
-        DlgBase *b = (DlgBase *)((CREATESTRUCTW *)l)->lpCreateParams;
-        SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)b);
-        b->hwnd = h;
-        return b;
+DlgBase *DlgFromHwnd(HWND hwnd, UINT msg, LPARAM lParam) {
+    if (msg == WM_NCCREATE) {
+        DlgBase *base = (DlgBase *)((CREATESTRUCTW *)lParam)->lpCreateParams;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)base);
+        base->hwnd = hwnd;
+        return base;
     }
-    return (DlgBase *)GetWindowLongPtrW(h, GWLP_USERDATA);
+    return (DlgBase *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
 }
 
-void DlgBaseInit(DlgBase *b, HWND owner) {
-    memset(b, 0, sizeof *b);
-    b->owner = owner;
+void DlgBaseInit(DlgBase *base, HWND owner) {
+    memset(base, 0, sizeof *base);
+    base->owner = owner;
 }
 
-void DlgFrame(DlgBase *b, int x, int y, int w, int h, int kind) {
-    if (b->nframes >= 24) return;
-    b->fr[b->nframes].left = S(x);
-    b->fr[b->nframes].top = S(y);
-    b->fr[b->nframes].right = S(x) + S(w);
-    b->fr[b->nframes].bottom = S(y) + S(h);
-    b->frk[b->nframes++] = (BYTE)kind;
+void DlgFrame(DlgBase *base, int x, int y, int width, int height, int kind) {
+    if (base->nframes >= 24) return;
+    base->fr[base->nframes].left = S(x);
+    base->fr[base->nframes].top = S(y);
+    base->fr[base->nframes].right = S(x) + S(width);
+    base->fr[base->nframes].bottom = S(y) + S(height);
+    base->frk[base->nframes++] = (BYTE)kind;
 }
 
-HWND DlgOpen(DlgBase *b, const WCHAR *cls, const WCHAR *title, int cw, int ch, int modeless) {
-    DWORD st = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
-    RECT rc, ow, wa;
-    MONITORINFO mi;
-    POINT cp;
-    int w, h, x, y;
-    b->modeless = modeless;
-    rc.left = 0; rc.top = 0; rc.right = S(cw); rc.bottom = S(ch);
-    UiAdjustRect(&rc, st, 0);
-    w = rc.right - rc.left;
-    h = rc.bottom - rc.top;
-    if (b->owner && IsWindowVisible(b->owner) && !IsIconic(b->owner)) GetWindowRect(b->owner, &ow);
-    else SystemParametersInfoW(SPI_GETWORKAREA, 0, &ow, 0);
-    x = ow.left + ((ow.right - ow.left) - w) / 2;
-    y = ow.top + ((ow.bottom - ow.top) - h) / 2;
-    cp.x = x + w / 2; cp.y = y + h / 2;
-    mi.cbSize = sizeof mi;
-    GetMonitorInfoW(MonitorFromPoint(cp, MONITOR_DEFAULTTONEAREST), &mi);
-    wa = mi.rcWork;
-    if (x + w > wa.right)  x = wa.right - w;
-    if (y + h > wa.bottom) y = wa.bottom - h;
-    if (x < wa.left) x = wa.left;
-    if (y < wa.top)  y = wa.top;
-    b->hwnd = CreateWindowExW(0, cls, title, st, x, y, w, h, b->owner, NULL, g_hinst, b);
-    if (b->hwnd) {
+HWND DlgOpen(DlgBase *base, const WCHAR *className, const WCHAR *title, int clientWidth, int clientHeight, int modeless) {
+    DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+    RECT windowRect, anchorRect, workArea;
+    MONITORINFO monitorInfo;
+    POINT center;
+    int width, height, x, y;
+    base->modeless = modeless;
+    windowRect.left = 0; windowRect.top = 0; windowRect.right = S(clientWidth); windowRect.bottom = S(clientHeight);
+    UiAdjustRect(&windowRect, style, 0);
+    width = windowRect.right - windowRect.left;
+    height = windowRect.bottom - windowRect.top;
+    if (base->owner && IsWindowVisible(base->owner) && !IsIconic(base->owner)) GetWindowRect(base->owner, &anchorRect);
+    else SystemParametersInfoW(SPI_GETWORKAREA, 0, &anchorRect, 0);
+    x = anchorRect.left + ((anchorRect.right - anchorRect.left) - width) / 2;
+    y = anchorRect.top + ((anchorRect.bottom - anchorRect.top) - height) / 2;
+    center.x = x + width / 2; center.y = y + height / 2;
+    monitorInfo.cbSize = sizeof monitorInfo;
+    GetMonitorInfoW(MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST), &monitorInfo);
+    workArea = monitorInfo.rcWork;
+    if (x + width > workArea.right)  x = workArea.right - width;
+    if (y + height > workArea.bottom) y = workArea.bottom - height;
+    if (x < workArea.left) x = workArea.left;
+    if (y < workArea.top)  y = workArea.top;
+    base->hwnd = CreateWindowExW(0, className, title, style, x, y, width, height, base->owner, NULL, g_hinst, base);
+    if (base->hwnd) {
         static HICON big, small_;
         if (!big) big = LoadIconW(g_hinst, MAKEINTRESOURCEW(1));
         if (!small_) small_ = (HICON)LoadImageW(g_hinst, MAKEINTRESOURCEW(1), IMAGE_ICON, UiMetric(SM_CXSMICON), UiMetric(SM_CYSMICON), LR_DEFAULTCOLOR);
-        SendMessageW(b->hwnd, WM_SETICON, ICON_BIG, (LPARAM)big);
-        SendMessageW(b->hwnd, WM_SETICON, ICON_SMALL, (LPARAM)small_);
-        DarkFrame(b->hwnd, 1);
+        SendMessageW(base->hwnd, WM_SETICON, ICON_BIG, (LPARAM)big);
+        SendMessageW(base->hwnd, WM_SETICON, ICON_SMALL, (LPARAM)small_);
+        DarkFrame(base->hwnd, 1);
     }
-    return b->hwnd;
+    return base->hwnd;
 }
 
-typedef struct { HWND list[8]; int n; HWND skip; } Disabled;
+typedef struct { HWND list[8]; int count; HWND skip; } Disabled;
 
-static BOOL CALLBACK DisableOne(HWND h, LPARAM l) {
-    Disabled *d = (Disabled *)l;
-    WCHAR cn[32];
-    if (h == d->skip || d->n >= COUNTOF(d->list) || !IsWindowVisible(h) || !IsWindowEnabled(h)) return TRUE;
-    GetClassNameW(h, cn, 32);
-    if (wcmp(cn, APP_CLASS) != 0 && !(cn[0] == 'm' && cn[1] == 'p' && cn[2] == '_')) return TRUE;
-    EnableWindow(h, FALSE);
-    d->list[d->n++] = h;
+static BOOL CALLBACK DisableOne(HWND hwnd, LPARAM lParam) {
+    Disabled *disabled = (Disabled *)lParam;
+    WCHAR className[32];
+    if (hwnd == disabled->skip || disabled->count >= COUNTOF(disabled->list) || !IsWindowVisible(hwnd) || !IsWindowEnabled(hwnd)) return TRUE;
+    GetClassNameW(hwnd, className, 32);
+    if (wcmp(className, APP_CLASS) != 0 && !(className[0] == 'm' && className[1] == 'p' && className[2] == '_')) return TRUE;
+    EnableWindow(hwnd, FALSE);
+    disabled->list[disabled->count++] = hwnd;
     return TRUE;
 }
 
-void DlgRunModal(DlgBase *b) {
-    MSG m;
-    Disabled dis;
+void DlgRunModal(DlgBase *base) {
+    MSG msg;
+    Disabled disabled;
     int i;
-    dis.n = 0; dis.skip = b->hwnd;
-    EnumThreadWindows(GetCurrentThreadId(), DisableOne, (LPARAM)&dis);
-    if (b->owner && IsWindowEnabled(b->owner) && dis.n < COUNTOF(dis.list)) {
-        EnableWindow(b->owner, FALSE);
-        dis.list[dis.n++] = b->owner;
+    disabled.count = 0; disabled.skip = base->hwnd;
+    EnumThreadWindows(GetCurrentThreadId(), DisableOne, (LPARAM)&disabled);
+    if (base->owner && IsWindowEnabled(base->owner) && disabled.count < COUNTOF(disabled.list)) {
+        EnableWindow(base->owner, FALSE);
+        disabled.list[disabled.count++] = base->owner;
     }
-    ShowWindow(b->hwnd, SW_SHOW);
-    while (!b->done) {
-        BOOL r = GetMessageW(&m, NULL, 0, 0);
-        if (r <= 0) {
-            if (r == 0) PostQuitMessage((int)m.wParam);
+    ShowWindow(base->hwnd, SW_SHOW);
+    while (!base->done) {
+        BOOL result = GetMessageW(&msg, NULL, 0, 0);
+        if (result <= 0) {
+            if (result == 0) PostQuitMessage((int)msg.wParam);
             break;
         }
-        if (!IsDialogMessageW(b->hwnd, &m)) {
-            TranslateMessage(&m);
-            DispatchMessageW(&m);
+        if (!IsDialogMessageW(base->hwnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
         }
     }
-    for (i = dis.n - 1; i >= 0; i--) if (IsWindow(dis.list[i])) EnableWindow(dis.list[i], TRUE);
-    DestroyWindow(b->hwnd);
-    b->hwnd = NULL;
+    for (i = disabled.count - 1; i >= 0; i--) if (IsWindow(disabled.list[i])) EnableWindow(disabled.list[i], TRUE);
+    DestroyWindow(base->hwnd);
+    base->hwnd = NULL;
 }
 
-BOOL DlgCommon(DlgBase *b, UINT m, WPARAM w, LPARAM l, LRESULT *ret) {
-    HDC dc;
+BOOL DlgCommon(DlgBase *base, UINT msg, WPARAM wParam, LPARAM lParam, LRESULT *ret) {
+    HDC hdc;
     *ret = 0;
-    switch (m) {
+    switch (msg) {
     case WM_ERASEBKGND: {
-        RECT rc;
-        GetClientRect(b->hwnd, &rc);
-        FillC((HDC)w, &rc, C_FACE);
+        RECT client;
+        GetClientRect(base->hwnd, &client);
+        FillC((HDC)wParam, &client, C_FACE);
         *ret = 1;
         return TRUE; }
     case WM_PAINT: {
         PAINTSTRUCT ps;
         int i;
-        dc = BeginPaint(b->hwnd, &ps);
-        for (i = 0; i < b->nframes; i++) Bevel(dc, &b->fr[i], b->frk[i]);
-        EndPaint(b->hwnd, &ps);
+        hdc = BeginPaint(base->hwnd, &ps);
+        for (i = 0; i < base->nframes; i++) Bevel(hdc, &base->fr[i], base->frk[i]);
+        EndPaint(base->hwnd, &ps);
         return TRUE; }
     case WM_CTLCOLORSTATIC:
-        dc = (HDC)w;
-        SetTextColor(dc, GetWindowLongPtrW((HWND)l, GWLP_ID) == IDC_DIM ? C_DIM : C_TEXT);
-        SetBkColor(dc, C_FACE);
+        hdc = (HDC)wParam;
+        SetTextColor(hdc, GetWindowLongPtrW((HWND)lParam, GWLP_ID) == IDC_DIM ? C_DIM : C_TEXT);
+        SetBkColor(hdc, C_FACE);
         *ret = (LRESULT)g_brFace;
         return TRUE;
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX:
-        dc = (HDC)w;
-        SetTextColor(dc, C_TEXT);
-        SetBkColor(dc, C_FIELD);
+        hdc = (HDC)wParam;
+        SetTextColor(hdc, C_TEXT);
+        SetBkColor(hdc, C_FIELD);
         *ret = (LRESULT)g_brField;
         return TRUE;
     case DM_GETDEFID:
         *ret = MAKELONG(IDOK, 0x534B);
         return TRUE;
     case WM_ACTIVATE:
-        DarkFrame(b->hwnd, LOWORD(w) != WA_INACTIVE);
-        if (LOWORD(w) == WA_INACTIVE) {
-            HWND f = GetFocus();
-            if (f && IsChild(b->hwnd, f)) b->focus = f;
-        } else if (b->focus && IsWindow(b->focus)) {
-            SetFocus(b->focus);
+        DarkFrame(base->hwnd, LOWORD(wParam) != WA_INACTIVE);
+        if (LOWORD(wParam) == WA_INACTIVE) {
+            HWND focus = GetFocus();
+            if (focus && IsChild(base->hwnd, focus)) base->focus = focus;
+        } else if (base->focus && IsWindow(base->focus)) {
+            SetFocus(base->focus);
         }
         return TRUE;
     case WM_CLOSE:
-        if (b->modeless) { DestroyWindow(b->hwnd); }
-        else { b->result = IDCANCEL; b->done = 1; }
+        if (base->modeless) { DestroyWindow(base->hwnd); }
+        else { base->result = IDCANCEL; base->done = 1; }
         return TRUE;
     }
     return FALSE;
 }
 
-HWND UiLabel(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWORD extra) {
-    HWND c = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT | extra, S(x), S(y), S(w), S(h), p, (HMENU)(ULONG_PTR)id, g_hinst, NULL);
-    SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
-    return c;
+HWND UiLabel(HWND parent, const WCHAR *text, int x, int y, int width, int height, int id, DWORD extra) {
+    HWND label = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT | extra, S(x), S(y), S(width), S(height), parent, (HMENU)(ULONG_PTR)id, g_hinst, NULL);
+    SendMessageW(label, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
+    return label;
 }
 
 static WNDPROC g_stockEdit;
 
-static LRESULT CALLBACK DlgEditProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    if (m == WM_CHAR && w == 0x7F) {
-        WCHAR t[PATH_CAP + 1];
-        DWORD s = 0, e = 0;
-        int n, a;
-        SendMessageW(h, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-        if (s != e) { SendMessageW(h, WM_CLEAR, 0, 0); return 0; }
-        n = GetWindowTextW(h, t, PATH_CAP + 1);
-        a = (int)s;
-        if (a > n) a = n;
-        while (a > 0 && WordClass(t[a - 1]) == 0) a--;
-        if (a > 0) {
-            int k = WordClass(t[a - 1]);
-            while (a > 0 && WordClass(t[a - 1]) == k) a--;
+static LRESULT CALLBACK DlgEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_CHAR && wParam == 0x7F) {
+        WCHAR text[PATH_CAP + 1];
+        DWORD selStart = 0, selEnd = 0;
+        int length, wordStart;
+        SendMessageW(hwnd, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+        if (selStart != selEnd) { SendMessageW(hwnd, WM_CLEAR, 0, 0); return 0; }
+        length = GetWindowTextW(hwnd, text, PATH_CAP + 1);
+        wordStart = (int)selStart;
+        if (wordStart > length) wordStart = length;
+        while (wordStart > 0 && WordClass(text[wordStart - 1]) == 0) wordStart--;
+        if (wordStart > 0) {
+            int wordClass = WordClass(text[wordStart - 1]);
+            while (wordStart > 0 && WordClass(text[wordStart - 1]) == wordClass) wordStart--;
         }
-        if (a != (int)s) {
-            SendMessageW(h, EM_SETSEL, (WPARAM)a, (LPARAM)s);
-            SendMessageW(h, EM_REPLACESEL, TRUE, (LPARAM)L"");
+        if (wordStart != (int)selStart) {
+            SendMessageW(hwnd, EM_SETSEL, (WPARAM)wordStart, (LPARAM)selStart);
+            SendMessageW(hwnd, EM_REPLACESEL, TRUE, (LPARAM)L"");
         }
         return 0;
     }
-    return CallWindowProcW(g_stockEdit, h, m, w, l);
+    return CallWindowProcW(g_stockEdit, hwnd, msg, wParam, lParam);
 }
 
-HWND UiEdit(DlgBase *b, const WCHAR *text, int x, int y, int w, int h, int id, DWORD extra) {
-    HWND c;
-    DlgFrame(b, x, y, w, h, BV_SUNKEN);
-    c = CreateWindowExW(0, L"EDIT", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | extra, S(x) + 2, S(y) + 2, S(w) - 4, S(h) - 4, b->hwnd, (HMENU)(ULONG_PTR)id, g_hinst, NULL);
-    SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
-    if (c) {
-        if (!g_stockEdit) g_stockEdit = (WNDPROC)(LONG_PTR)GetWindowLongPtrW(c, GWLP_WNDPROC);
-        SetWindowLongPtrW(c, GWLP_WNDPROC, (LONG_PTR)DlgEditProc);
+HWND UiEdit(DlgBase *base, const WCHAR *text, int x, int y, int width, int height, int id, DWORD extra) {
+    HWND edit;
+    DlgFrame(base, x, y, width, height, BV_SUNKEN);
+    edit = CreateWindowExW(0, L"EDIT", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | extra, S(x) + 2, S(y) + 2, S(width) - 4, S(height) - 4, base->hwnd, (HMENU)(ULONG_PTR)id, g_hinst, NULL);
+    SendMessageW(edit, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
+    if (edit) {
+        if (!g_stockEdit) g_stockEdit = (WNDPROC)(LONG_PTR)GetWindowLongPtrW(edit, GWLP_WNDPROC);
+        SetWindowLongPtrW(edit, GWLP_WNDPROC, (LONG_PTR)DlgEditProc);
     }
-    return c;
+    return edit;
 }
 
-typedef struct { DlgBase b; const WCHAR *msg, *lab[3]; int nb, esc, tw, th; } MsgDlg;
+typedef struct { DlgBase base; const WCHAR *message, *labels[3]; int buttonCount, escIdx, textWidth, textHeight; } MsgDlg;
 
-static LRESULT CALLBACK MsgProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    DlgBase *b = DlgFromHwnd(h, m, l);
-    MsgDlg *d = (MsgDlg *)b;
-    LRESULT r;
-    if (!b) return DefWindowProcW(h, m, w, l);
-    switch (m) {
+static LRESULT CALLBACK MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    DlgBase *base = DlgFromHwnd(hwnd, msg, lParam);
+    MsgDlg *dlg = (MsgDlg *)base;
+    LRESULT result;
+    if (!base) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    switch (msg) {
     case WM_CREATE: {
-        int cw = d->tw + 32, bw = 88, gap = 8, total = d->nb * bw + (d->nb - 1) * gap, i, x, y;
-        if (cw < total + 32) cw = total + 32;
-        UiLabel(h, d->msg, 16, 16, d->tw, d->th, 0, SS_NOPREFIX);
-        x = cw - 16 - total;
-        y = 16 + d->th + 18;
-        for (i = 0; i < d->nb; i++) {
-            HWND c = UiButton(h, d->lab[i], x + i * (bw + gap), y, bw, 24, i == 0 ? IDOK : 100 + i + 1, i == 0 ? BS_DEFPUSHBUTTON : BS_PUSHBUTTON);
-            if (i == 0) b->focus = c;
+        int clientWidth = dlg->textWidth + 32, buttonWidth = 88, gap = 8, totalWidth = dlg->buttonCount * buttonWidth + (dlg->buttonCount - 1) * gap, i, x, y;
+        if (clientWidth < totalWidth + 32) clientWidth = totalWidth + 32;
+        UiLabel(hwnd, dlg->message, 16, 16, dlg->textWidth, dlg->textHeight, 0, SS_NOPREFIX);
+        x = clientWidth - 16 - totalWidth;
+        y = 16 + dlg->textHeight + 18;
+        for (i = 0; i < dlg->buttonCount; i++) {
+            HWND button = UiButton(hwnd, dlg->labels[i], x + i * (buttonWidth + gap), y, buttonWidth, 24, i == 0 ? IDOK : 100 + i + 1, i == 0 ? BS_DEFPUSHBUTTON : BS_PUSHBUTTON);
+            if (i == 0) base->focus = button;
         }
         return 0; }
     case WM_COMMAND: {
-        int id = LOWORD(w);
-        if (id == IDOK) { b->result = 1; b->done = 1; return 0; }
-        if (id == 102 || id == 103) { b->result = id - 100; b->done = 1; return 0; }
-        if (id == IDCANCEL) { b->result = d->esc; b->done = 1; return 0; }
+        int id = LOWORD(wParam);
+        if (id == IDOK) { base->result = 1; base->done = 1; return 0; }
+        if (id == 102 || id == 103) { base->result = id - 100; base->done = 1; return 0; }
+        if (id == IDCANCEL) { base->result = dlg->escIdx; base->done = 1; return 0; }
         break; }
     case WM_CLOSE:
-        b->result = d->esc; b->done = 1;
+        base->result = dlg->escIdx; base->done = 1;
         return 0;
     }
-    if (DlgCommon(b, m, w, l, &r)) return r;
-    return DefWindowProcW(h, m, w, l);
+    if (DlgCommon(base, msg, wParam, lParam, &result)) return result;
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-int MpAsk(HWND owner, const WCHAR *title, const WCHAR *msg, const WCHAR *b1, const WCHAR *b2, const WCHAR *b3, int escIdx) {
-    MsgDlg d;
-    HDC dc;
-    HGDIOBJ old;
-    RECT r;
-    int cw, ch, total, bw = 88, gap = 8;
-    memset(&d, 0, sizeof d);
-    DlgBaseInit(&d.b, owner);
-    d.msg = msg;
-    d.esc = escIdx;
-    d.lab[0] = b1; d.lab[1] = b2; d.lab[2] = b3;
-    d.nb = b3 ? 3 : (b2 ? 2 : 1);
-    dc = GetDC(NULL);
-    old = SelectObject(dc, g_fontUI);
-    r.left = 0; r.top = 0; r.right = S(380); r.bottom = 0;
-    DrawTextW(dc, msg, -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-    SelectObject(dc, old);
-    ReleaseDC(NULL, dc);
-    d.tw = UnS(r.right) + 4;
-    d.th = UnS(r.bottom) + 2;
-    if (d.tw < 200) d.tw = 200;
-    total = d.nb * bw + (d.nb - 1) * gap;
-    cw = d.tw + 32;
-    if (cw < total + 32) cw = total + 32;
-    ch = 16 + d.th + 18 + 24 + 16;
-    if (!DlgOpen(&d.b, L"mp_msg", title, cw, ch, 0)) return escIdx;
-    DlgRunModal(&d.b);
-    return d.b.result;
+int MpAsk(HWND owner, const WCHAR *title, const WCHAR *message, const WCHAR *label1, const WCHAR *label2, const WCHAR *label3, int escIdx) {
+    MsgDlg dlg;
+    HDC hdc;
+    HGDIOBJ oldFont;
+    RECT textRect;
+    int clientWidth, clientHeight, totalWidth, buttonWidth = 88, gap = 8;
+    memset(&dlg, 0, sizeof dlg);
+    DlgBaseInit(&dlg.base, owner);
+    dlg.message = message;
+    dlg.escIdx = escIdx;
+    dlg.labels[0] = label1; dlg.labels[1] = label2; dlg.labels[2] = label3;
+    dlg.buttonCount = label3 ? 3 : (label2 ? 2 : 1);
+    hdc = GetDC(NULL);
+    oldFont = SelectObject(hdc, g_fontUI);
+    textRect.left = 0; textRect.top = 0; textRect.right = S(380); textRect.bottom = 0;
+    DrawTextW(hdc, message, -1, &textRect, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+    SelectObject(hdc, oldFont);
+    ReleaseDC(NULL, hdc);
+    dlg.textWidth = UnS(textRect.right) + 4;
+    dlg.textHeight = UnS(textRect.bottom) + 2;
+    if (dlg.textWidth < 200) dlg.textWidth = 200;
+    totalWidth = dlg.buttonCount * buttonWidth + (dlg.buttonCount - 1) * gap;
+    clientWidth = dlg.textWidth + 32;
+    if (clientWidth < totalWidth + 32) clientWidth = totalWidth + 32;
+    clientHeight = 16 + dlg.textHeight + 18 + 24 + 16;
+    if (!DlgOpen(&dlg.base, L"mp_msg", title, clientWidth, clientHeight, 0)) return escIdx;
+    DlgRunModal(&dlg.base);
+    return dlg.base.result;
 }
 
-void MpNote(HWND owner, const WCHAR *title, const WCHAR *msg) {
-    MpAsk(owner, title, msg, L"ok", NULL, NULL, 1);
+void MpNote(HWND owner, const WCHAR *title, const WCHAR *message) {
+    MpAsk(owner, title, message, L"ok", NULL, NULL, 1);
 }
 
 void DialogInit(void) {

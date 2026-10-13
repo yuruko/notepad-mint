@@ -16,13 +16,13 @@ static int Edge(void) { return UiMetric(SM_CYFRAME) + UiMetric(SM_CXPADDEDBORDER
 static int Crop(void) { return S(1); }
 
 static void Metrics(void) {
-    HDC dc = GetDC(NULL);
-    HGDIOBJ of = SelectObject(dc, g_fontMenu);
-    TEXTMETRICW tm;
-    GetTextMetricsW(dc, &tm);
-    SelectObject(dc, of);
-    ReleaseDC(NULL, dc);
-    g_capH = tm.tmHeight + S(10) - Crop();
+    HDC hdc = GetDC(NULL);
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontMenu);
+    TEXTMETRICW textMetrics;
+    GetTextMetricsW(hdc, &textMetrics);
+    SelectObject(hdc, oldFont);
+    ReleaseDC(NULL, hdc);
+    g_capH = textMetrics.tmHeight + S(10) - Crop();
     if (g_capH < S(24) - Crop()) g_capH = S(24) - Crop();
 }
 
@@ -34,42 +34,42 @@ int FrameHeight(void) {
 
 static int ContentH(void) { return FrameHeight() + Crop(); }
 
-void FrameRefont(HWND h) {
+void FrameRefont(HWND hwnd) {
     if (!FRAME_CUSTOM) return;
     if (g_icon) { DestroyIcon(g_icon); g_icon = NULL; }
     Metrics();
-    if (h) InvalidateRect(h, NULL, FALSE);
+    if (hwnd) InvalidateRect(hwnd, NULL, FALSE);
 }
 
-void FrameInvalidate(HWND h) {
-    RECT rc;
-    if (!FRAME_CUSTOM || !h) return;
-    GetClientRect(h, &rc);
-    rc.bottom = FrameHeight();
-    InvalidateRect(h, &rc, FALSE);
+void FrameInvalidate(HWND hwnd) {
+    RECT client;
+    if (!FRAME_CUSTOM || !hwnd) return;
+    GetClientRect(hwnd, &client);
+    client.bottom = FrameHeight();
+    InvalidateRect(hwnd, &client, FALSE);
 }
 
-void FrameActive(HWND h, int active) {
+void FrameActive(HWND hwnd, int active) {
     g_active = active;
     if (!active && g_down < 0) g_hot = -1;
-    FrameInvalidate(h);
+    FrameInvalidate(hwnd);
 }
 
-static void BtnRect(int b, int cw, RECT *r) {
-    r->right = cw - (FB_COUNT - 1 - b) * BtnW();
-    r->left = r->right - BtnW();
-    r->top = 0;
-    r->bottom = FrameHeight();
+static void BtnRect(int button, int clientWidth, RECT *rect) {
+    rect->right = clientWidth - (FB_COUNT - 1 - button) * BtnW();
+    rect->left = rect->right - BtnW();
+    rect->top = 0;
+    rect->bottom = FrameHeight();
 }
 
-static int HitBtn(int x, int y, int cw) {
-    POINT p;
-    RECT r;
-    int b;
-    p.x = x; p.y = y;
-    for (b = 0; b < FB_COUNT; b++) {
-        BtnRect(b, cw, &r);
-        if (PtInRect(&r, p)) return b;
+static int HitBtn(int x, int y, int clientWidth) {
+    POINT pt;
+    RECT rect;
+    int button;
+    pt.x = x; pt.y = y;
+    for (button = 0; button < FB_COUNT; button++) {
+        BtnRect(button, clientWidth, &rect);
+        if (PtInRect(&rect, pt)) return button;
     }
     return -1;
 }
@@ -78,17 +78,17 @@ static int IconLeft(void) { return S(8); }
 static int IconRight(void) { return IconLeft() + S(16) + S(6); }
 static int InIcon(int x, int y) { return x >= 0 && x < IconRight() && y >= 0 && y < FrameHeight(); }
 
-static void Line(HDC dc, int x1, int y1, int x2, int y2) {
-    MoveToEx(dc, x1, y1, NULL);
-    LineTo(dc, x2, y2);
+static void Line(HDC hdc, int x1, int y1, int x2, int y2) {
+    MoveToEx(hdc, x1, y1, NULL);
+    LineTo(hdc, x2, y2);
 }
 
-static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed) {
+static void DrawBtn(HDC hdc, int button, const RECT *rect, int hot, int down, int zoomed) {
     COLORREF bg = C_FACE, fg = g_active ? C_TEXT : C_DIM;
     HPEN pen;
-    HGDIOBJ op;
-    int cx = (r->left + r->right) / 2, cy = (r->top + r->bottom) / 2, g = S(4), d = S(2), pw = S(1);
-    if (b == FB_CLOSE && (hot || down)) {
+    HGDIOBJ oldPen;
+    int centerX = (rect->left + rect->right) / 2, centerY = (rect->top + rect->bottom) / 2, half = S(4), offset = S(2), penWidth = S(1);
+    if (button == FB_CLOSE && (hot || down)) {
         bg = down ? RGB(0xf1, 0x70, 0x7a) : RGB(0xe8, 0x11, 0x23);
         fg = RGB(0xff, 0xff, 0xff);
     } else if (down) {
@@ -96,220 +96,220 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
     } else if (hot) {
         bg = C_ACCENT; fg = C_ON_ACCENT;
     }
-    if (hot || down) FillC(dc, r, bg);
-    pen = CreatePen(PS_SOLID, pw < 1 ? 1 : pw, fg);
-    op = SelectObject(dc, pen);
-    switch (b) {
+    if (hot || down) FillC(hdc, rect, bg);
+    pen = CreatePen(PS_SOLID, penWidth < 1 ? 1 : penWidth, fg);
+    oldPen = SelectObject(hdc, pen);
+    switch (button) {
     case FB_MIN:
-        Line(dc, cx - g, cy, cx + g + 1, cy);
+        Line(hdc, centerX - half, centerY, centerX + half + 1, centerY);
         break;
     case FB_MAX:
         if (!zoomed) {
-            Line(dc, cx - g, cy - g, cx + g, cy - g);
-            Line(dc, cx + g, cy - g, cx + g, cy + g);
-            Line(dc, cx + g, cy + g, cx - g, cy + g);
-            Line(dc, cx - g, cy + g, cx - g, cy - g);
+            Line(hdc, centerX - half, centerY - half, centerX + half, centerY - half);
+            Line(hdc, centerX + half, centerY - half, centerX + half, centerY + half);
+            Line(hdc, centerX + half, centerY + half, centerX - half, centerY + half);
+            Line(hdc, centerX - half, centerY + half, centerX - half, centerY - half);
         } else {
-            Line(dc, cx - g, cy - g + d, cx + g - d, cy - g + d);
-            Line(dc, cx + g - d, cy - g + d, cx + g - d, cy + g);
-            Line(dc, cx + g - d, cy + g, cx - g, cy + g);
-            Line(dc, cx - g, cy + g, cx - g, cy - g + d);
-            Line(dc, cx - g + d, cy - g + d, cx - g + d, cy - g);
-            Line(dc, cx - g + d, cy - g, cx + g, cy - g);
-            Line(dc, cx + g, cy - g, cx + g, cy + g - d);
-            Line(dc, cx + g, cy + g - d, cx + g - d, cy + g - d);
+            Line(hdc, centerX - half, centerY - half + offset, centerX + half - offset, centerY - half + offset);
+            Line(hdc, centerX + half - offset, centerY - half + offset, centerX + half - offset, centerY + half);
+            Line(hdc, centerX + half - offset, centerY + half, centerX - half, centerY + half);
+            Line(hdc, centerX - half, centerY + half, centerX - half, centerY - half + offset);
+            Line(hdc, centerX - half + offset, centerY - half + offset, centerX - half + offset, centerY - half);
+            Line(hdc, centerX - half + offset, centerY - half, centerX + half, centerY - half);
+            Line(hdc, centerX + half, centerY - half, centerX + half, centerY + half - offset);
+            Line(hdc, centerX + half, centerY + half - offset, centerX + half - offset, centerY + half - offset);
         }
         break;
     case FB_CLOSE:
-        Line(dc, cx - g, cy - g, cx + g + 1, cy + g + 1);
-        Line(dc, cx + g, cy - g, cx - g - 1, cy + g + 1);
+        Line(hdc, centerX - half, centerY - half, centerX + half + 1, centerY + half + 1);
+        Line(hdc, centerX + half, centerY - half, centerX - half - 1, centerY + half + 1);
         break;
     }
-    SelectObject(dc, op);
+    SelectObject(hdc, oldPen);
     DeleteObject(pen);
 }
 
 #define STRIP_TINT 9
 #define STRIP_TINT_LIGHT_PLUS 12
 #define STRIP_TINT_INACTIVE_MINUS 7
-static COLORREF Tint(COLORREF face, COLORREF acc, int a) {
-    int r = GetRValue(face) + (GetRValue(acc) - GetRValue(face)) * a / 255;
-    int g = GetGValue(face) + (GetGValue(acc) - GetGValue(face)) * a / 255;
-    int b = GetBValue(face) + (GetBValue(acc) - GetBValue(face)) * a / 255;
-    return RGB(r, g, b);
+static COLORREF Tint(COLORREF face, COLORREF accent, int amount) {
+    int red = GetRValue(face) + (GetRValue(accent) - GetRValue(face)) * amount / 255;
+    int green = GetGValue(face) + (GetGValue(accent) - GetGValue(face)) * amount / 255;
+    int blue = GetBValue(face) + (GetBValue(accent) - GetBValue(face)) * amount / 255;
+    return RGB(red, green, blue);
 }
 
-static void FillStrip(HDC dc, int cw, int ch) {
-    RECT r;
-    int p = STRIP_TINT + (ThemeGet() == THEME_LIGHT ? STRIP_TINT_LIGHT_PLUS : 0) - (g_active ? 0 : STRIP_TINT_INACTIVE_MINUS);
-    if (p < 0) p = 0;
-    r.left = 0; r.top = 0; r.right = cw; r.bottom = ch;
-    FillC(dc, &r, Tint(C_FACE, C_ACCENT, p * 255 / 100));
+static void FillStrip(HDC hdc, int width, int height) {
+    RECT rect;
+    int percent = STRIP_TINT + (ThemeGet() == THEME_LIGHT ? STRIP_TINT_LIGHT_PLUS : 0) - (g_active ? 0 : STRIP_TINT_INACTIVE_MINUS);
+    if (percent < 0) percent = 0;
+    rect.left = 0; rect.top = 0; rect.right = width; rect.bottom = height;
+    FillC(hdc, &rect, Tint(C_FACE, C_ACCENT, percent * 255 / 100));
 }
 
-void FramePaint(HWND h, HDC dc) {
-    RECT rc, r, tr;
-    HDC mdc;
-    HBITMAP bmp;
-    HGDIOBJ ob, of;
-    WCHAR t[PATH_CAP + 64];
-    int cw, ch, b, isz = S(16), n, cut, hw;
+void FramePaint(HWND hwnd, HDC hdc) {
+    RECT client, buttonRect, titleRect;
+    HDC memDc;
+    HBITMAP bitmap;
+    HGDIOBJ oldBitmap, oldFont;
+    WCHAR title[PATH_CAP + 64];
+    int width, height, button, iconSize = S(16), length, boldLength, boldWidth;
     COLORREF fg;
     if (!FRAME_CUSTOM) return;
-    GetClientRect(h, &rc);
-    cw = rc.right;
-    ch = FrameHeight();
-    if (cw <= 0) return;
-    mdc = CreateCompatibleDC(dc);
-    bmp = CreateCompatibleBitmap(dc, cw, ch);
-    ob = SelectObject(mdc, bmp);
-    of = SelectObject(mdc, g_fontMenu);
-    FillStrip(mdc, cw, ch);
-    if (!g_icon) g_icon = (HICON)LoadImageW(g_hinst, MAKEINTRESOURCEW(1), IMAGE_ICON, isz, isz, LR_DEFAULTCOLOR);
-    if (g_icon) DrawIconEx(mdc, IconLeft(), (ContentH() - isz) / 2, g_icon, isz, isz, 0, NULL, DI_NORMAL);
-    GetWindowTextW(h, t, COUNTOF(t));
-    BtnRect(FB_MIN, cw, &r);
-    tr.left = IconRight() + S(4); tr.right = r.left - S(8); tr.top = 0; tr.bottom = ContentH();
+    GetClientRect(hwnd, &client);
+    width = client.right;
+    height = FrameHeight();
+    if (width <= 0) return;
+    memDc = CreateCompatibleDC(hdc);
+    bitmap = CreateCompatibleBitmap(hdc, width, height);
+    oldBitmap = SelectObject(memDc, bitmap);
+    oldFont = SelectObject(memDc, g_fontMenu);
+    FillStrip(memDc, width, height);
+    if (!g_icon) g_icon = (HICON)LoadImageW(g_hinst, MAKEINTRESOURCEW(1), IMAGE_ICON, iconSize, iconSize, LR_DEFAULTCOLOR);
+    if (g_icon) DrawIconEx(memDc, IconLeft(), (ContentH() - iconSize) / 2, g_icon, iconSize, iconSize, 0, NULL, DI_NORMAL);
+    GetWindowTextW(hwnd, title, COUNTOF(title));
+    BtnRect(FB_MIN, width, &buttonRect);
+    titleRect.left = IconRight() + S(4); titleRect.right = buttonRect.left - S(8); titleRect.top = 0; titleRect.bottom = ContentH();
     fg = g_active ? (ThemeGet() == THEME_DARK ? RGB(0xff, 0xff, 0xff) : RGB(0, 0, 0)) : C_DIM;
-    n = wlen(t);
-    cut = n - wlen(TITLE_TAIL);
-    if (cut < 0 || wcmp(t + cut, TITLE_TAIL) != 0) cut = n;
-    SelectObject(mdc, g_fontMenuB);
-    hw = TextW(mdc, t, cut);
-    TextC(mdc, t, cut, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX, fg);
-    SelectObject(mdc, g_fontMenu);
-    if (cut < n && hw < tr.right - tr.left) {
-        tr.left += hw;
-        TextC(mdc, t + cut, n - cut, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX, fg);
+    length = wlen(title);
+    boldLength = length - wlen(TITLE_TAIL);
+    if (boldLength < 0 || wcmp(title + boldLength, TITLE_TAIL) != 0) boldLength = length;
+    SelectObject(memDc, g_fontMenuB);
+    boldWidth = TextW(memDc, title, boldLength);
+    TextC(memDc, title, boldLength, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX, fg);
+    SelectObject(memDc, g_fontMenu);
+    if (boldLength < length && boldWidth < titleRect.right - titleRect.left) {
+        titleRect.left += boldWidth;
+        TextC(memDc, title + boldLength, length - boldLength, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX, fg);
     }
-    for (b = 0; b < FB_COUNT; b++) {
-        BtnRect(b, cw, &r);
-        DrawBtn(mdc, b, &r, b == g_hot, b == g_down && b == g_hot, IsZoomed(h) ? 1 : 0);
+    for (button = 0; button < FB_COUNT; button++) {
+        BtnRect(button, width, &buttonRect);
+        DrawBtn(memDc, button, &buttonRect, button == g_hot, button == g_down && button == g_hot, IsZoomed(hwnd) ? 1 : 0);
     }
-    BitBlt(dc, 0, 0, cw, ch, mdc, 0, 0, SRCCOPY);
-    SelectObject(mdc, of);
-    SelectObject(mdc, ob);
-    DeleteObject(bmp);
-    DeleteDC(mdc);
+    BitBlt(hdc, 0, 0, width, height, memDc, 0, 0, SRCCOPY);
+    SelectObject(memDc, oldFont);
+    SelectObject(memDc, oldBitmap);
+    DeleteObject(bitmap);
+    DeleteDC(memDc);
 }
 
-LRESULT FrameNcCalc(HWND h, WPARAM w, LPARAM l) {
-    RECT *r = (RECT *)l;
-    RECT win;
+LRESULT FrameNcCalc(HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    RECT *rect = (RECT *)lParam;
+    RECT windowRect;
     LRESULT ret;
-    if (!FRAME_CUSTOM || !r) return DefWindowProcW(h, WM_NCCALCSIZE, w, l);
-    win = *r;
-    ret = DefWindowProcW(h, WM_NCCALCSIZE, w, l);
-    if (!IsIconic(h)) {
-        r->top = win.top;
-        if (IsZoomed(h)) r->top += r->left - win.left;
+    if (!FRAME_CUSTOM || !rect) return DefWindowProcW(hwnd, WM_NCCALCSIZE, wParam, lParam);
+    windowRect = *rect;
+    ret = DefWindowProcW(hwnd, WM_NCCALCSIZE, wParam, lParam);
+    if (!IsIconic(hwnd)) {
+        rect->top = windowRect.top;
+        if (IsZoomed(hwnd)) rect->top += rect->left - windowRect.left;
     }
-    DBG(L"nccalc w/top-inset", w, r->top - win.top);
+    DBG(L"nccalc w/top-inset", wParam, rect->top - windowRect.top);
     return ret;
 }
 
-LRESULT FrameHitTest(HWND h, LPARAM l) {
+LRESULT FrameHitTest(HWND hwnd, LPARAM lParam) {
     POINT pt;
-    RECT rc;
-    int b, e;
-    LRESULT r = DefWindowProcW(h, WM_NCHITTEST, 0, l);
-    if (!FRAME_CUSTOM || r != HTCLIENT) return r;
-    pt.x = GET_X_LPARAM(l); pt.y = GET_Y_LPARAM(l);
-    ScreenToClient(h, &pt);
+    RECT client;
+    int button, border;
+    LRESULT hit = DefWindowProcW(hwnd, WM_NCHITTEST, 0, lParam);
+    if (!FRAME_CUSTOM || hit != HTCLIENT) return hit;
+    pt.x = GET_X_LPARAM(lParam); pt.y = GET_Y_LPARAM(lParam);
+    ScreenToClient(hwnd, &pt);
     if (pt.y < 0 || pt.y >= FrameHeight()) return HTCLIENT;
-    GetClientRect(h, &rc);
-    b = HitBtn(pt.x, pt.y, rc.right);
-    e = b >= 0 ? Edge() / 2 : Edge();
-    if (!IsZoomed(h) && pt.y < e) {
+    GetClientRect(hwnd, &client);
+    button = HitBtn(pt.x, pt.y, client.right);
+    border = button >= 0 ? Edge() / 2 : Edge();
+    if (!IsZoomed(hwnd) && pt.y < border) {
         if (pt.x < S(16)) return HTTOPLEFT;
-        if (pt.x >= rc.right - S(16)) return HTTOPRIGHT;
+        if (pt.x >= client.right - S(16)) return HTTOPRIGHT;
         return HTTOP;
     }
-    if (b >= 0 || InIcon(pt.x, pt.y)) return HTCLIENT;
+    if (button >= 0 || InIcon(pt.x, pt.y)) return HTCLIENT;
     return HTCAPTION;
 }
 
-void FrameSysMenu(HWND h, int x, int y) {
+void FrameSysMenu(HWND hwnd, int x, int y) {
     POINT pt;
     if (x == -1 && y == -1) {
         pt.x = 0; pt.y = FrameHeight();
-        ClientToScreen(h, &pt);
+        ClientToScreen(hwnd, &pt);
         x = pt.x; y = pt.y;
     }
-    MenuPopup(h, &g_mdSys, x, y, 0);
+    MenuPopup(hwnd, &g_mdSys, x, y, 0);
 }
 
 unsigned FrameSysState(int id) {
-    HWND h = g_hwnd;
-    int max = IsZoomed(h) ? 1 : 0, min = IsIconic(h) ? 1 : 0;
+    HWND hwnd = g_hwnd;
+    int maximized = IsZoomed(hwnd) ? 1 : 0, minimized = IsIconic(hwnd) ? 1 : 0;
     switch (id) {
-    case IDM_SYS_RESTORE: return (max || min) ? 0 : MS_GRAY;
+    case IDM_SYS_RESTORE: return (maximized || minimized) ? 0 : MS_GRAY;
     case IDM_SYS_MOVE:
     case IDM_SYS_SIZE:
-    case IDM_SYS_MAX:     return max ? MS_GRAY : 0;
+    case IDM_SYS_MAX:     return maximized ? MS_GRAY : 0;
     }
     return 0;
 }
 
-void FrameSysCommand(HWND h, int id) {
-    UINT sc = 0;
+void FrameSysCommand(HWND hwnd, int id) {
+    UINT sysCommand = 0;
     switch (id) {
-    case IDM_SYS_RESTORE: sc = SC_RESTORE; break;
-    case IDM_SYS_MOVE:    sc = SC_MOVE; break;
-    case IDM_SYS_SIZE:    sc = SC_SIZE; break;
-    case IDM_SYS_MIN:     sc = SC_MINIMIZE; break;
-    case IDM_SYS_MAX:     sc = SC_MAXIMIZE; break;
-    case IDM_SYS_CLOSE:   sc = SC_CLOSE; break;
+    case IDM_SYS_RESTORE: sysCommand = SC_RESTORE; break;
+    case IDM_SYS_MOVE:    sysCommand = SC_MOVE; break;
+    case IDM_SYS_SIZE:    sysCommand = SC_SIZE; break;
+    case IDM_SYS_MIN:     sysCommand = SC_MINIMIZE; break;
+    case IDM_SYS_MAX:     sysCommand = SC_MAXIMIZE; break;
+    case IDM_SYS_CLOSE:   sysCommand = SC_CLOSE; break;
     }
-    if (sc) PostMessageW(h, WM_SYSCOMMAND, sc, 0);
+    if (sysCommand) PostMessageW(hwnd, WM_SYSCOMMAND, sysCommand, 0);
 }
 
-BOOL FrameMsg(HWND h, UINT m, WPARAM w, LPARAM l) {
-    int x = GET_X_LPARAM(l), y = GET_Y_LPARAM(l), b;
-    RECT rc;
+BOOL FrameMsg(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    int x = GET_X_LPARAM(lParam), y = GET_Y_LPARAM(lParam), button;
+    RECT client;
     POINT pt;
     if (!FRAME_CUSTOM) return FALSE;
-    switch (m) {
+    switch (msg) {
     case WM_MOUSEMOVE:
-        GetClientRect(h, &rc);
-        b = (y >= 0 && y < FrameHeight()) ? HitBtn(x, y, rc.right) : -1;
-        if (g_down >= 0 && b != g_down) b = -1;
-        if (b >= 0 && !g_track) {
-            TRACKMOUSEEVENT te;
-            te.cbSize = sizeof te; te.dwFlags = TME_LEAVE; te.hwndTrack = h; te.dwHoverTime = 0;
-            g_track = TrackMouseEvent(&te) ? 1 : 0;
+        GetClientRect(hwnd, &client);
+        button = (y >= 0 && y < FrameHeight()) ? HitBtn(x, y, client.right) : -1;
+        if (g_down >= 0 && button != g_down) button = -1;
+        if (button >= 0 && !g_track) {
+            TRACKMOUSEEVENT trackEvent;
+            trackEvent.cbSize = sizeof trackEvent; trackEvent.dwFlags = TME_LEAVE; trackEvent.hwndTrack = hwnd; trackEvent.dwHoverTime = 0;
+            g_track = TrackMouseEvent(&trackEvent) ? 1 : 0;
         }
-        if (b != g_hot) { g_hot = b; FrameInvalidate(h); }
+        if (button != g_hot) { g_hot = button; FrameInvalidate(hwnd); }
         return TRUE;
     case WM_MOUSELEAVE:
         g_track = 0;
-        if (g_hot >= 0 && g_down < 0) { g_hot = -1; FrameInvalidate(h); }
+        if (g_hot >= 0 && g_down < 0) { g_hot = -1; FrameInvalidate(hwnd); }
         return TRUE;
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK:
         if (y < 0 || y >= FrameHeight()) return FALSE;
-        GetClientRect(h, &rc);
-        b = HitBtn(x, y, rc.right);
-        if (b >= 0) {
-            g_down = b; g_hot = b;
-            SetCapture(h);
-            FrameInvalidate(h);
+        GetClientRect(hwnd, &client);
+        button = HitBtn(x, y, client.right);
+        if (button >= 0) {
+            g_down = button; g_hot = button;
+            SetCapture(hwnd);
+            FrameInvalidate(hwnd);
             return TRUE;
         }
-        if (InIcon(x, y)) { FrameSysMenu(h, -1, -1); return TRUE; }
+        if (InIcon(x, y)) { FrameSysMenu(hwnd, -1, -1); return TRUE; }
         return FALSE;
     case WM_LBUTTONUP:
         if (g_down >= 0) {
-            int d = g_down;
-            GetClientRect(h, &rc);
-            b = (y >= 0 && y < FrameHeight()) ? HitBtn(x, y, rc.right) : -1;
+            int pressed = g_down;
+            GetClientRect(hwnd, &client);
+            button = (y >= 0 && y < FrameHeight()) ? HitBtn(x, y, client.right) : -1;
             g_down = -1;
             ReleaseCapture();
-            g_hot = b;
-            FrameInvalidate(h);
-            if (b == d) {
-                UINT sc = (d == FB_MIN) ? SC_MINIMIZE : (d == FB_CLOSE ? SC_CLOSE : (IsZoomed(h) ? SC_RESTORE : SC_MAXIMIZE));
-                PostMessageW(h, WM_SYSCOMMAND, sc, 0);
+            g_hot = button;
+            FrameInvalidate(hwnd);
+            if (button == pressed) {
+                UINT sysCommand = (pressed == FB_MIN) ? SC_MINIMIZE : (pressed == FB_CLOSE ? SC_CLOSE : (IsZoomed(hwnd) ? SC_RESTORE : SC_MAXIMIZE));
+                PostMessageW(hwnd, WM_SYSCOMMAND, sysCommand, 0);
             }
             return TRUE;
         }
@@ -317,13 +317,13 @@ BOOL FrameMsg(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_RBUTTONUP:
         if (y < 0 || y >= FrameHeight()) return FALSE;
         pt.x = x; pt.y = y;
-        ClientToScreen(h, &pt);
-        FrameSysMenu(h, pt.x, pt.y);
+        ClientToScreen(hwnd, &pt);
+        FrameSysMenu(hwnd, pt.x, pt.y);
         return TRUE;
     case WM_NCRBUTTONDOWN:
-        return w == HTCAPTION;
+        return wParam == HTCAPTION;
     case WM_CAPTURECHANGED:
-        if (g_down >= 0) { g_down = -1; g_hot = -1; FrameInvalidate(h); }
+        if (g_down >= 0) { g_down = -1; g_hot = -1; FrameInvalidate(hwnd); }
         return FALSE;
     }
     return FALSE;

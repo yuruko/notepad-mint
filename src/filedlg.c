@@ -12,7 +12,7 @@ static OfnFn   pOpen, pSave;
 static CdErrFn pCdErr;
 static WCHAR   g_last[PATH_CAP];
 
-typedef struct { DlgBase b; HWND list; int enc, reopen; } EncSt;
+typedef struct { DlgBase base; HWND list; int enc, reopen; } EncSt;
 
 static BOOL CdLoad(void) {
     if (!g_cd && (g_cd = LoadLibraryW(L"comdlg32.dll")) != NULL) {
@@ -23,13 +23,13 @@ static BOOL CdLoad(void) {
     return pOpen && pSave && pCdErr;
 }
 
-static BOOL PickFile(HWND owner, WCHAR *path, int cap, BOOL save) {
-    OPENFILENAMEW o;
-    WCHAR buf[PATH_CAP], dir[PATH_CAP];
-    HWND fd;
-    DWORD er = 0;
+static BOOL PickFile(HWND owner, WCHAR *path, int capacity, BOOL save) {
+    OPENFILENAMEW ofn;
+    WCHAR buffer[PATH_CAP], dir[PATH_CAP];
+    HWND held;
+    DWORD err = 0;
     BOOL ok;
-    if (!path || cap <= 0) return FALSE;
+    if (!path || capacity <= 0) return FALSE;
     if (!CdLoad()) {
         MpNote(owner, APP_NAME, L"cannot show the file dialog.");
         return FALSE;
@@ -37,157 +37,157 @@ static BOOL PickFile(HWND owner, WCHAR *path, int cap, BOOL save) {
     PathDir(path, dir, PATH_CAP);
     if (!IsDir(dir)) wcopy(dir, g_last, PATH_CAP);
     if (!IsDir(dir)) dir[0] = 0;
-    wcopy(buf, save ? PathName(path) : L"", PATH_CAP);
-    memset(&o, 0, sizeof o);
-    o.lStructSize = sizeof o;
-    o.hwndOwner = owner;
-    o.lpstrFilter = L"text documents (*.txt)\0*.txt\0all files (*.*)\0*.*\0";
-    o.nFilterIndex = 1;
-    o.lpstrFile = buf;
-    o.nMaxFile = PATH_CAP;
-    o.lpstrInitialDir = dir[0] ? dir : NULL;
-    o.lpstrTitle = save ? L"save as" : L"open";
-    o.lpstrDefExt = L"txt";
-    o.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
-    fd = DialogHoldFind();
-    ok = save ? pSave(&o) : pOpen(&o);
-    if (!ok) er = pCdErr();
-    DialogReleaseFind(fd);
+    wcopy(buffer, save ? PathName(path) : L"", PATH_CAP);
+    memset(&ofn, 0, sizeof ofn);
+    ofn.lStructSize = sizeof ofn;
+    ofn.hwndOwner = owner;
+    ofn.lpstrFilter = L"text documents (*.txt)\0*.txt\0all files (*.*)\0*.*\0";
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile = buffer;
+    ofn.nMaxFile = PATH_CAP;
+    ofn.lpstrInitialDir = dir[0] ? dir : NULL;
+    ofn.lpstrTitle = save ? L"save as" : L"open";
+    ofn.lpstrDefExt = L"txt";
+    ofn.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    held = DialogHoldFind();
+    ok = save ? pSave(&ofn) : pOpen(&ofn);
+    if (!ok) err = pCdErr();
+    DialogReleaseFind(held);
     if (!ok) {
-        if (er) MpNote(owner, APP_NAME, er == FNERR_BUFFERTOOSMALL ? L"the file name is too long." : L"cannot show the file dialog.");
+        if (err) MpNote(owner, APP_NAME, err == FNERR_BUFFERTOOSMALL ? L"the file name is too long." : L"cannot show the file dialog.");
         return FALSE;
     }
-    if (wlen(buf) >= cap) {
+    if (wlen(buffer) >= capacity) {
         MpNote(owner, APP_NAME, L"the file name is too long.");
         return FALSE;
     }
-    wcopy(path, buf, cap);
-    PathDir(buf, g_last, PATH_CAP);
+    wcopy(path, buffer, capacity);
+    PathDir(buffer, g_last, PATH_CAP);
     return TRUE;
 }
 
-BOOL FileDlgOpen(HWND owner, WCHAR *path, int cap) {
-    return PickFile(owner, path, cap, FALSE);
+BOOL FileDlgOpen(HWND owner, WCHAR *path, int capacity) {
+    return PickFile(owner, path, capacity, FALSE);
 }
 
-BOOL FileDlgSave(HWND owner, WCHAR *path, int cap) {
-    return PickFile(owner, path, cap, TRUE);
+BOOL FileDlgSave(HWND owner, WCHAR *path, int capacity) {
+    return PickFile(owner, path, capacity, TRUE);
 }
 
-static int AddItem(HWND list, const WCHAR *t, int data) {
-    int k = (int)SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)t);
-    if (k >= 0) SendMessageW(list, LB_SETITEMDATA, (WPARAM)k, (LPARAM)data);
-    return k;
+static int AddItem(HWND list, const WCHAR *text, int data) {
+    int index = (int)SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)text);
+    if (index >= 0) SendMessageW(list, LB_SETITEMDATA, (WPARAM)index, (LPARAM)data);
+    return index;
 }
 
-static void DrawItem(const DRAWITEMSTRUCT *di) {
-    WCHAR t[PATH_CAP];
-    RECT r = di->rcItem;
-    HDC dc = di->hDC;
-    BOOL sel = (di->itemState & ODS_SELECTED) != 0;
-    COLORREF fg = sel ? C_ON_ACCENT : C_TEXT, dim = sel ? C_ON_ACCENT : C_DIM;
-    UINT fmt = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS;
-    int n = -1, k = 0;
-    HGDIOBJ of;
-    FillC(dc, &r, sel ? C_ACCENT : C_FIELD);
-    if (di->itemID != (UINT)-1) n = (int)SendMessageW(di->hwndItem, LB_GETTEXTLEN, di->itemID, 0);
-    if (n >= 0 && n < PATH_CAP) {
-        SendMessageW(di->hwndItem, LB_GETTEXT, di->itemID, (LPARAM)t);
-        of = SelectObject(dc, g_fontUI);
-        while (k < n && !(t[k] == ' ' && t[k + 1] == ' ')) k++;
-        r.left += S(8);
-        TextC(dc, t, k, &r, fmt, fg);
-        if (k < n) {
-            r.left = di->rcItem.left + S(140);
-            TextC(dc, t + k + 2, -1, &r, fmt, dim);
+static void DrawItem(const DRAWITEMSTRUCT *item) {
+    WCHAR text[PATH_CAP];
+    RECT rect = item->rcItem;
+    HDC hdc = item->hDC;
+    BOOL selected = (item->itemState & ODS_SELECTED) != 0;
+    COLORREF textColor = selected ? C_ON_ACCENT : C_TEXT, dimColor = selected ? C_ON_ACCENT : C_DIM;
+    UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS;
+    int length = -1, split = 0;
+    HGDIOBJ oldFont;
+    FillC(hdc, &rect, selected ? C_ACCENT : C_FIELD);
+    if (item->itemID != (UINT)-1) length = (int)SendMessageW(item->hwndItem, LB_GETTEXTLEN, item->itemID, 0);
+    if (length >= 0 && length < PATH_CAP) {
+        SendMessageW(item->hwndItem, LB_GETTEXT, item->itemID, (LPARAM)text);
+        oldFont = SelectObject(hdc, g_fontUI);
+        while (split < length && !(text[split] == ' ' && text[split + 1] == ' ')) split++;
+        rect.left += S(8);
+        TextC(hdc, text, split, &rect, format, textColor);
+        if (split < length) {
+            rect.left = item->rcItem.left + S(140);
+            TextC(hdc, text + split + 2, -1, &rect, format, dimColor);
         }
-        SelectObject(dc, of);
+        SelectObject(hdc, oldFont);
     }
-    if (di->itemState & ODS_FOCUS) DrawFocusRect(dc, &di->rcItem);
+    if (item->itemState & ODS_FOCUS) DrawFocusRect(hdc, &item->rcItem);
 }
 
-static HWND ListBox(DlgBase *b, int x, int y, int w, int h, int id, DWORD extra) {
-    HWND c;
-    DlgFrame(b, x, y, w, h, BV_SUNKEN);
-    c = CreateWindowExW(0, L"LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | extra, S(x) + 2, S(y) + 2, S(w) - 4, S(h) - 4, b->hwnd, (HMENU)(ULONG_PTR)id, g_hinst, NULL);
-    SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
-    DarkScroll(c);
-    return c;
+static HWND ListBox(DlgBase *base, int x, int y, int width, int height, int id, DWORD extra) {
+    HWND list;
+    DlgFrame(base, x, y, width, height, BV_SUNKEN);
+    list = CreateWindowExW(0, L"LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | extra, S(x) + 2, S(y) + 2, S(width) - 4, S(height) - 4, base->hwnd, (HMENU)(ULONG_PTR)id, g_hinst, NULL);
+    SendMessageW(list, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
+    DarkScroll(list);
+    return list;
 }
 
 static BOOL FocusClick(HWND dlg) {
-    WCHAR cn[16];
-    HWND f = GetFocus();
-    if (!f || GetParent(f) != dlg || GetWindowLongPtrW(f, GWLP_ID) == IDOK) return FALSE;
-    GetClassNameW(f, cn, 16);
-    if (wcmp(cn, L"mp_btn") != 0) return FALSE;
-    SendMessageW(f, BM_CLICK, 0, 0);
+    WCHAR className[16];
+    HWND focus = GetFocus();
+    if (!focus || GetParent(focus) != dlg || GetWindowLongPtrW(focus, GWLP_ID) == IDOK) return FALSE;
+    GetClassNameW(focus, className, 16);
+    if (wcmp(className, L"mp_btn") != 0) return FALSE;
+    SendMessageW(focus, BM_CLICK, 0, 0);
     return TRUE;
 }
 
-static LRESULT CALLBACK EncProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    DlgBase *b = DlgFromHwnd(h, m, l);
-    EncSt *d = (EncSt *)b;
-    LRESULT r;
-    if (!b) return DefWindowProcW(h, m, w, l);
-    switch (m) {
+static LRESULT CALLBACK EncProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    DlgBase *base = DlgFromHwnd(hwnd, msg, lParam);
+    EncSt *state = (EncSt *)base;
+    LRESULT result;
+    if (!base) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    switch (msg) {
     case WM_CREATE: {
-        WCHAR t[96];
-        int i, k, e, sel = -1, n = EncListCount();
-        UiLabel(h, d->reopen ? L"pick the encoding to read the file with:" : L"pick the encoding to save the file with:", 16, 14, 368, 16, 0, 0);
-        d->list = ListBox(b, 16, 36, 368, 272, ID_ENCLIST, 0);
-        for (i = 0; i < n; i++) {
-            e = EncListGet(i, t, COUNTOF(t));
-            k = AddItem(d->list, t, e);
-            if (e == d->enc && sel < 0) sel = k;
+        WCHAR label[96];
+        int i, index, encoding, selIndex = -1, count = EncListCount();
+        UiLabel(hwnd, state->reopen ? L"pick the encoding to read the file with:" : L"pick the encoding to save the file with:", 16, 14, 368, 16, 0, 0);
+        state->list = ListBox(base, 16, 36, 368, 272, ID_ENCLIST, 0);
+        for (i = 0; i < count; i++) {
+            encoding = EncListGet(i, label, COUNTOF(label));
+            index = AddItem(state->list, label, encoding);
+            if (encoding == state->enc && selIndex < 0) selIndex = index;
         }
-        if (sel < 0 && d->enc >= ENC_CP_MIN) {
-            EncLabel(d->enc, t, COUNTOF(t));
-            sel = AddItem(d->list, t, d->enc);
+        if (selIndex < 0 && state->enc >= ENC_CP_MIN) {
+            EncLabel(state->enc, label, COUNTOF(label));
+            selIndex = AddItem(state->list, label, state->enc);
         }
-        if (sel >= 0) {
-            SendMessageW(d->list, LB_SETTOPINDEX, (WPARAM)(sel > 5 ? sel - 5 : 0), 0);
-            SendMessageW(d->list, LB_SETCURSEL, (WPARAM)sel, 0);
+        if (selIndex >= 0) {
+            SendMessageW(state->list, LB_SETTOPINDEX, (WPARAM)(selIndex > 5 ? selIndex - 5 : 0), 0);
+            SendMessageW(state->list, LB_SETCURSEL, (WPARAM)selIndex, 0);
         }
-        UiButton(h, L"ok", 200, 320, 88, 24, IDOK, BS_DEFPUSHBUTTON);
-        UiButton(h, L"cancel", 296, 320, 88, 24, IDCANCEL, BS_PUSHBUTTON);
-        b->focus = d->list;
+        UiButton(hwnd, L"ok", 200, 320, 88, 24, IDOK, BS_DEFPUSHBUTTON);
+        UiButton(hwnd, L"cancel", 296, 320, 88, 24, IDCANCEL, BS_PUSHBUTTON);
+        base->focus = state->list;
         return 0; }
     case WM_MEASUREITEM:
-        ((MEASUREITEMSTRUCT *)l)->itemHeight = (UINT)S(20);
+        ((MEASUREITEMSTRUCT *)lParam)->itemHeight = (UINT)S(20);
         return TRUE;
     case WM_DRAWITEM:
-        DrawItem((const DRAWITEMSTRUCT *)l);
+        DrawItem((const DRAWITEMSTRUCT *)lParam);
         return TRUE;
     case WM_COMMAND:
-        if (LOWORD(w) == IDOK && FocusClick(h)) return 0;
-        if (LOWORD(w) == IDOK || (LOWORD(w) == ID_ENCLIST && HIWORD(w) == LBN_DBLCLK)) {
-            int i = (int)SendMessageW(d->list, LB_GETCURSEL, 0, 0);
-            if (i >= 0) {
-                d->enc = (int)SendMessageW(d->list, LB_GETITEMDATA, (WPARAM)i, 0);
-                b->result = 1; b->done = 1;
+        if (LOWORD(wParam) == IDOK && FocusClick(hwnd)) return 0;
+        if (LOWORD(wParam) == IDOK || (LOWORD(wParam) == ID_ENCLIST && HIWORD(wParam) == LBN_DBLCLK)) {
+            int index = (int)SendMessageW(state->list, LB_GETCURSEL, 0, 0);
+            if (index >= 0) {
+                state->enc = (int)SendMessageW(state->list, LB_GETITEMDATA, (WPARAM)index, 0);
+                base->result = 1; base->done = 1;
             }
             return 0;
         }
-        if (LOWORD(w) == IDCANCEL) { b->result = 0; b->done = 1; return 0; }
+        if (LOWORD(wParam) == IDCANCEL) { base->result = 0; base->done = 1; return 0; }
         break;
     }
-    if (DlgCommon(b, m, w, l, &r)) return r;
-    return DefWindowProcW(h, m, w, l);
+    if (DlgCommon(base, msg, wParam, lParam, &result)) return result;
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 BOOL EncDlg(HWND owner, int *enc, int reopen) {
     static BOOL reg;
-    EncSt d;
+    EncSt state;
     if (!enc) return FALSE;
     if (!reg) { RegClass(L"mp_enc", EncProc, 0, NULL); reg = TRUE; }
-    memset(&d, 0, sizeof d);
-    DlgBaseInit(&d.b, owner);
-    d.enc = *enc;
-    d.reopen = reopen;
-    if (!DlgOpen(&d.b, L"mp_enc", reopen ? L"reopen with encoding" : L"other code page", 400, 360, 0)) return FALSE;
-    DlgRunModal(&d.b);
-    if (d.b.result != 1) return FALSE;
-    *enc = d.enc;
+    memset(&state, 0, sizeof state);
+    DlgBaseInit(&state.base, owner);
+    state.enc = *enc;
+    state.reopen = reopen;
+    if (!DlgOpen(&state.base, L"mp_enc", reopen ? L"reopen with encoding" : L"other code page", 400, 360, 0)) return FALSE;
+    DlgRunModal(&state.base);
+    if (state.base.result != 1) return FALSE;
+    *enc = state.enc;
     return TRUE;
 }

@@ -5,7 +5,7 @@
 
 void ButtonInit(void);
 void DialogInit(void);
-void UiFrame(HDC dc, const RECT *r, COLORREF topLeft, COLORREF bottomRight);
+void UiFrame(HDC hdc, const RECT *rect, COLORREF topLeft, COLORREF bottomRight);
 
 HWND DialogHoldFind(void);
 void DialogReleaseFind(HWND held);

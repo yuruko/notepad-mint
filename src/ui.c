@@ -56,30 +56,30 @@ int UnS(int px) { return MulDiv(px, 96, g_dpi); }
 int UiSystemDpi(void) {
     if (pDpiSys) return (int)pDpiSys();
     {
-        HDC dc = GetDC(NULL);
-        int d = dc ? GetDeviceCaps(dc, LOGPIXELSX) : 96;
-        if (dc) ReleaseDC(NULL, dc);
-        return d ? d : 96;
+        HDC hdc = GetDC(NULL);
+        int dpi = hdc ? GetDeviceCaps(hdc, LOGPIXELSX) : 96;
+        if (hdc) ReleaseDC(NULL, hdc);
+        return dpi ? dpi : 96;
     }
 }
 
-int UiDpiForWindow(HWND h) {
-    UINT d = pDpiWin ? pDpiWin(h) : 0;
-    return d ? (int)d : g_dpi;
+int UiDpiForWindow(HWND hwnd) {
+    UINT dpi = pDpiWin ? pDpiWin(hwnd) : 0;
+    return dpi ? (int)dpi : g_dpi;
 }
 
-int UiMetric(int idx) {
-    if (pMetric) return pMetric(idx, (UINT)g_dpi);
-    return GetSystemMetrics(idx);
+int UiMetric(int index) {
+    if (pMetric) return pMetric(index, (UINT)g_dpi);
+    return GetSystemMetrics(index);
 }
 
-BOOL UiAdjustRect(RECT *r, DWORD style, DWORD ex) {
-    if (pAdjDpi) return pAdjDpi(r, style, FALSE, ex, (UINT)g_dpi);
-    return AdjustWindowRectEx(r, style, FALSE, ex);
+BOOL UiAdjustRect(RECT *rect, DWORD style, DWORD exStyle) {
+    if (pAdjDpi) return pAdjDpi(rect, style, FALSE, exStyle, (UINT)g_dpi);
+    return AdjustWindowRectEx(rect, style, FALSE, exStyle);
 }
 
-static HFONT Face(const WCHAR *face, int pt, int weight) {
-    return CreateFontW(-MulDiv(pt, g_dpi, 72), 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
+static HFONT Face(const WCHAR *face, int points, int weight) {
+    return CreateFontW(-MulDiv(points, g_dpi, 72), 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
 }
 
 static HFONT FacePx(const WCHAR *face, int px, int weight) {
@@ -94,68 +94,68 @@ typedef struct DialogFonts {
 static DialogFonts *g_dialogFonts;
 
 static void MakeDialogFonts(void) {
-    DialogFonts *f;
-    for (f = g_dialogFonts; f; f = f->next) if (f->dpi == g_dpi) break;
-    if (!f) {
-        f = (DialogFonts *)mem_zalloc(sizeof *f);
-        if (!f) return;
-        f->normal = Face(UI_FACE, UI_PT, FW_NORMAL);
-        f->bold = Face(UI_FACE, UI_PT, FW_BOLD);
-        if (!f->normal || !f->bold) {
-            if (f->normal) DeleteObject(f->normal);
-            if (f->bold) DeleteObject(f->bold);
-            mem_free(f);
+    DialogFonts *fonts;
+    for (fonts = g_dialogFonts; fonts; fonts = fonts->next) if (fonts->dpi == g_dpi) break;
+    if (!fonts) {
+        fonts = (DialogFonts *)mem_zalloc(sizeof *fonts);
+        if (!fonts) return;
+        fonts->normal = Face(UI_FACE, UI_PT, FW_NORMAL);
+        fonts->bold = Face(UI_FACE, UI_PT, FW_BOLD);
+        if (!fonts->normal || !fonts->bold) {
+            if (fonts->normal) DeleteObject(fonts->normal);
+            if (fonts->bold) DeleteObject(fonts->bold);
+            mem_free(fonts);
             return;
         }
-        f->dpi = g_dpi;
-        f->next = g_dialogFonts;
-        g_dialogFonts = f;
+        fonts->dpi = g_dpi;
+        fonts->next = g_dialogFonts;
+        g_dialogFonts = fonts;
     }
-    g_fontUI = f->normal;
-    g_fontUIB = f->bold;
+    g_fontUI = fonts->normal;
+    g_fontUIB = fonts->bold;
 }
 
 typedef struct { HFONT old, oldBold, font, bold; } FontChange;
 
-static BOOL CALLBACK RefontChild(HWND h, LPARAM l) {
-    const FontChange *c = (const FontChange *)l;
-    HFONT font = (HFONT)SendMessageW(h, WM_GETFONT, 0, 0), replacement = NULL;
-    if (c->old && font == c->old) replacement = c->font;
-    else if (c->oldBold && font == c->oldBold) replacement = c->bold;
+static BOOL CALLBACK RefontChild(HWND hwnd, LPARAM lParam) {
+    const FontChange *change = (const FontChange *)lParam;
+    HFONT font = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0), replacement = NULL;
+    if (change->old && font == change->old) replacement = change->font;
+    else if (change->oldBold && font == change->oldBold) replacement = change->bold;
     if (replacement) {
-        WCHAR cls[16];
-        RECT r;
+        WCHAR className[16];
+        RECT rect;
         BOOL edit;
-        GetClassNameW(h, cls, COUNTOF(cls));
-        edit = wcmpi(cls, L"EDIT") == 0;
-        if (edit) SendMessageW(h, EM_GETRECT, 0, (LPARAM)&r);
-        SendMessageW(h, WM_SETFONT, (WPARAM)replacement, TRUE);
-        if (edit) SendMessageW(h, EM_SETRECTNP, 0, (LPARAM)&r);
+        GetClassNameW(hwnd, className, COUNTOF(className));
+        edit = wcmpi(className, L"EDIT") == 0;
+        if (edit) SendMessageW(hwnd, EM_GETRECT, 0, (LPARAM)&rect);
+        SendMessageW(hwnd, WM_SETFONT, (WPARAM)replacement, TRUE);
+        if (edit) SendMessageW(hwnd, EM_SETRECTNP, 0, (LPARAM)&rect);
     }
     return TRUE;
 }
 
-static BOOL CALLBACK RefontWindow(HWND h, LPARAM l) {
-    RefontChild(h, l);
-    EnumChildWindows(h, RefontChild, l);
+static BOOL CALLBACK RefontWindow(HWND hwnd, LPARAM lParam) {
+    RefontChild(hwnd, lParam);
+    EnumChildWindows(hwnd, RefontChild, lParam);
     return TRUE;
 }
 
 static void MakeMenuFont(void) {
-    FontChange c;
-    c.old = g_fontMenu; c.oldBold = g_fontMenuB;
-    c.font = FacePx(g_chromeFace, CHROME_PX, FW_NORMAL);
-    c.bold = FacePx(g_chromeFace, CHROME_PX, FW_BOLD);
-    if (!c.font || !c.bold) {
-        if (c.font) DeleteObject(c.font);
-        if (c.bold) DeleteObject(c.bold);
+    FontChange change;
+    change.old = g_fontMenu; change.oldBold = g_fontMenuB;
+    change.font = FacePx(g_chromeFace, CHROME_PX, FW_NORMAL);
+    change.bold = FacePx(g_chromeFace, CHROME_PX, FW_BOLD);
+    if (!change.font || !change.bold) {
+        if (change.font) DeleteObject(change.font);
+        if (change.bold) DeleteObject(change.bold);
         return;
     }
-    g_fontMenu = c.font;
-    g_fontMenuB = c.bold;
-    if (c.old || c.oldBold) EnumThreadWindows(GetCurrentThreadId(), RefontWindow, (LPARAM)&c);
-    if (c.old) DeleteObject(c.old);
-    if (c.oldBold) DeleteObject(c.oldBold);
+    g_fontMenu = change.font;
+    g_fontMenuB = change.bold;
+    if (change.old || change.oldBold) EnumThreadWindows(GetCurrentThreadId(), RefontWindow, (LPARAM)&change);
+    if (change.old) DeleteObject(change.old);
+    if (change.oldBold) DeleteObject(change.oldBold);
 }
 
 static void MakeFonts(void) {
@@ -173,88 +173,88 @@ void UiSetDpi(int dpi) {
     MakeFonts();
 }
 
-void FillC(HDC dc, const RECT *r, COLORREF c) {
-    SetBkColor(dc, c);
-    ExtTextOutW(dc, 0, 0, ETO_OPAQUE, r, NULL, 0, NULL);
+void FillC(HDC hdc, const RECT *rect, COLORREF color) {
+    SetBkColor(hdc, color);
+    ExtTextOutW(hdc, 0, 0, ETO_OPAQUE, rect, NULL, 0, NULL);
 }
 
-void UiFrame(HDC dc, const RECT *r, COLORREF tl, COLORREF br) {
-    RECT a;
-    a.left = r->left;      a.top = r->top;        a.right = r->right - 1; a.bottom = r->top + 1;    FillC(dc, &a, tl);
-    a.left = r->left;      a.top = r->top + 1;    a.right = r->left + 1;  a.bottom = r->bottom - 1; FillC(dc, &a, tl);
-    a.left = r->left;      a.top = r->bottom - 1; a.right = r->right;     a.bottom = r->bottom;     FillC(dc, &a, br);
-    a.left = r->right - 1; a.top = r->top;        a.right = r->right;     a.bottom = r->bottom - 1; FillC(dc, &a, br);
+void UiFrame(HDC hdc, const RECT *rect, COLORREF topLeft, COLORREF bottomRight) {
+    RECT edge;
+    edge.left = rect->left;      edge.top = rect->top;        edge.right = rect->right - 1; edge.bottom = rect->top + 1;    FillC(hdc, &edge, topLeft);
+    edge.left = rect->left;      edge.top = rect->top + 1;    edge.right = rect->left + 1;  edge.bottom = rect->bottom - 1; FillC(hdc, &edge, topLeft);
+    edge.left = rect->left;      edge.top = rect->bottom - 1; edge.right = rect->right;     edge.bottom = rect->bottom;     FillC(hdc, &edge, bottomRight);
+    edge.left = rect->right - 1; edge.top = rect->top;        edge.right = rect->right;     edge.bottom = rect->bottom - 1; FillC(hdc, &edge, bottomRight);
 }
 
-void Bevel(HDC dc, const RECT *r, int kind) {
-    RECT a = *r;
+void Bevel(HDC hdc, const RECT *rect, int kind) {
+    RECT area = *rect;
     switch (kind) {
     case BV_RAISED:
-        UiFrame(dc, &a, C_HI, C_LO);   InflateRect(&a, -1, -1); UiFrame(dc, &a, C_HI2, C_LO2); break;
+        UiFrame(hdc, &area, C_HI, C_LO);   InflateRect(&area, -1, -1); UiFrame(hdc, &area, C_HI2, C_LO2); break;
     case BV_SUNKEN:
-        UiFrame(dc, &a, C_LO2, C_HI);  InflateRect(&a, -1, -1); UiFrame(dc, &a, C_LO, C_HI2);  break;
+        UiFrame(hdc, &area, C_LO2, C_HI);  InflateRect(&area, -1, -1); UiFrame(hdc, &area, C_LO, C_HI2);  break;
     case BV_ETCHED:
-        UiFrame(dc, &a, C_LO2, C_HI2); InflateRect(&a, -1, -1); UiFrame(dc, &a, C_HI2, C_LO2); break;
+        UiFrame(hdc, &area, C_LO2, C_HI2); InflateRect(&area, -1, -1); UiFrame(hdc, &area, C_HI2, C_LO2); break;
     case BV_FLAT_DN:
-        UiFrame(dc, &a, C_LO2, C_HI2); break;
+        UiFrame(hdc, &area, C_LO2, C_HI2); break;
     }
 }
 
-void TextC(HDC dc, const WCHAR *s, int n, RECT *r, UINT fmt, COLORREF c) {
-    SetTextColor(dc, c);
-    SetBkMode(dc, TRANSPARENT);
-    DrawTextW(dc, s, n, r, fmt);
+void TextC(HDC hdc, const WCHAR *text, int length, RECT *rect, UINT format, COLORREF color) {
+    SetTextColor(hdc, color);
+    SetBkMode(hdc, TRANSPARENT);
+    DrawTextW(hdc, text, length, rect, format);
 }
 
-int TextW(HDC dc, const WCHAR *s, int n) {
-    SIZE sz;
-    sz.cx = 0;
-    GetTextExtentPoint32W(dc, s, n < 0 ? wlen(s) : n, &sz);
-    return sz.cx;
+int TextW(HDC hdc, const WCHAR *text, int length) {
+    SIZE size;
+    size.cx = 0;
+    GetTextExtentPoint32W(hdc, text, length < 0 ? wlen(text) : length, &size);
+    return size.cx;
 }
 
-void Tri(HDC dc, int x, int y, int sz, COLORREF c) {
-    POINT p[3];
-    HGDIOBJ op = SelectObject(dc, GetStockObject(NULL_PEN));
-    HGDIOBJ ob = SelectObject(dc, GetStockObject(DC_BRUSH));
-    SetDCBrushColor(dc, c);
-    p[0].x = x;      p[0].y = y;
-    p[1].x = x;      p[1].y = y + sz * 2;
-    p[2].x = x + sz; p[2].y = y + sz;
-    Polygon(dc, p, 3);
-    SelectObject(dc, op);
-    SelectObject(dc, ob);
+void Tri(HDC hdc, int x, int y, int size, COLORREF color) {
+    POINT points[3];
+    HGDIOBJ oldPen = SelectObject(hdc, GetStockObject(NULL_PEN));
+    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(DC_BRUSH));
+    SetDCBrushColor(hdc, color);
+    points[0].x = x;        points[0].y = y;
+    points[1].x = x;        points[1].y = y + size * 2;
+    points[2].x = x + size; points[2].y = y + size;
+    Polygon(hdc, points, 3);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
 }
 
-void CheckGlyph(HDC dc, int x, int y, COLORREF c) {
+void CheckGlyph(HDC hdc, int x, int y, COLORREF color) {
     static const POINT pt[6] = { {2, 6}, {3, 5}, {5, 7}, {9, 3}, {10, 4}, {5, 9} };
-    POINT p[6];
+    POINT points[6];
     int i;
-    HGDIOBJ op = SelectObject(dc, GetStockObject(NULL_PEN));
-    HGDIOBJ ob = SelectObject(dc, GetStockObject(DC_BRUSH));
-    for (i = 0; i < 6; i++) { p[i].x = x + S(pt[i].x); p[i].y = y + S(pt[i].y); }
-    SetDCBrushColor(dc, c);
-    Polygon(dc, p, 6);
-    SelectObject(dc, op);
-    SelectObject(dc, ob);
+    HGDIOBJ oldPen = SelectObject(hdc, GetStockObject(NULL_PEN));
+    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(DC_BRUSH));
+    for (i = 0; i < 6; i++) { points[i].x = x + S(pt[i].x); points[i].y = y + S(pt[i].y); }
+    SetDCBrushColor(hdc, color);
+    Polygon(hdc, points, 6);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
 }
 
-void DarkFrame(HWND h, int active) {
+void DarkFrame(HWND hwnd, int active) {
     BOOL dark = g_theme == THEME_DARK;
-    COLORREF cap = C_FACE, txt = active ? C_ACCENT_FG : C_DIM;
-    COLORREF bor = dark ? (active ? C_HI : C_HI2) : (active ? C_LO2 : RGB(0xa8, 0xa5, 0x9e));
+    COLORREF captionColor = C_FACE, textColor = active ? C_ACCENT_FG : C_DIM;
+    COLORREF borderColor = dark ? (active ? C_HI : C_HI2) : (active ? C_LO2 : RGB(0xa8, 0xa5, 0x9e));
     int corner = DWMWCP_DONOTROUND;
     if (!pDwmSet) return;
-    pDwmSet(h, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof dark);
-    pDwmSet(h, DWMWA_CAPTION_COLOR, &cap, sizeof cap);
-    pDwmSet(h, DWMWA_TEXT_COLOR, &txt, sizeof txt);
-    pDwmSet(h, DWMWA_BORDER_COLOR, &bor, sizeof bor);
-    pDwmSet(h, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof corner);
+    pDwmSet(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof dark);
+    pDwmSet(hwnd, DWMWA_CAPTION_COLOR, &captionColor, sizeof captionColor);
+    pDwmSet(hwnd, DWMWA_TEXT_COLOR, &textColor, sizeof textColor);
+    pDwmSet(hwnd, DWMWA_BORDER_COLOR, &borderColor, sizeof borderColor);
+    pDwmSet(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof corner);
 }
 
-void DarkScroll(HWND h) {
-    if (pSetTheme) pSetTheme(h, L"", L"");
-    SbarAttach(h);
+void DarkScroll(HWND hwnd) {
+    if (pSetTheme) pSetTheme(hwnd, L"", L"");
+    SbarAttach(hwnd);
 }
 
 void RegClass(const WCHAR *name, WNDPROC proc, UINT style, HBRUSH bg) {
@@ -270,20 +270,20 @@ void RegClass(const WCHAR *name, WNDPROC proc, UINT style, HBRUSH bg) {
     RegisterClassExW(&wc);
 }
 
-void UiInit(HINSTANCE hi) {
-    HMODULE m;
-    g_hinst = hi;
+void UiInit(HINSTANCE hInstance) {
+    HMODULE module;
+    g_hinst = hInstance;
     SetErrorMode(SetErrorMode(0) | SEM_FAILCRITICALERRORS);
-    m = LoadLibraryW(L"dwmapi.dll");
-    if (m) pDwmSet = (DwmSetFn)GetProcAddress(m, "DwmSetWindowAttribute");
-    m = LoadLibraryW(L"uxtheme.dll");
-    if (m) pSetTheme = (ThemeFn)GetProcAddress(m, "SetWindowTheme");
-    m = GetModuleHandleW(L"user32.dll");
-    if (m) {
-        pDpiWin = (DpiWinFn)GetProcAddress(m, "GetDpiForWindow");
-        pDpiSys = (DpiSysFn)GetProcAddress(m, "GetDpiForSystem");
-        pAdjDpi = (AdjDpiFn)GetProcAddress(m, "AdjustWindowRectExForDpi");
-        pMetric = (MetricFn)GetProcAddress(m, "GetSystemMetricsForDpi");
+    module = LoadLibraryW(L"dwmapi.dll");
+    if (module) pDwmSet = (DwmSetFn)GetProcAddress(module, "DwmSetWindowAttribute");
+    module = LoadLibraryW(L"uxtheme.dll");
+    if (module) pSetTheme = (ThemeFn)GetProcAddress(module, "SetWindowTheme");
+    module = GetModuleHandleW(L"user32.dll");
+    if (module) {
+        pDpiWin = (DpiWinFn)GetProcAddress(module, "GetDpiForWindow");
+        pDpiSys = (DpiSysFn)GetProcAddress(module, "GetDpiForSystem");
+        pAdjDpi = (AdjDpiFn)GetProcAddress(module, "AdjustWindowRectExForDpi");
+        pMetric = (MetricFn)GetProcAddress(module, "GetSystemMetricsForDpi");
     }
     g_dpi = UiSystemDpi();
     MakeFonts();

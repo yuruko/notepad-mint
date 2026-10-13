@@ -8,30 +8,30 @@ static MenuItem g_recItem[RECENT_MAX + 2] = { { L"(none)", NULL, IDM_RECENT_NONE
 static WCHAR    g_recLbl[RECENT_MAX][64];
 MenuDef g_mdRecent = { g_recItem, 1 };
 
-void MenuSetRecent(const WCHAR (*paths)[PATH_CAP], int n) {
+void MenuSetRecent(const WCHAR (*paths)[PATH_CAP], int count) {
     int i;
-    if (n > RECENT_MAX) n = RECENT_MAX;
-    if (n < 1) {
+    if (count > RECENT_MAX) count = RECENT_MAX;
+    if (count < 1) {
         g_recItem[0].label = L"(none)"; g_recItem[0].accel = NULL; g_recItem[0].id = IDM_RECENT_NONE; g_recItem[0].sub = NULL;
         g_mdRecent.n = 1;
         return;
     }
-    for (i = 0; i < n; i++) {
-        const WCHAR *p = paths[i];
-        WCHAR *o = g_recLbl[i];
-        int len = lstrlenW(p), j = 0, k;
-        o[j++] = '&'; o[j++] = (WCHAR)('1' + i); o[j++] = ' '; o[j++] = ' ';
+    for (i = 0; i < count; i++) {
+        const WCHAR *path = paths[i];
+        WCHAR *label = g_recLbl[i];
+        int len = lstrlenW(path), j = 0, k;
+        label[j++] = '&'; label[j++] = (WCHAR)('1' + i); label[j++] = ' '; label[j++] = ' ';
         for (k = 0; k < len && j < 56; k++) {
-            if (len > 50 && k == 3) { o[j++] = '.'; o[j++] = '.'; o[j++] = '.'; k = len - 44; }
-            if (p[k] == '&') o[j++] = '&';
-            o[j++] = p[k];
+            if (len > 50 && k == 3) { label[j++] = '.'; label[j++] = '.'; label[j++] = '.'; k = len - 44; }
+            if (path[k] == '&') label[j++] = '&';
+            label[j++] = path[k];
         }
-        o[j] = 0;
-        g_recItem[i].label = o; g_recItem[i].accel = NULL; g_recItem[i].id = IDM_RECENT_BASE + i; g_recItem[i].sub = NULL;
+        label[j] = 0;
+        g_recItem[i].label = label; g_recItem[i].accel = NULL; g_recItem[i].id = IDM_RECENT_BASE + i; g_recItem[i].sub = NULL;
     }
-    g_recItem[n].label = NULL; g_recItem[n].accel = NULL; g_recItem[n].id = 0; g_recItem[n].sub = NULL;
-    g_recItem[n + 1].label = L"&clear list"; g_recItem[n + 1].accel = NULL; g_recItem[n + 1].id = IDM_RECENT_CLEAR; g_recItem[n + 1].sub = NULL;
-    g_mdRecent.n = n + 2;
+    g_recItem[count].label = NULL; g_recItem[count].accel = NULL; g_recItem[count].id = 0; g_recItem[count].sub = NULL;
+    g_recItem[count + 1].label = L"&clear list"; g_recItem[count + 1].accel = NULL; g_recItem[count + 1].id = IDM_RECENT_CLEAR; g_recItem[count + 1].sub = NULL;
+    g_mdRecent.n = count + 2;
 }
 
 static const MenuItem miFile[] = {
@@ -182,8 +182,8 @@ const MenuBarEntry g_menuEntries[MENU_BAR_COUNT] = {
 };
 
 const WCHAR *MenuAccelOf(int id) {
-    static const struct { const MenuItem *it; int n; } l[] = { { miFormat, COUNTOF(miFormat) }, { miTheme, COUNTOF(miTheme) } };
+    static const struct { const MenuItem *items; int count; } l[] = { { miFormat, COUNTOF(miFormat) }, { miTheme, COUNTOF(miTheme) } };
     int i, j;
-    for (i = 0; i < (int)COUNTOF(l); i++) for (j = 0; j < l[i].n; j++) if (l[i].it[j].id == id) return l[i].it[j].accel;
+    for (i = 0; i < (int)COUNTOF(l); i++) for (j = 0; j < l[i].count; j++) if (l[i].items[j].id == id) return l[i].items[j].accel;
     return NULL;
 }

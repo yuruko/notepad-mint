@@ -3,8 +3,8 @@
 enum { ID_WHAT = 1001, ID_CASE, ID_WRAP, ID_UP, ID_DOWN, ID_WITH, ID_REPLACE, ID_REPLACEALL, ID_WORD };
 #define ID_LINE 1051
 
-typedef struct { DlgBase b; int rep; } FindSt;
-typedef struct { DlgBase b; HWND edit; } GotoSt;
+typedef struct { DlgBase base; int replaceMode; } FindSt;
+typedef struct { DlgBase base; HWND edit; } GotoSt;
 
 static WCHAR  g_findWhat[256], g_findWith[256];
 static int    g_findUp;
@@ -13,7 +13,7 @@ static int    g_switching;
 static RECT   g_pos;
 static int    g_havePos;
 
-HWND FindDlgHwnd(void) { return g_fd.b.hwnd; }
+HWND FindDlgHwnd(void) { return g_fd.base.hwnd; }
 BOOL FindHasText(void) { return g_findWhat[0] != 0; }
 
 static void NotFound(HWND owner) {
@@ -24,92 +24,92 @@ static void NotFound(HWND owner) {
     MpNote(owner, APP_NAME, msg);
 }
 
-static void Dodge(HWND dlg, int at) {
-    MONITORINFO mi;
+static void Dodge(HWND dlg, int index) {
+    MONITORINFO monitorInfo;
     POINT pt;
-    RECT r;
-    LRESULT p;
-    int lh = MulDiv(g_pf.cur, g_dpi, 480), h, y;
+    RECT dlgRect;
+    LRESULT charPos;
+    int lineHeight = MulDiv(g_pf.cur, g_dpi, 480), height, y;
     if (!dlg) return;
-    p = SendMessageW(g_edit, EM_POSFROMCHAR, (WPARAM)at, 0);
-    if (p == -1) return;
-    pt.x = GET_X_LPARAM(p); pt.y = GET_Y_LPARAM(p);
+    charPos = SendMessageW(g_edit, EM_POSFROMCHAR, (WPARAM)index, 0);
+    if (charPos == -1) return;
+    pt.x = GET_X_LPARAM(charPos); pt.y = GET_Y_LPARAM(charPos);
     ClientToScreen(g_edit, &pt);
-    GetWindowRect(dlg, &r);
-    if (pt.x < r.left || pt.x >= r.right || pt.y + lh <= r.top || pt.y >= r.bottom) return;
-    h = r.bottom - r.top;
-    mi.cbSize = sizeof mi;
-    if (!GetMonitorInfoW(MonitorFromWindow(dlg, MONITOR_DEFAULTTONEAREST), &mi)) return;
-    y = pt.y - h - S(8);
-    if (y < mi.rcWork.top) y = pt.y + lh + S(8);
-    if (y + h > mi.rcWork.bottom) return;
-    SetWindowPos(dlg, NULL, r.left, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    GetWindowRect(dlg, &dlgRect);
+    if (pt.x < dlgRect.left || pt.x >= dlgRect.right || pt.y + lineHeight <= dlgRect.top || pt.y >= dlgRect.bottom) return;
+    height = dlgRect.bottom - dlgRect.top;
+    monitorInfo.cbSize = sizeof monitorInfo;
+    if (!GetMonitorInfoW(MonitorFromWindow(dlg, MONITOR_DEFAULTTONEAREST), &monitorInfo)) return;
+    y = pt.y - height - S(8);
+    if (y < monitorInfo.rcWork.top) y = pt.y + lineHeight + S(8);
+    if (y + height > monitorInfo.rcWork.bottom) return;
+    SetWindowPos(dlg, NULL, dlgRect.left, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 static void Search(HWND owner, int up) {
-    DWORD s = 0, e = 0;
-    void *hl = NULL;
-    int n = 0, m = wlen(g_findWhat), at = -1;
-    const WCHAR *t;
-    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    t = EditLockText(&hl, &n);
-    if (t) {
-        at = FindInTextEx(t, n, g_findWhat, m, (int)(up ? s : e), up, g_pf.matchCase, g_pf.wholeWord);
-        if (at < 0 && g_pf.wrapAround) at = FindInTextEx(t, n, g_findWhat, m, up ? n : 0, up, g_pf.matchCase, g_pf.wholeWord);
+    DWORD selStart = 0, selEnd = 0;
+    void *lock = NULL;
+    int length = 0, patLen = wlen(g_findWhat), found = -1;
+    const WCHAR *text;
+    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    text = EditLockText(&lock, &length);
+    if (text) {
+        found = FindInTextEx(text, length, g_findWhat, patLen, (int)(up ? selStart : selEnd), up, g_pf.matchCase, g_pf.wholeWord);
+        if (found < 0 && g_pf.wrapAround) found = FindInTextEx(text, length, g_findWhat, patLen, up ? length : 0, up, g_pf.matchCase, g_pf.wholeWord);
     }
-    EditUnlockText(hl);
-    if (at < 0) { NotFound(owner); return; }
-    SendMessageW(g_edit, EM_SETSEL, (WPARAM)at, (LPARAM)(at + m));
+    EditUnlockText(lock);
+    if (found < 0) { NotFound(owner); return; }
+    SendMessageW(g_edit, EM_SETSEL, (WPARAM)found, (LPARAM)(found + patLen));
     SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);
-    Dodge(g_fd.b.hwnd, at);
+    Dodge(g_fd.base.hwnd, found);
 }
 
 void FindNext(int dirUp) {
-    if (!g_findWhat[0]) { FindDlgShow(g_fd.b.hwnd ? g_fd.rep : 0); return; }
+    if (!g_findWhat[0]) { FindDlgShow(g_fd.base.hwnd ? g_fd.replaceMode : 0); return; }
     Search(g_hwnd, dirUp);
 }
 
 static void Replace(HWND owner) {
-    DWORD s = 0, e = 0;
-    void *hl = NULL;
-    int n = 0, m = wlen(g_findWhat), hit = 0;
-    const WCHAR *t;
-    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    t = EditLockText(&hl, &n);
-    if (t && (int)(e - s) == m && (int)e <= n) hit = FindInTextEx(t, n, g_findWhat, m, (int)s, 0, g_pf.matchCase, g_pf.wholeWord) == (int)s;
-    EditUnlockText(hl);
+    DWORD selStart = 0, selEnd = 0;
+    void *lock = NULL;
+    int length = 0, patLen = wlen(g_findWhat), hit = 0;
+    const WCHAR *text;
+    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    text = EditLockText(&lock, &length);
+    if (text && (int)(selEnd - selStart) == patLen && (int)selEnd <= length) hit = FindInTextEx(text, length, g_findWhat, patLen, (int)selStart, 0, g_pf.matchCase, g_pf.wholeWord) == (int)selStart;
+    EditUnlockText(lock);
     if (hit) {
         SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)g_findWith);
-        if (g_findUp) SendMessageW(g_edit, EM_SETSEL, (WPARAM)s, (LPARAM)s);
+        if (g_findUp) SendMessageW(g_edit, EM_SETSEL, (WPARAM)selStart, (LPARAM)selStart);
     }
     Search(owner, g_findUp);
 }
 
 static void ReplaceAll(HWND owner) {
-    DWORD s = 0, e = 0;
-    void *hl = NULL;
-    int n = 0, m = wlen(g_findWhat), wn = wlen(g_findWith), len = 0, cnt = 0, k = 0, i, p, caret, found = 0;
-    const WCHAR *t;
+    DWORD selStart = 0, selEnd = 0;
+    void *lock = NULL;
+    int length = 0, patLen = wlen(g_findWhat), replLen = wlen(g_findWith), outLen = 0, count = 0, before = 0, i, pos, caret, found = 0;
+    const WCHAR *text;
     WCHAR *out = NULL;
-    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    t = EditLockText(&hl, &n);
-    if (t) {
-        found = FindInTextEx(t, n, g_findWhat, m, 0, 0, g_pf.matchCase, g_pf.wholeWord) >= 0;
+    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    text = EditLockText(&lock, &length);
+    if (text) {
+        found = FindInTextEx(text, length, g_findWhat, patLen, 0, 0, g_pf.matchCase, g_pf.wholeWord) >= 0;
         if (found) {
-            out = ReplaceAllTextEx(t, n, g_findWhat, m, g_findWith, wn, g_pf.matchCase, g_pf.wholeWord, &len, &cnt);
-            if ((int)s > n) s = (DWORD)n;
-            for (i = 0; (p = FindInTextEx(t, n, g_findWhat, m, i, 0, g_pf.matchCase, g_pf.wholeWord)) >= 0 && p + m <= (int)s; i = p + m) k++;
+            out = ReplaceAllTextEx(text, length, g_findWhat, patLen, g_findWith, replLen, g_pf.matchCase, g_pf.wholeWord, &outLen, &count);
+            if ((int)selStart > length) selStart = (DWORD)length;
+            for (i = 0; (pos = FindInTextEx(text, length, g_findWhat, patLen, i, 0, g_pf.matchCase, g_pf.wholeWord)) >= 0 && pos + patLen <= (int)selStart; i = pos + patLen) before++;
         }
     }
-    EditUnlockText(hl);
+    EditUnlockText(lock);
     if (found && !out) {
         MpNote(owner, APP_NAME, L"not enough memory available to complete this operation.");
         return;
     }
-    if (!found || !cnt) { mem_free(out); NotFound(owner); return; }
-    caret = (int)s + k * (wn - m);
+    if (!found || !count) { mem_free(out); NotFound(owner); return; }
+    caret = (int)selStart + before * (replLen - patLen);
     if (caret < 0) caret = 0;
-    if (caret > len) caret = len;
+    if (caret > outLen) caret = outLen;
     SendMessageW(g_edit, EM_SETSEL, 0, (LPARAM)-1);
     SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)out);
     mem_free(out);
@@ -117,219 +117,219 @@ static void ReplaceAll(HWND owner) {
     SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);
 }
 
-static void Flag(HWND h, int id, int *v) {
-    HWND c = GetDlgItem(h, id);
-    if (c) *v = SendMessageW(c, BM_GETCHECK, 0, 0) == BST_CHECKED;
+static void Flag(HWND dlg, int id, int *value) {
+    HWND control = GetDlgItem(dlg, id);
+    if (control) *value = SendMessageW(control, BM_GETCHECK, 0, 0) == BST_CHECKED;
 }
 
-static void Sync(HWND h) {
-    HWND c;
-    if ((c = GetDlgItem(h, ID_WHAT)) != NULL) GetWindowTextW(c, g_findWhat, 256);
-    if ((c = GetDlgItem(h, ID_WITH)) != NULL) GetWindowTextW(c, g_findWith, 256);
-    Flag(h, ID_CASE, &g_pf.matchCase);
-    Flag(h, ID_WRAP, &g_pf.wrapAround);
-    Flag(h, ID_WORD, &g_pf.wholeWord);
-    Flag(h, ID_UP, &g_findUp);
+static void Sync(HWND dlg) {
+    HWND control;
+    if ((control = GetDlgItem(dlg, ID_WHAT)) != NULL) GetWindowTextW(control, g_findWhat, 256);
+    if ((control = GetDlgItem(dlg, ID_WITH)) != NULL) GetWindowTextW(control, g_findWith, 256);
+    Flag(dlg, ID_CASE, &g_pf.matchCase);
+    Flag(dlg, ID_WRAP, &g_pf.wrapAround);
+    Flag(dlg, ID_WORD, &g_pf.wholeWord);
+    Flag(dlg, ID_UP, &g_findUp);
 }
 
-static void Enable(HWND h) {
+static void Enable(HWND dlg) {
     static const int ids[3] = { IDOK, ID_REPLACE, ID_REPLACEALL };
-    BOOL on = GetWindowTextLengthW(GetDlgItem(h, ID_WHAT)) > 0;
+    BOOL enabled = GetWindowTextLengthW(GetDlgItem(dlg, ID_WHAT)) > 0;
     int i;
     for (i = 0; i < 3; i++) {
-        HWND c = GetDlgItem(h, ids[i]);
-        if (c) EnableWindow(c, on);
+        HWND control = GetDlgItem(dlg, ids[i]);
+        if (control) EnableWindow(control, enabled);
     }
 }
 
-static void Opt(HWND h, const WCHAR *text, int x, int y, int w, int id, DWORD style, int on) {
-    HWND c = UiButton(h, text, x, y, w, 20, id, style);
-    SendMessageW(c, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
+static void Opt(HWND dlg, const WCHAR *text, int x, int y, int width, int id, DWORD style, int checked) {
+    HWND button = UiButton(dlg, text, x, y, width, 20, id, style);
+    SendMessageW(button, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
-static void Group(DlgBase *b, const WCHAR *text, int x, int y, int w, int h) {
-    HWND c = UiLabel(b->hwnd, text, x + 6, y, 8, 16, 0, SS_CENTER | SS_NOPREFIX);
-    HDC dc = GetDC(c);
-    HGDIOBJ of = SelectObject(dc, g_fontUI);
-    int tw = TextW(dc, text, -1) + S(6);
-    SelectObject(dc, of);
-    ReleaseDC(c, dc);
-    SetWindowPos(c, NULL, 0, 0, tw, S(16), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-    DlgFrame(b, x, y + 8, w, h - 8, BV_ETCHED);
+static void Group(DlgBase *base, const WCHAR *text, int x, int y, int width, int height) {
+    HWND label = UiLabel(base->hwnd, text, x + 6, y, 8, 16, 0, SS_CENTER | SS_NOPREFIX);
+    HDC hdc = GetDC(label);
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontUI);
+    int textWidth = TextW(hdc, text, -1) + S(6);
+    SelectObject(hdc, oldFont);
+    ReleaseDC(label, hdc);
+    SetWindowPos(label, NULL, 0, 0, textWidth, S(16), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    DlgFrame(base, x, y + 8, width, height - 8, BV_ETCHED);
 }
 
-static void FindLayout(DlgBase *b, int rep) {
-    HWND h = b->hwnd, e;
-    int dy = rep ? 32 : 0;
-    UiLabel(h, L"find what:", 12, 16, 78, 16, 0, SS_NOPREFIX);
-    e = UiEdit(b, g_findWhat, 92, 12, 212, 23, ID_WHAT, 0);
-    SendMessageW(e, EM_LIMITTEXT, 255, 0);
-    b->focus = e;
-    if (rep) {
-        UiLabel(h, L"replace with:", 12, 48, 78, 16, 0, SS_NOPREFIX);
-        e = UiEdit(b, g_findWith, 92, 44, 212, 23, ID_WITH, 0);
-        SendMessageW(e, EM_LIMITTEXT, 255, 0);
+static void FindLayout(DlgBase *base, int replaceMode) {
+    HWND dlg = base->hwnd, edit;
+    int dy = replaceMode ? 32 : 0;
+    UiLabel(dlg, L"find what:", 12, 16, 78, 16, 0, SS_NOPREFIX);
+    edit = UiEdit(base, g_findWhat, 92, 12, 212, 23, ID_WHAT, 0);
+    SendMessageW(edit, EM_LIMITTEXT, 255, 0);
+    base->focus = edit;
+    if (replaceMode) {
+        UiLabel(dlg, L"replace with:", 12, 48, 78, 16, 0, SS_NOPREFIX);
+        edit = UiEdit(base, g_findWith, 92, 44, 212, 23, ID_WITH, 0);
+        SendMessageW(edit, EM_LIMITTEXT, 255, 0);
     }
-    Opt(h, L"match case", 12, 66 + dy, 150, ID_CASE, BS_AUTOCHECKBOX, g_pf.matchCase);
-    Opt(h, L"wrap around", 12, 90 + dy, 150, ID_WRAP, BS_AUTOCHECKBOX, g_pf.wrapAround);
-    Opt(h, L"whole word", 12, 114 + dy, 150, ID_WORD, BS_AUTOCHECKBOX, g_pf.wholeWord);
-    Group(b, L"direction", 176, 50 + dy, 128, 52);
-    Opt(h, L"up", 188, 70 + dy, 46, ID_UP, BS_AUTORADIOBUTTON | WS_GROUP, g_findUp);
-    Opt(h, L"down", 240, 70 + dy, 58, ID_DOWN, BS_AUTORADIOBUTTON, !g_findUp);
-    UiButton(h, L"find next", 316, 12, 82, 24, IDOK, BS_DEFPUSHBUTTON | WS_GROUP);
-    if (rep) {
-        UiButton(h, L"replace", 316, 42, 82, 24, ID_REPLACE, BS_PUSHBUTTON);
-        UiButton(h, L"replace all", 316, 72, 82, 24, ID_REPLACEALL, BS_PUSHBUTTON);
+    Opt(dlg, L"match case", 12, 66 + dy, 150, ID_CASE, BS_AUTOCHECKBOX, g_pf.matchCase);
+    Opt(dlg, L"wrap around", 12, 90 + dy, 150, ID_WRAP, BS_AUTOCHECKBOX, g_pf.wrapAround);
+    Opt(dlg, L"whole word", 12, 114 + dy, 150, ID_WORD, BS_AUTOCHECKBOX, g_pf.wholeWord);
+    Group(base, L"direction", 176, 50 + dy, 128, 52);
+    Opt(dlg, L"up", 188, 70 + dy, 46, ID_UP, BS_AUTORADIOBUTTON | WS_GROUP, g_findUp);
+    Opt(dlg, L"down", 240, 70 + dy, 58, ID_DOWN, BS_AUTORADIOBUTTON, !g_findUp);
+    UiButton(dlg, L"find next", 316, 12, 82, 24, IDOK, BS_DEFPUSHBUTTON | WS_GROUP);
+    if (replaceMode) {
+        UiButton(dlg, L"replace", 316, 42, 82, 24, ID_REPLACE, BS_PUSHBUTTON);
+        UiButton(dlg, L"replace all", 316, 72, 82, 24, ID_REPLACEALL, BS_PUSHBUTTON);
     }
-    UiButton(h, L"cancel", 316, rep ? 102 : 42, 82, 24, IDCANCEL, BS_PUSHBUTTON);
-    Enable(h);
+    UiButton(dlg, L"cancel", 316, replaceMode ? 102 : 42, 82, 24, IDCANCEL, BS_PUSHBUTTON);
+    Enable(dlg);
 }
 
-static void FindCmd(HWND h, int id, int code) {
-    if (id == IDCANCEL) { SendMessageW(h, WM_CLOSE, 0, 0); return; }
+static void FindCmd(HWND dlg, int id, int code) {
+    if (id == IDCANCEL) { SendMessageW(dlg, WM_CLOSE, 0, 0); return; }
     if ((id == ID_WHAT || id == ID_WITH) && code != EN_CHANGE) return;
-    Sync(h);
-    if (id == ID_WHAT) Enable(h);
+    Sync(dlg);
+    if (id == ID_WHAT) Enable(dlg);
     if (!g_findWhat[0]) return;
-    if (id == IDOK) Search(h, g_findUp);
-    else if (id == ID_REPLACE) Replace(h);
-    else if (id == ID_REPLACEALL) ReplaceAll(h);
+    if (id == IDOK) Search(dlg, g_findUp);
+    else if (id == ID_REPLACE) Replace(dlg);
+    else if (id == ID_REPLACEALL) ReplaceAll(dlg);
 }
 
-static LRESULT CALLBACK FindProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    DlgBase *b = DlgFromHwnd(h, m, l);
-    LRESULT r;
-    if (!b) return DefWindowProcW(h, m, w, l);
-    switch (m) {
+static LRESULT CALLBACK FindProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    DlgBase *base = DlgFromHwnd(hwnd, msg, lParam);
+    LRESULT result;
+    if (!base) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    switch (msg) {
     case WM_CREATE:
-        FindLayout(b, ((FindSt *)b)->rep);
+        FindLayout(base, ((FindSt *)base)->replaceMode);
         return 0;
     case WM_COMMAND:
-        FindCmd(h, LOWORD(w), HIWORD(w));
+        FindCmd(hwnd, LOWORD(wParam), HIWORD(wParam));
         return 0;
     case WM_DESTROY:
-        GetWindowRect(h, &g_pos);
+        GetWindowRect(hwnd, &g_pos);
         g_havePos = 1;
         break;
     case WM_NCDESTROY:
-        b->hwnd = NULL;
+        base->hwnd = NULL;
         if (!g_switching && g_edit && g_hwnd && IsWindowVisible(g_hwnd) && IsWindowEnabled(g_hwnd)) SetFocus(g_edit);
         break;
     }
-    if (DlgCommon(b, m, w, l, &r)) return r;
-    return DefWindowProcW(h, m, w, l);
+    if (DlgCommon(base, msg, wParam, lParam, &result)) return result;
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 static BOOL SelText(WCHAR *out) {
-    DWORD s = 0, e = 0;
-    void *hl = NULL;
-    int n = 0, len, i = 0;
-    const WCHAR *t;
-    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
-    len = (int)(e - s);
-    if (len <= 0 || len > 255) return FALSE;
-    t = EditLockText(&hl, &n);
-    if (t && (int)e <= n) {
-        t += s;
-        for (; i < len && t[i] != '\r' && t[i] != '\n'; i++) out[i] = t[i];
+    DWORD selStart = 0, selEnd = 0;
+    void *lock = NULL;
+    int length = 0, selLen, i = 0;
+    const WCHAR *text;
+    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    selLen = (int)(selEnd - selStart);
+    if (selLen <= 0 || selLen > 255) return FALSE;
+    text = EditLockText(&lock, &length);
+    if (text && (int)selEnd <= length) {
+        text += selStart;
+        for (; i < selLen && text[i] != '\r' && text[i] != '\n'; i++) out[i] = text[i];
     }
-    EditUnlockText(hl);
+    EditUnlockText(lock);
     out[i] = 0;
-    return i == len;
+    return i == selLen;
 }
 
-static void PlaceAgain(HWND h) {
-    MONITORINFO mi;
+static void PlaceAgain(HWND dlg) {
+    MONITORINFO monitorInfo;
     POINT pt;
-    RECT r;
-    HMONITOR mon;
-    int w, ht;
+    RECT dlgRect;
+    HMONITOR monitor;
+    int width, height;
     if (!g_havePos) return;
     pt.x = g_pos.left; pt.y = g_pos.top;
-    mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONULL);
-    mi.cbSize = sizeof mi;
-    if (!mon || !GetMonitorInfoW(mon, &mi)) return;
-    GetWindowRect(h, &r);
-    w = r.right - r.left; ht = r.bottom - r.top;
-    if (pt.x + w > mi.rcWork.right)  pt.x = mi.rcWork.right - w;
-    if (pt.y + ht > mi.rcWork.bottom) pt.y = mi.rcWork.bottom - ht;
-    if (pt.x < mi.rcWork.left) pt.x = mi.rcWork.left;
-    if (pt.y < mi.rcWork.top)  pt.y = mi.rcWork.top;
-    SetWindowPos(h, NULL, pt.x, pt.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONULL);
+    monitorInfo.cbSize = sizeof monitorInfo;
+    if (!monitor || !GetMonitorInfoW(monitor, &monitorInfo)) return;
+    GetWindowRect(dlg, &dlgRect);
+    width = dlgRect.right - dlgRect.left; height = dlgRect.bottom - dlgRect.top;
+    if (pt.x + width > monitorInfo.rcWork.right)  pt.x = monitorInfo.rcWork.right - width;
+    if (pt.y + height > monitorInfo.rcWork.bottom) pt.y = monitorInfo.rcWork.bottom - height;
+    if (pt.x < monitorInfo.rcWork.left) pt.x = monitorInfo.rcWork.left;
+    if (pt.y < monitorInfo.rcWork.top)  pt.y = monitorInfo.rcWork.top;
+    SetWindowPos(dlg, NULL, pt.x, pt.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void FindDlgShow(int replaceMode) {
     static BOOL reg;
-    WCHAR sel[256];
-    HWND h = g_fd.b.hwnd, e;
-    int rep = replaceMode ? 1 : 0, pre;
+    WCHAR selection[256];
+    HWND dlg = g_fd.base.hwnd, edit;
+    int replacing = replaceMode ? 1 : 0, prefill;
     if (!reg) { RegClass(L"mp_find", FindProc, 0, NULL); reg = TRUE; }
-    if (h && !IsWindowEnabled(h)) return;
-    if (h) Sync(h);
-    pre = SelText(sel);
-    if (pre) wcopy(g_findWhat, sel, 256);
-    if (h && g_fd.rep == rep) {
-        if (pre) SetWindowTextW(GetDlgItem(h, ID_WHAT), g_findWhat);
+    if (dlg && !IsWindowEnabled(dlg)) return;
+    if (dlg) Sync(dlg);
+    prefill = SelText(selection);
+    if (prefill) wcopy(g_findWhat, selection, 256);
+    if (dlg && g_fd.replaceMode == replacing) {
+        if (prefill) SetWindowTextW(GetDlgItem(dlg, ID_WHAT), g_findWhat);
     } else {
-        if (h) { g_switching = 1; DestroyWindow(h); g_switching = 0; }
-        DlgBaseInit(&g_fd.b, g_hwnd);
-        g_fd.rep = rep;
-        h = DlgOpen(&g_fd.b, L"mp_find", rep ? L"replace" : L"find", 410, rep ? 178 : 146, 1);
-        if (!h) return;
-        PlaceAgain(h);
-        ShowWindow(h, SW_SHOW);
+        if (dlg) { g_switching = 1; DestroyWindow(dlg); g_switching = 0; }
+        DlgBaseInit(&g_fd.base, g_hwnd);
+        g_fd.replaceMode = replacing;
+        dlg = DlgOpen(&g_fd.base, L"mp_find", replacing ? L"replace" : L"find", 410, replacing ? 178 : 146, 1);
+        if (!dlg) return;
+        PlaceAgain(dlg);
+        ShowWindow(dlg, SW_SHOW);
     }
-    SetActiveWindow(h);
-    e = GetDlgItem(h, ID_WHAT);
-    SetFocus(e);
-    SendMessageW(e, EM_SETSEL, 0, (LPARAM)-1);
+    SetActiveWindow(dlg);
+    edit = GetDlgItem(dlg, ID_WHAT);
+    SetFocus(edit);
+    SendMessageW(edit, EM_SETSEL, 0, (LPARAM)-1);
 }
 
-static LRESULT CALLBACK GotoProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    DlgBase *b = DlgFromHwnd(h, m, l);
-    GotoSt *d = (GotoSt *)b;
-    LRESULT r;
-    if (!b) return DefWindowProcW(h, m, w, l);
-    switch (m) {
+static LRESULT CALLBACK GotoProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    DlgBase *base = DlgFromHwnd(hwnd, msg, lParam);
+    GotoSt *state = (GotoSt *)base;
+    LRESULT result;
+    if (!base) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    switch (msg) {
     case WM_CREATE: {
         WCHAR num[16];
         int line, col;
         EditCaretPos(&line, &col);
         wsprintfW(num, L"%d", line);
-        UiLabel(h, L"line number:", 12, 14, 276, 16, 0, SS_NOPREFIX);
-        d->edit = UiEdit(b, num, 12, 34, 276, 23, ID_LINE, ES_NUMBER);
-        SendMessageW(d->edit, EM_LIMITTEXT, 9, 0);
-        SendMessageW(d->edit, EM_SETSEL, 0, (LPARAM)-1);
-        b->focus = d->edit;
-        UiButton(h, L"go to", 116, 72, 82, 24, IDOK, BS_DEFPUSHBUTTON);
-        UiButton(h, L"cancel", 206, 72, 82, 24, IDCANCEL, BS_PUSHBUTTON);
+        UiLabel(hwnd, L"line number:", 12, 14, 276, 16, 0, SS_NOPREFIX);
+        state->edit = UiEdit(base, num, 12, 34, 276, 23, ID_LINE, ES_NUMBER);
+        SendMessageW(state->edit, EM_LIMITTEXT, 9, 0);
+        SendMessageW(state->edit, EM_SETSEL, 0, (LPARAM)-1);
+        base->focus = state->edit;
+        UiButton(hwnd, L"go to", 116, 72, 82, 24, IDOK, BS_DEFPUSHBUTTON);
+        UiButton(hwnd, L"cancel", 206, 72, 82, 24, IDCANCEL, BS_PUSHBUTTON);
         return 0; }
     case WM_COMMAND:
-        if (LOWORD(w) == IDOK) {
-            WCHAR t[16];
-            int n;
-            GetWindowTextW(d->edit, t, 16);
-            n = wtoi(t);
-            if (EditGotoLine(n < 1 ? 1 : n)) { b->result = 1; b->done = 1; return 0; }
-            MpNote(h, L"go to line", L"the line number is beyond the total number of lines");
-            SetFocus(d->edit);
-            SendMessageW(d->edit, EM_SETSEL, 0, (LPARAM)-1);
+        if (LOWORD(wParam) == IDOK) {
+            WCHAR text[16];
+            int line;
+            GetWindowTextW(state->edit, text, 16);
+            line = wtoi(text);
+            if (EditGotoLine(line < 1 ? 1 : line)) { base->result = 1; base->done = 1; return 0; }
+            MpNote(hwnd, L"go to line", L"the line number is beyond the total number of lines");
+            SetFocus(state->edit);
+            SendMessageW(state->edit, EM_SETSEL, 0, (LPARAM)-1);
             return 0;
         }
-        if (LOWORD(w) == IDCANCEL) { b->result = 0; b->done = 1; return 0; }
+        if (LOWORD(wParam) == IDCANCEL) { base->result = 0; base->done = 1; return 0; }
         break;
     }
-    if (DlgCommon(b, m, w, l, &r)) return r;
-    return DefWindowProcW(h, m, w, l);
+    if (DlgCommon(base, msg, wParam, lParam, &result)) return result;
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 void GotoDlg(HWND owner) {
     static BOOL reg;
-    GotoSt d;
+    GotoSt state;
     if (!reg) { RegClass(L"mp_goto", GotoProc, 0, NULL); reg = TRUE; }
-    memset(&d, 0, sizeof d);
-    DlgBaseInit(&d.b, owner);
-    if (!DlgOpen(&d.b, L"mp_goto", L"go to line", 300, 110, 0)) return;
-    DlgRunModal(&d.b);
+    memset(&state, 0, sizeof state);
+    DlgBaseInit(&state.base, owner);
+    if (!DlgOpen(&state.base, L"mp_goto", L"go to line", 300, 110, 0)) return;
+    DlgRunModal(&state.base);
     if (g_edit) SetFocus(g_edit);
 }

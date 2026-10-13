@@ -4,17 +4,17 @@ LRESULT UiProbeFontAndDialogs(WPARAM operation, LPARAM font) {
     if (operation == 0) return (LRESULT)g_fontUI;
     if (operation == 1) return (LRESULT)g_fontUIB;
     if (operation == 4) {
-        HDC dc = GetDC(g_hwnd);
-        HGDIOBJ old;
+        HDC hdc = GetDC(g_hwnd);
+        HGDIOBJ oldFont;
         TEXTMETRICW tm;
         int height = 0;
-        if (!dc || !font) { if (dc) ReleaseDC(g_hwnd, dc); return 0; }
-        old = SelectObject(dc, (HFONT)font);
-        if (old && old != (HGDIOBJ)(INT_PTR)-1) {
-            if (GetTextMetricsW(dc, &tm)) height = tm.tmHeight;
-            SelectObject(dc, old);
+        if (!hdc || !font) { if (hdc) ReleaseDC(g_hwnd, hdc); return 0; }
+        oldFont = SelectObject(hdc, (HFONT)font);
+        if (oldFont && oldFont != (HGDIOBJ)(INT_PTR)-1) {
+            if (GetTextMetricsW(hdc, &tm)) height = tm.tmHeight;
+            SelectObject(hdc, oldFont);
         }
-        ReleaseDC(g_hwnd, dc);
+        ReleaseDC(g_hwnd, hdc);
         return height;
     }
     if (operation == 2 || operation == 3) {

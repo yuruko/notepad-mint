@@ -17,8 +17,8 @@ static void PrefsDefaults(void) {
 
 static void IniLocate(void) {
     WCHAR base[PATH_CAP];
-    DWORD n = GetEnvironmentVariableW(L"APPDATA", base, PATH_CAP - 64);
-    if (!n || n >= PATH_CAP - 64) {
+    DWORD length = GetEnvironmentVariableW(L"APPDATA", base, PATH_CAP - 64);
+    if (!length || length >= PATH_CAP - 64) {
         WCHAR exe[PATH_CAP];
         GetModuleFileNameW(NULL, exe, PATH_CAP - 64);
         PathDir(exe, base, PATH_CAP - 64);
@@ -29,43 +29,43 @@ static void IniLocate(void) {
     PathJoin(g_ini, L"settings.ini", PATH_CAP);
 }
 
-static int IniGet(const WCHAR *sec, const WCHAR *key, int def) {
-    WCHAR b[32];
-    GetPrivateProfileStringW(sec, key, L"", b, 32, g_ini);
-    return b[0] ? wtoi(b) : def;
+static int IniGet(const WCHAR *section, const WCHAR *key, int defaultValue) {
+    WCHAR value[32];
+    GetPrivateProfileStringW(section, key, L"", value, 32, g_ini);
+    return value[0] ? wtoi(value) : defaultValue;
 }
 
-static void IniPutStr(const WCHAR *sec, const WCHAR *key, const WCHAR *v, BOOL mine) {
+static void IniPutStr(const WCHAR *section, const WCHAR *key, const WCHAR *value, BOOL mine) {
     static DWORD retryAfter;
     WCHAR current[PATH_CAP];
-    int n;
-    DWORD er;
+    int attempt;
+    DWORD err;
     if (retryAfter && (LONG)(GetTickCount() - retryAfter) < 0) return;
     retryAfter = 0;
-    GetPrivateProfileStringW(sec, key, L"", current, COUNTOF(current), g_ini);
-    if (wcmp(current, v) == 0 || (!mine && current[0])) return;
-    for (n = 0; n < 8; n++) {
-        if (WritePrivateProfileStringW(sec, key, v, g_ini)) return;
-        er = GetLastError();
-        if (er != 32 && er != 33) break;
-        if (n < 7) Sleep(25);
+    GetPrivateProfileStringW(section, key, L"", current, COUNTOF(current), g_ini);
+    if (wcmp(current, value) == 0 || (!mine && current[0])) return;
+    for (attempt = 0; attempt < 8; attempt++) {
+        if (WritePrivateProfileStringW(section, key, value, g_ini)) return;
+        err = GetLastError();
+        if (err != 32 && err != 33) break;
+        if (attempt < 7) Sleep(25);
     }
     retryAfter = GetTickCount() + 1000;
 }
 
-static void IniPutInt(const WCHAR *sec, const WCHAR *key, int v, BOOL mine) {
-    WCHAR b[16];
-    wsprintfW(b, L"%d", v);
-    IniPutStr(sec, key, b, mine);
+static void IniPutInt(const WCHAR *section, const WCHAR *key, int value, BOOL mine) {
+    WCHAR number[16];
+    wsprintfW(number, L"%d", value);
+    IniPutStr(section, key, number, mine);
 }
 
 static void IniEnsure(void) {
     static const BYTE bom[2] = { 0xFF, 0xFE };
-    HANDLE f;
-    DWORD wr;
+    HANDLE file;
+    DWORD written;
     CreateDirectoryW(g_iniDir, NULL);
-    f = CreateFileW(g_ini, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (f != INVALID_HANDLE_VALUE) { WriteFile(f, bom, 2, &wr, NULL); CloseHandle(f); }
+    file = CreateFileW(g_ini, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE) { WriteFile(file, bom, 2, &written, NULL); CloseHandle(file); }
 }
 
 static WCHAR g_recent[RECENT_MAX][PATH_CAP];
@@ -73,15 +73,15 @@ static int   g_nRecent;
 #define RECENT_SECTION_CAP (RECENT_MAX * (PATH_CAP + 4) + 1)
 
 void RecentLoad(void) {
-    WCHAR section[RECENT_SECTION_CAP], *p;
+    WCHAR section[RECENT_SECTION_CAP], *entry;
     int i, k;
-    DWORD n = GetPrivateProfileSectionW(L"recent", section, COUNTOF(section), g_ini);
+    DWORD length = GetPrivateProfileSectionW(L"recent", section, COUNTOF(section), g_ini);
     g_nRecent = 0;
-    if (n < COUNTOF(section) - 2) for (i = 1; i <= RECENT_MAX; i++) {
-        for (p = section; *p; p += wlen(p) + 1) {
-            if (p[0] != '0' + i || p[1] != '=' || !p[2]) continue;
-            for (k = 0; k < g_nRecent; k++) if (wcmpi(g_recent[k], p + 2) == 0) break;
-            if (k == g_nRecent) wcopy(g_recent[g_nRecent++], p + 2, PATH_CAP);
+    if (length < COUNTOF(section) - 2) for (i = 1; i <= RECENT_MAX; i++) {
+        for (entry = section; *entry; entry += wlen(entry) + 1) {
+            if (entry[0] != '0' + i || entry[1] != '=' || !entry[2]) continue;
+            for (k = 0; k < g_nRecent; k++) if (wcmpi(g_recent[k], entry + 2) == 0) break;
+            if (k == g_nRecent) wcopy(g_recent[g_nRecent++], entry + 2, PATH_CAP);
             break;
         }
     }
@@ -89,19 +89,19 @@ void RecentLoad(void) {
 }
 
 static void RecentStore(void) {
-    WCHAR section[RECENT_SECTION_CAP] = { 0 }, *p = section;
+    WCHAR section[RECENT_SECTION_CAP] = { 0 }, *cursor = section;
     int i;
     IniEnsure();
     for (i = 0; i < g_nRecent; i++) {
-        *p++ = (WCHAR)('1' + i); *p++ = '=';
-        wcopy(p, g_recent[i], PATH_CAP);
-        p += wlen(p) + 1;
+        *cursor++ = (WCHAR)('1' + i); *cursor++ = '=';
+        wcopy(cursor, g_recent[i], PATH_CAP);
+        cursor += wlen(cursor) + 1;
     }
     for (i = 0; i < 8; i++) {
-        DWORD er;
+        DWORD err;
         if (WritePrivateProfileSectionW(L"recent", section, g_ini)) break;
-        er = GetLastError();
-        if (er != 32 && er != 33) break;
+        err = GetLastError();
+        if (err != 32 && err != 33) break;
         if (i < 7) Sleep(25);
     }
     MenuSetRecent((const WCHAR (*)[PATH_CAP])g_recent, g_nRecent);
@@ -134,10 +134,10 @@ void ThemeUse(int theme) {
 }
 
 static void PrefsLoad(void) {
-    WCHAR f[32];
+    WCHAR value[32];
     PrefsDefaults();
-    GetPrivateProfileStringW(L"editor", L"font", L"", f, 32, g_ini);
-    if (f[0]) wcopy(g_pf.font, f, 32);
+    GetPrivateProfileStringW(L"editor", L"font", L"", value, 32, g_ini);
+    if (value[0]) wcopy(g_pf.font, value, 32);
     g_pf.pt      = IniGet(L"editor", L"size10", 0);
     if (!g_pf.pt) g_pf.pt = 10 * IniGet(L"editor", L"size", 10);
     g_pf.pt      = ClampInt(g_pf.pt, FONT_MIN, FONT_MAX);
@@ -148,8 +148,8 @@ static void PrefsLoad(void) {
     g_pf.statusbar = IniGet(L"view", L"statusbar", 1) != 0;
     g_pf.tab     = IniGet(L"editor", L"tab", 4);
     if (g_pf.tab != 2 && g_pf.tab != 8) g_pf.tab = 4;
-    GetPrivateProfileStringW(L"view", L"theme", L"dark", f, 32, g_ini);
-    ThemeUse(wcmpi(f, L"light") == 0 ? THEME_LIGHT : THEME_DARK);
+    GetPrivateProfileStringW(L"view", L"theme", L"dark", value, 32, g_ini);
+    ThemeUse(wcmpi(value, L"light") == 0 ? THEME_LIGHT : THEME_DARK);
     g_pf.winx    = IniGet(L"window", L"x", 0);
     g_pf.winy    = IniGet(L"window", L"y", 0);
     g_pf.winw    = IniGet(L"window", L"w", 0);
@@ -166,15 +166,15 @@ static void PrefsLoad(void) {
 }
 
 static void CapturePlacement(void) {
-    WINDOWPLACEMENT wp;
+    WINDOWPLACEMENT placement;
     if (!g_hwnd) return;
-    wp.length = sizeof wp;
-    if (!GetWindowPlacement(g_hwnd, &wp)) return;
-    g_pf.maximized = wp.showCmd == SW_SHOWMAXIMIZED || (wp.showCmd == SW_SHOWMINIMIZED && (wp.flags & 2));
-    g_pf.winx = wp.rcNormalPosition.left;
-    g_pf.winy = wp.rcNormalPosition.top;
-    g_pf.winw = wp.rcNormalPosition.right - wp.rcNormalPosition.left;
-    g_pf.winh = wp.rcNormalPosition.bottom - wp.rcNormalPosition.top;
+    placement.length = sizeof placement;
+    if (!GetWindowPlacement(g_hwnd, &placement)) return;
+    g_pf.maximized = placement.showCmd == SW_SHOWMAXIMIZED || (placement.showCmd == SW_SHOWMINIMIZED && (placement.flags & 2));
+    g_pf.winx = placement.rcNormalPosition.left;
+    g_pf.winy = placement.rcNormalPosition.top;
+    g_pf.winw = placement.rcNormalPosition.right - placement.rcNormalPosition.left;
+    g_pf.winh = placement.rcNormalPosition.bottom - placement.rcNormalPosition.top;
 }
 
 void AppSavePrefs(void) {
@@ -206,17 +206,17 @@ void AppSavePrefs(void) {
 }
 
 unsigned PrefsTakeDocName(unsigned clock) {
-    HANDLE mx = CreateMutexW(NULL, FALSE, L"notepad-mint-docname");
-    DWORD wait = mx ? WaitForSingleObject(mx, 2000) : 1;
-    unsigned v;
-    WCHAR b[16];
-    v = DocNameNext(clock, (unsigned)IniGet(L"name", L"last", (int)DOCNAME_NONE));
+    HANDLE mutex = CreateMutexW(NULL, FALSE, L"notepad-mint-docname");
+    DWORD wait = mutex ? WaitForSingleObject(mutex, 2000) : 1;
+    unsigned serial;
+    WCHAR number[16];
+    serial = DocNameNext(clock, (unsigned)IniGet(L"name", L"last", (int)DOCNAME_NONE));
     IniEnsure();
-    wsprintfW(b, L"%u", v);
-    IniPutStr(L"name", L"last", b, TRUE);
-    if (wait == 0 || wait == 0x80) ReleaseMutex(mx);
-    if (mx) CloseHandle(mx);
-    return v;
+    wsprintfW(number, L"%u", serial);
+    IniPutStr(L"name", L"last", number, TRUE);
+    if (wait == 0 || wait == 0x80) ReleaseMutex(mutex);
+    if (mutex) CloseHandle(mutex);
+    return serial;
 }
 
 void PrefsInit(void) {

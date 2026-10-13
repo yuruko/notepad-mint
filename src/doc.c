@@ -7,25 +7,25 @@
 #ifdef DOC_IO_TEST
 static int g_ioFault, g_ioCalls;
 void DocTestFault(int fault) { g_ioFault = fault; g_ioCalls = 0; }
-static BOOL DocReadFile(HANDLE f, LPVOID p, DWORD n, DWORD *rd, void *overlap) {
-    if (g_ioFault == 1) { *rd = 0; SetLastError(30); return FALSE; }
+static BOOL DocReadFile(HANDLE file, LPVOID buffer, DWORD length, DWORD *bytesRead, void *overlap) {
+    if (g_ioFault == 1) { *bytesRead = 0; SetLastError(30); return FALSE; }
     if (g_ioFault == 2) {
-        if (g_ioCalls++) { *rd = 0; return TRUE; }
-        if (n > 1) n = 1;
+        if (g_ioCalls++) { *bytesRead = 0; return TRUE; }
+        if (length > 1) length = 1;
     }
-    return ReadFile(f, p, n, rd, overlap);
+    return ReadFile(file, buffer, length, bytesRead, overlap);
 }
-static BOOL DocWriteFile(HANDLE f, LPCVOID p, DWORD n, DWORD *wr, void *overlap) {
+static BOOL DocWriteFile(HANDLE file, LPCVOID buffer, DWORD length, DWORD *bytesWritten, void *overlap) {
     if (g_ioFault == 3) {
-        WriteFile(f, p, n ? 1 : 0, wr, overlap);
+        WriteFile(file, buffer, length ? 1 : 0, bytesWritten, overlap);
         SetLastError(29); return FALSE;
     }
-    if (g_ioFault == 4) { *wr = 0; SetLastError(0); return TRUE; }
-    return WriteFile(f, p, n, wr, overlap);
+    if (g_ioFault == 4) { *bytesWritten = 0; SetLastError(0); return TRUE; }
+    return WriteFile(file, buffer, length, bytesWritten, overlap);
 }
-static BOOL DocFlushFile(HANDLE f) {
+static BOOL DocFlushFile(HANDLE file) {
     if (g_ioFault == 5) { SetLastError(29); return FALSE; }
-    return FlushFileBuffers(f);
+    return FlushFileBuffers(file);
 }
 static BOOL DocReplaceFile(LPCWSTR path, LPCWSTR temp, LPCWSTR backup) {
     if (g_ioFault == 6) { SetLastError(5); return FALSE; }
@@ -130,45 +130,45 @@ static const CpInfo *CpFind(int cp) {
 }
 
 void EncLabel(int enc, WCHAR *out, int cap) {
-    const CpInfo *c;
-    WCHAR buf[48];
+    const CpInfo *info;
+    WCHAR buffer[48];
     if (enc >= 0 && enc < ENC_COUNT) { wcopy(out, g_encName[enc], cap); return; }
-    c = CpFind(enc);
-    if (c) { wcopy(out, c->name, cap); return; }
-    wsprintfW(buf, L"code page %d", enc);
-    wcopy(out, buf, cap);
+    info = CpFind(enc);
+    if (info) { wcopy(out, info->name, cap); return; }
+    wsprintfW(buffer, L"code page %d", enc);
+    wcopy(out, buffer, cap);
 }
 
 void EncShort(int enc, WCHAR *out, int cap) {
-    const CpInfo *c;
-    WCHAR buf[24];
-    int i, n = 0;
+    const CpInfo *info;
+    WCHAR buffer[24];
+    int i, length = 0;
     if (cap <= 0) return;
     if (enc >= 0 && enc < ENC_COUNT) { wcopy(out, g_encShort[enc], cap); return; }
-    c = CpFind(enc);
-    if (c) {
-        for (i = 0; c->name[i] && n < cap - 1; i++) if (c->name[i] != '-') out[n++] = c->name[i];
-        out[n] = 0;
+    info = CpFind(enc);
+    if (info) {
+        for (i = 0; info->name[i] && length < cap - 1; i++) if (info->name[i] != '-') out[length++] = info->name[i];
+        out[length] = 0;
         return;
     }
-    wsprintfW(buf, L"cp %d", enc);
-    wcopy(out, buf, cap);
+    wsprintfW(buffer, L"cp %d", enc);
+    wcopy(out, buffer, cap);
 }
 
 int EncListCount(void) { return ENC_COUNT + (int)NCP; }
 
-int EncListGet(int i, WCHAR *label, int cap) {
-    if (i < 0) i = 0;
-    if (i < ENC_COUNT) {
-        wcopy(label, i == ENC_ANSI ? L"ansi  system default code page" : g_encName[i], cap);
-        return i;
+int EncListGet(int index, WCHAR *label, int cap) {
+    if (index < 0) index = 0;
+    if (index < ENC_COUNT) {
+        wcopy(label, index == ENC_ANSI ? L"ansi  system default code page" : g_encName[index], cap);
+        return index;
     }
-    i -= ENC_COUNT;
-    if (i >= (int)NCP) i = (int)NCP - 1;
-    wcopy(label, g_cpTab[i].name, cap);
+    index -= ENC_COUNT;
+    if (index >= (int)NCP) index = (int)NCP - 1;
+    wcopy(label, g_cpTab[index].name, cap);
     wcat(label, L"  ", cap);
-    wcat(label, g_cpTab[i].desc, cap);
-    return g_cpTab[i].cp;
+    wcat(label, g_cpTab[index].desc, cap);
+    return g_cpTab[index].cp;
 }
 
 static UINT CpOf(int enc) {
@@ -184,38 +184,38 @@ static BOOL CpHasDefaultChar(UINT cp) {
     return TRUE;
 }
 
-static BOOL Utf8Valid(const BYTE *p, size_t n) {
+static BOOL Utf8Valid(const BYTE *bytes, size_t length) {
     size_t i = 0;
-    while (i < n) {
-        BYTE c = p[i];
+    while (i < length) {
+        BYTE lead = bytes[i];
         int need, k;
-        unsigned cp;
-        if (c < 0x80) { i++; continue; }
-        if (c >= 0xC2 && c <= 0xDF)      { need = 1; cp = c & 0x1F; }
-        else if (c >= 0xE0 && c <= 0xEF) { need = 2; cp = c & 0x0F; }
-        else if (c >= 0xF0 && c <= 0xF4) { need = 3; cp = c & 0x07; }
+        unsigned codePoint;
+        if (lead < 0x80) { i++; continue; }
+        if (lead >= 0xC2 && lead <= 0xDF)      { need = 1; codePoint = lead & 0x1F; }
+        else if (lead >= 0xE0 && lead <= 0xEF) { need = 2; codePoint = lead & 0x0F; }
+        else if (lead >= 0xF0 && lead <= 0xF4) { need = 3; codePoint = lead & 0x07; }
         else return FALSE;
-        if (i + need >= n) return FALSE;
+        if (i + need >= length) return FALSE;
         for (k = 1; k <= need; k++) {
-            if ((p[i + k] & 0xC0) != 0x80) return FALSE;
-            cp = (cp << 6) | (p[i + k] & 0x3F);
+            if ((bytes[i + k] & 0xC0) != 0x80) return FALSE;
+            codePoint = (codePoint << 6) | (bytes[i + k] & 0x3F);
         }
-        if (need == 2 && (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF))) return FALSE;
-        if (need == 3 && (cp < 0x10000 || cp > 0x10FFFF)) return FALSE;
+        if (need == 2 && (codePoint < 0x800 || (codePoint >= 0xD800 && codePoint <= 0xDFFF))) return FALSE;
+        if (need == 3 && (codePoint < 0x10000 || codePoint > 0x10FFFF)) return FALSE;
         i += (size_t)need + 1;
     }
     return TRUE;
 }
 
-static int Utf16Guess(const BYTE *p, size_t n) {
-    size_t lim = n < 4096 ? n : 4096, i, ze = 0, zo = 0, pairs = lim / 2;
-    if (lim < 4) return 0;
-    for (i = 0; i + 1 < lim; i += 2) {
-        if (!p[i]) ze++;
-        if (!p[i + 1]) zo++;
+static int Utf16Guess(const BYTE *bytes, size_t length) {
+    size_t limit = length < 4096 ? length : 4096, i, zerosEven = 0, zerosOdd = 0, pairs = limit / 2;
+    if (limit < 4) return 0;
+    for (i = 0; i + 1 < limit; i += 2) {
+        if (!bytes[i]) zerosEven++;
+        if (!bytes[i + 1]) zerosOdd++;
     }
-    if (zo * 4 >= pairs && ze == 0) return 1;
-    if (ze * 4 >= pairs && zo == 0) return 2;
+    if (zerosOdd * 4 >= pairs && zerosEven == 0) return 1;
+    if (zerosEven * 4 >= pairs && zerosOdd == 0) return 2;
     return 0;
 }
 
@@ -223,167 +223,167 @@ static BOOL g_lossyOk;
 void DocAllowLossy(BOOL on) { g_lossyOk = on; }
 
 DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int forceEnc) {
-    HANDLE f;
-    __int64 sz;
-    BYTE *buf;
-    DWORD rd;
-    size_t n, got, off = 0, i, nCRLF = 0, nLF = 0, nCR = 0, nNul = 0, first = 0, outn;
-    WCHAR *w, *out;
-    int wn, e, k;
+    HANDLE file;
+    __int64 fileSize;
+    BYTE *bytes;
+    DWORD bytesRead;
+    size_t byteLen, totalRead, offset = 0, i, nCRLF = 0, nLF = 0, nCR = 0, nNul = 0, firstEol = 0, outLen;
+    WCHAR *wide, *out;
+    int wideLen, encoding, k;
     BOOL bom8, bomLE, bomBE, validUtf8 = FALSE;
     *text = NULL; *len = 0; *enc = ENC_UTF8; *eol = EOL_CRLF;
-    f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (f == INVALID_HANDLE_VALUE) return GetLastError();
-    if (!GetFileSizeEx(f, &sz)) { DWORD er = GetLastError(); CloseHandle(f); return er; }
-    if (sz < 0 || sz > 0x30000000) { CloseHandle(f); return ERR_TOO_BIG; }
-    n = (size_t)sz;
-    buf = (BYTE *)mem_alloc(n + 4);
-    if (!buf) { CloseHandle(f); return ERR_NOMEM; }
-    for (got = 0; got < n; got += rd) {
-        if (!DocReadFile(f, buf + got, (DWORD)(n - got), &rd, NULL)) {
-            DWORD er = GetLastError();
-            CloseHandle(f); mem_free(buf); return er ? er : 30;
+    file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return GetLastError();
+    if (!GetFileSizeEx(file, &fileSize)) { DWORD err = GetLastError(); CloseHandle(file); return err; }
+    if (fileSize < 0 || fileSize > 0x30000000) { CloseHandle(file); return ERR_TOO_BIG; }
+    byteLen = (size_t)fileSize;
+    bytes = (BYTE *)mem_alloc(byteLen + 4);
+    if (!bytes) { CloseHandle(file); return ERR_NOMEM; }
+    for (totalRead = 0; totalRead < byteLen; totalRead += bytesRead) {
+        if (!DocReadFile(file, bytes + totalRead, (DWORD)(byteLen - totalRead), &bytesRead, NULL)) {
+            DWORD err = GetLastError();
+            CloseHandle(file); mem_free(bytes); return err ? err : 30;
         }
-        if (!rd || rd > n - got) { CloseHandle(f); mem_free(buf); return 38; }
+        if (!bytesRead || bytesRead > byteLen - totalRead) { CloseHandle(file); mem_free(bytes); return 38; }
     }
-    CloseHandle(f);
-    n = got;
-    buf[n] = buf[n + 1] = buf[n + 2] = buf[n + 3] = 0;
-    bom8  = (n >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF);
-    bomLE = (n >= 2 && buf[0] == 0xFF && buf[1] == 0xFE);
-    bomBE = (n >= 2 && buf[0] == 0xFE && buf[1] == 0xFF);
+    CloseHandle(file);
+    byteLen = totalRead;
+    bytes[byteLen] = bytes[byteLen + 1] = bytes[byteLen + 2] = bytes[byteLen + 3] = 0;
+    bom8  = (byteLen >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
+    bomLE = (byteLen >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE);
+    bomBE = (byteLen >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF);
     if (forceEnc >= 0) {
-        e = forceEnc;
-        if (e == ENC_UTF8 || e == ENC_UTF8BOM) { e = bom8 ? ENC_UTF8BOM : ENC_UTF8; if (bom8) off = 3; }
-        else if (e == ENC_UTF16LE && bomLE) off = 2;
-        else if (e == ENC_UTF16BE && bomBE) off = 2;
+        encoding = forceEnc;
+        if (encoding == ENC_UTF8 || encoding == ENC_UTF8BOM) { encoding = bom8 ? ENC_UTF8BOM : ENC_UTF8; if (bom8) offset = 3; }
+        else if (encoding == ENC_UTF16LE && bomLE) offset = 2;
+        else if (encoding == ENC_UTF16BE && bomBE) offset = 2;
     } else {
-        e = ENC_UTF8;
-        if (bom8) { e = ENC_UTF8BOM; off = 3; }
-        else if (bomLE) { e = ENC_UTF16LE; off = 2; }
-        else if (bomBE) { e = ENC_UTF16BE; off = 2; }
+        encoding = ENC_UTF8;
+        if (bom8) { encoding = ENC_UTF8BOM; offset = 3; }
+        else if (bomLE) { encoding = ENC_UTF16LE; offset = 2; }
+        else if (bomBE) { encoding = ENC_UTF16BE; offset = 2; }
         else {
-            k = Utf16Guess(buf, n);
-            if (k == 1) e = ENC_UTF16LE;
-            else if (k == 2) e = ENC_UTF16BE;
-            else if (!Utf8Valid(buf, n)) e = ENC_ANSI;
+            k = Utf16Guess(bytes, byteLen);
+            if (k == 1) encoding = ENC_UTF16LE;
+            else if (k == 2) encoding = ENC_UTF16BE;
+            else if (!Utf8Valid(bytes, byteLen)) encoding = ENC_ANSI;
             else validUtf8 = TRUE;
         }
     }
-    if (e == ENC_UTF16LE || e == ENC_UTF16BE) {
-        int odd = (int)((n - off) & 1);
-        if (odd && !g_lossyOk) { mem_free(buf); return ERR_LOSSY; }
-        wn = (int)((n - off) / 2);
-        w = (WCHAR *)mem_alloc(((size_t)wn + 2) * sizeof(WCHAR));
-        if (w) {
-            memcpy(w, buf + off, (size_t)wn * sizeof(WCHAR));
-            if (e == ENC_UTF16BE) for (k = 0; k < wn; k++) w[k] = (WCHAR)((w[k] << 8) | (w[k] >> 8));
-            if (odd) w[wn++] = 0xFFFD;
+    if (encoding == ENC_UTF16LE || encoding == ENC_UTF16BE) {
+        int odd = (int)((byteLen - offset) & 1);
+        if (odd && !g_lossyOk) { mem_free(bytes); return ERR_LOSSY; }
+        wideLen = (int)((byteLen - offset) / 2);
+        wide = (WCHAR *)mem_alloc(((size_t)wideLen + 2) * sizeof(WCHAR));
+        if (wide) {
+            memcpy(wide, bytes + offset, (size_t)wideLen * sizeof(WCHAR));
+            if (encoding == ENC_UTF16BE) for (k = 0; k < wideLen; k++) wide[k] = (WCHAR)((wide[k] << 8) | (wide[k] >> 8));
+            if (odd) wide[wideLen++] = 0xFFFD;
         }
     } else {
-        UINT cp = CpOf(e);
-        int src = (int)(n - off);
-        if (cp == CP_UTF8 && !validUtf8 && !g_lossyOk && !Utf8Valid(buf + off, n - off)) { mem_free(buf); return ERR_LOSSY; }
-        w = (WCHAR *)mem_alloc(((size_t)src + 1) * sizeof(WCHAR));
-        wn = (w && src) ? MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, w, src) : 0;
-        if (w && src && !wn && GetLastError() == 122) {
-            wn = MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, NULL, 0);
-            mem_free(w);
-            if (!wn) { mem_free(buf); return ERR_BADCP; }
-            if (wn > DOC_MAX_CHARS) { mem_free(buf); return ERR_TOO_BIG; }
-            w = (WCHAR *)mem_alloc(((size_t)wn + 1) * sizeof(WCHAR));
-            if (w) wn = MultiByteToWideChar(cp, 0, (LPCSTR)(buf + off), src, w, wn);
+        UINT cp = CpOf(encoding);
+        int srcLen = (int)(byteLen - offset);
+        if (cp == CP_UTF8 && !validUtf8 && !g_lossyOk && !Utf8Valid(bytes + offset, byteLen - offset)) { mem_free(bytes); return ERR_LOSSY; }
+        wide = (WCHAR *)mem_alloc(((size_t)srcLen + 1) * sizeof(WCHAR));
+        wideLen = (wide && srcLen) ? MultiByteToWideChar(cp, 0, (LPCSTR)(bytes + offset), srcLen, wide, srcLen) : 0;
+        if (wide && srcLen && !wideLen && GetLastError() == 122) {
+            wideLen = MultiByteToWideChar(cp, 0, (LPCSTR)(bytes + offset), srcLen, NULL, 0);
+            mem_free(wide);
+            if (!wideLen) { mem_free(bytes); return ERR_BADCP; }
+            if (wideLen > DOC_MAX_CHARS) { mem_free(bytes); return ERR_TOO_BIG; }
+            wide = (WCHAR *)mem_alloc(((size_t)wideLen + 1) * sizeof(WCHAR));
+            if (wide) wideLen = MultiByteToWideChar(cp, 0, (LPCSTR)(bytes + offset), srcLen, wide, wideLen);
         }
-        if (w && src && !wn) { mem_free(w); mem_free(buf); return ERR_BADCP; }
-        if (w && (size_t)wn < (size_t)src) { WCHAR *s = (WCHAR *)mem_realloc(w, ((size_t)wn + 1) * sizeof(WCHAR)); if (s) w = s; }
+        if (wide && srcLen && !wideLen) { mem_free(wide); mem_free(bytes); return ERR_BADCP; }
+        if (wide && (size_t)wideLen < (size_t)srcLen) { WCHAR *resized = (WCHAR *)mem_realloc(wide, ((size_t)wideLen + 1) * sizeof(WCHAR)); if (resized) wide = resized; }
     }
-    mem_free(buf);
-    if (!w) return ERR_NOMEM;
-    w[wn] = 0;
-    for (i = mp_find3(w, (size_t)wn, '\r', '\n', 0); i < (size_t)wn; i += 1 + mp_find3(w + i + 1, (size_t)wn - i - 1, '\r', '\n', 0)) {
-        WCHAR c = w[i];
+    mem_free(bytes);
+    if (!wide) return ERR_NOMEM;
+    wide[wideLen] = 0;
+    for (i = mp_find3(wide, (size_t)wideLen, '\r', '\n', 0); i < (size_t)wideLen; i += 1 + mp_find3(wide + i + 1, (size_t)wideLen - i - 1, '\r', '\n', 0)) {
+        WCHAR c = wide[i];
         if (c == '\r') {
-            if (i + 1 < (size_t)wn && w[i + 1] == '\n') { nCRLF++; i++; if (!first) first = 1; }
-            else { nCR++; if (!first) first = 3; }
+            if (i + 1 < (size_t)wideLen && wide[i + 1] == '\n') { nCRLF++; i++; if (!firstEol) firstEol = 1; }
+            else { nCR++; if (!firstEol) firstEol = 3; }
         } else if (c == '\n') {
-            nLF++; if (!first) first = 2;
+            nLF++; if (!firstEol) firstEol = 2;
         } else {
             nNul++;
         }
     }
     if (nLF + nCR + nNul == 0) {
-        out = w; outn = (size_t)wn;
+        out = wide; outLen = (size_t)wideLen;
     } else {
-        outn = (size_t)wn + nLF + nCR;
-        if (outn > DOC_MAX_CHARS) { mem_free(w); return ERR_TOO_BIG; }
-        out = (WCHAR *)mem_alloc((outn + 1) * sizeof(WCHAR));
-        if (!out) { mem_free(w); return ERR_NOMEM; }
+        outLen = (size_t)wideLen + nLF + nCR;
+        if (outLen > DOC_MAX_CHARS) { mem_free(wide); return ERR_TOO_BIG; }
+        out = (WCHAR *)mem_alloc((outLen + 1) * sizeof(WCHAR));
+        if (!out) { mem_free(wide); return ERR_NOMEM; }
         {
-            WCHAR *d = out;
-            for (i = 0; i < (size_t)wn; i++) {
-                size_t k = mp_find3(w + i, (size_t)wn - i, '\r', '\n', 0);
+            WCHAR *dst = out;
+            for (i = 0; i < (size_t)wideLen; i++) {
+                size_t run = mp_find3(wide + i, (size_t)wideLen - i, '\r', '\n', 0);
                 WCHAR c;
-                memcpy(d, w + i, k * sizeof(WCHAR));
-                d += k; i += k;
-                if (i >= (size_t)wn) break;
-                c = w[i];
+                memcpy(dst, wide + i, run * sizeof(WCHAR));
+                dst += run; i += run;
+                if (i >= (size_t)wideLen) break;
+                c = wide[i];
                 if (c == '\r') {
-                    *d++ = '\r'; *d++ = '\n';
-                    if (i + 1 < (size_t)wn && w[i + 1] == '\n') i++;
+                    *dst++ = '\r'; *dst++ = '\n';
+                    if (i + 1 < (size_t)wideLen && wide[i + 1] == '\n') i++;
                 } else if (c == '\n') {
-                    *d++ = '\r'; *d++ = '\n';
+                    *dst++ = '\r'; *dst++ = '\n';
                 } else {
-                    *d++ = ' ';
+                    *dst++ = ' ';
                 }
             }
         }
-        mem_free(w);
+        mem_free(wide);
     }
-    out[outn] = 0;
+    out[outLen] = 0;
     {
-        int best = EOL_CRLF;
-        size_t bc = nCRLF;
-        if (nLF > bc) { best = EOL_LF; bc = nLF; }
-        if (nCR > bc) { best = EOL_CR; bc = nCR; }
-        if (first == 1 && nCRLF == bc) best = EOL_CRLF;
-        else if (first == 2 && nLF == bc) best = EOL_LF;
-        else if (first == 3 && nCR == bc) best = EOL_CR;
-        *eol = best;
+        int bestEol = EOL_CRLF;
+        size_t bestCount = nCRLF;
+        if (nLF > bestCount) { bestEol = EOL_LF; bestCount = nLF; }
+        if (nCR > bestCount) { bestEol = EOL_CR; bestCount = nCR; }
+        if (firstEol == 1 && nCRLF == bestCount) bestEol = EOL_CRLF;
+        else if (firstEol == 2 && nLF == bestCount) bestEol = EOL_LF;
+        else if (firstEol == 3 && nCR == bestCount) bestEol = EOL_CR;
+        *eol = bestEol;
     }
-    *text = out; *len = (int)outn; *enc = e;
+    *text = out; *len = (int)outLen; *enc = encoding;
     return 0;
 }
 
-static WCHAR *EolConvert(const WCHAR *t, int len, int eol, int *outLen, int *owned) {
-    size_t el = (eol == EOL_CRLF) ? 2 : 1, i, breaks = 0, consumed = 0, total;
-    WCHAR *out, *d;
-    for (i = mp_find3(t, (size_t)len, '\r', '\n', '\n'); i < (size_t)len; i += 1 + mp_find3(t + i + 1, (size_t)len - i - 1, '\r', '\n', '\n')) {
-        if (t[i] == '\r') {
+static WCHAR *EolConvert(const WCHAR *text, int len, int eol, int *outLen, int *owned) {
+    size_t eolLen = (eol == EOL_CRLF) ? 2 : 1, i, breaks = 0, consumed = 0, total;
+    WCHAR *out, *dst;
+    for (i = mp_find3(text, (size_t)len, '\r', '\n', '\n'); i < (size_t)len; i += 1 + mp_find3(text + i + 1, (size_t)len - i - 1, '\r', '\n', '\n')) {
+        if (text[i] == '\r') {
             breaks++; consumed++;
-            if (i + 1 < (size_t)len && t[i + 1] == '\n') { i++; consumed++; }
+            if (i + 1 < (size_t)len && text[i + 1] == '\n') { i++; consumed++; }
         } else {
             breaks++; consumed++;
         }
     }
-    total = (size_t)len - consumed + breaks * el;
+    total = (size_t)len - consumed + breaks * eolLen;
     if (total > DOC_MAX_CHARS) { *outLen = -1; return NULL; }
-    if (t && eol == EOL_CRLF && consumed == breaks * 2) { *outLen = len; *owned = 0; return (WCHAR *)t; }
+    if (text && eol == EOL_CRLF && consumed == breaks * 2) { *outLen = len; *owned = 0; return (WCHAR *)text; }
     *owned = 1;
     out = (WCHAR *)mem_alloc((total + 1) * sizeof(WCHAR));
     if (!out) return NULL;
-    d = out;
+    dst = out;
     for (i = 0; i < (size_t)len; i++) {
-        size_t k = mp_find3(t + i, (size_t)len - i, '\r', '\n', '\n');
+        size_t run = mp_find3(text + i, (size_t)len - i, '\r', '\n', '\n');
         WCHAR c;
-        memcpy(d, t + i, k * sizeof(WCHAR));
-        d += k; i += k;
+        memcpy(dst, text + i, run * sizeof(WCHAR));
+        dst += run; i += run;
         if (i >= (size_t)len) break;
-        c = t[i];
-        if (c == '\r' && i + 1 < (size_t)len && t[i + 1] == '\n') i++;
-        if (eol == EOL_CRLF) { *d++ = '\r'; *d++ = '\n'; }
-        else *d++ = (eol == EOL_LF) ? '\n' : '\r';
+        c = text[i];
+        if (c == '\r' && i + 1 < (size_t)len && text[i + 1] == '\n') i++;
+        if (eol == EOL_CRLF) { *dst++ = '\r'; *dst++ = '\n'; }
+        else *dst++ = (eol == EOL_LF) ? '\n' : '\r';
     }
-    *d = 0;
+    *dst = 0;
     *outLen = (int)total;
     return out;
 }
@@ -395,8 +395,8 @@ DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol) {
     if (enc == ENC_UTF16LE || enc == ENC_UTF16BE) return (DWORD)(((size_t)len - cut) * 2);
     {
         UINT cp = CpOf(enc);
-        DWORD fl = CpHasDefaultChar(cp) ? WC_NO_BEST_FIT_CHARS : 0;
-        size_t need = (size_t)WideCharToMultiByte(cp, fl, text, len, NULL, 0, NULL, NULL);
+        DWORD flags = CpHasDefaultChar(cp) ? WC_NO_BEST_FIT_CHARS : 0;
+        size_t need = (size_t)WideCharToMultiByte(cp, flags, text, len, NULL, 0, NULL, NULL);
         return need >= cut ? (DWORD)(need - cut) : 0;
     }
 }
@@ -410,25 +410,25 @@ static HANDLE SaveSibling(const WCHAR *full, WCHAR *out, const WCHAR *extension)
     static DWORD serial;
     const WCHAR *name = PathName(full);
     size_t prefix = (size_t)(name - full);
-    HANDLE f;
-    DWORD er;
+    HANDLE file;
+    DWORD err;
     int attempt;
     memcpy(out, full, prefix * sizeof(WCHAR));
     for (attempt = 0; attempt < 100; attempt++) {
         wsprintfW(out + prefix, L".mint-%08x-%08x-%08x.%s", GetCurrentThreadId(), GetTickCount(), ++serial, extension);
-        f = CreateFileW(out, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (f != INVALID_HANDLE_VALUE) return f;
-        er = GetLastError();
-        if (er != 80 && er != 183) return INVALID_HANDLE_VALUE;
+        file = CreateFileW(out, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (file != INVALID_HANDLE_VALUE) return file;
+        err = GetLastError();
+        if (err != 80 && err != 183) return INVALID_HANDLE_VALUE;
     }
     SetLastError(80);
     return INVALID_HANDLE_VALUE;
 }
 
-static DWORD SaveBytes(const WCHAR *path, const BYTE *out, size_t on) {
+static DWORD SaveBytes(const WCHAR *path, const BYTE *out, size_t outLen) {
     WCHAR full[PATH_CAP], temp[PATH_CAP + 64], backup[PATH_CAP + 64];
-    HANDLE f = INVALID_HANDLE_VALUE, guard = INVALID_HANDLE_VALUE;
-    DWORD size, attrs, er = 0, wr, basic;
+    HANDLE file = INVALID_HANDLE_VALUE, guard = INVALID_HANDLE_VALUE;
+    DWORD size, attrs, err = 0, bytesWritten, basicAttrs;
     size_t done;
     BOOL existed, haveTemp = FALSE, haveBackup = FALSE;
     size = GetFullPathNameW(path, PATH_CAP, full, NULL);
@@ -437,124 +437,124 @@ static DWORD SaveBytes(const WCHAR *path, const BYTE *out, size_t on) {
     attrs = GetFileAttributesW(full);
     existed = attrs != INVALID_FILE_ATTRIBUTES;
     if (!existed) {
-        er = GetLastError();
-        if (er != ERROR_FILE_NOT_FOUND) return er;
+        err = GetLastError();
+        if (err != ERROR_FILE_NOT_FOUND) return err;
     } else {
         if (attrs & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_DIRECTORY)) return 5;
         guard = CreateFileW(full, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (guard == INVALID_HANDLE_VALUE) return GetLastError();
     }
-    er = 0;
-    f = SaveSibling(full, temp, L"tmp");
-    if (f == INVALID_HANDLE_VALUE) { er = GetLastError(); goto finish; }
+    err = 0;
+    file = SaveSibling(full, temp, L"tmp");
+    if (file == INVALID_HANDLE_VALUE) { err = GetLastError(); goto finish; }
     haveTemp = TRUE;
-    for (done = 0; done < on; done += wr) {
-        if (!DocWriteFile(f, out + done, (DWORD)(on - done), &wr, NULL)) { er = GetLastError(); if (!er) er = 29; goto finish; }
-        if (!wr || wr > on - done) { er = 29; goto finish; }
+    for (done = 0; done < outLen; done += bytesWritten) {
+        if (!DocWriteFile(file, out + done, (DWORD)(outLen - done), &bytesWritten, NULL)) { err = GetLastError(); if (!err) err = 29; goto finish; }
+        if (!bytesWritten || bytesWritten > outLen - done) { err = 29; goto finish; }
     }
-    if (!DocFlushFile(f)) { er = GetLastError(); if (!er) er = 29; goto finish; }
-    if (!CloseHandle(f)) { er = GetLastError(); f = INVALID_HANDLE_VALUE; goto finish; }
-    f = INVALID_HANDLE_VALUE;
+    if (!DocFlushFile(file)) { err = GetLastError(); if (!err) err = 29; goto finish; }
+    if (!CloseHandle(file)) { err = GetLastError(); file = INVALID_HANDLE_VALUE; goto finish; }
+    file = INVALID_HANDLE_VALUE;
     if (existed) {
-        basic = attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED);
-        if (!SetFileAttributesW(temp, basic ? basic : FILE_ATTRIBUTE_NORMAL)) { er = GetLastError(); goto finish; }
-        f = SaveSibling(full, backup, L"bak");
-        if (f == INVALID_HANDLE_VALUE) { er = GetLastError(); goto finish; }
+        basicAttrs = attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED);
+        if (!SetFileAttributesW(temp, basicAttrs ? basicAttrs : FILE_ATTRIBUTE_NORMAL)) { err = GetLastError(); goto finish; }
+        file = SaveSibling(full, backup, L"bak");
+        if (file == INVALID_HANDLE_VALUE) { err = GetLastError(); goto finish; }
         haveBackup = TRUE;
-        if (!CloseHandle(f)) { er = GetLastError(); f = INVALID_HANDLE_VALUE; goto finish; }
-        f = INVALID_HANDLE_VALUE;
+        if (!CloseHandle(file)) { err = GetLastError(); file = INVALID_HANDLE_VALUE; goto finish; }
+        file = INVALID_HANDLE_VALUE;
         if (!DocReplaceFile(full, temp, backup)) {
-            er = GetLastError();
-            if (!er) er = 29;
-            if (er == 1177) {
+            err = GetLastError();
+            if (!err) err = 29;
+            if (err == 1177) {
                 if (!MoveFileExW(backup, full, MOVEFILE_WRITE_THROUGH)) haveBackup = FALSE;
             }
             goto finish;
         }
     } else if (!DocMoveFile(temp, full)) {
-        er = GetLastError();
-        if (!er) er = 29;
+        err = GetLastError();
+        if (!err) err = 29;
         goto finish;
     }
     haveTemp = FALSE;
 finish:
-    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
     if (guard != INVALID_HANDLE_VALUE) CloseHandle(guard);
     if (haveTemp) DeleteFileW(temp);
     if (haveBackup) DeleteFileW(backup);
-    return er;
+    return err;
 }
 
 DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, BOOL *lossy) {
-    WCHAR *w;
+    WCHAR *wide;
     BYTE *out = NULL;
-    size_t on = 0;
-    int wn = 0, k, own = 0;
-    BOOL allow = lossy ? *lossy : FALSE, used = FALSE;
-    DWORD er;
+    size_t outLen = 0;
+    int wideLen = 0, k, own = 0;
+    BOOL allowLossy = lossy ? *lossy : FALSE, isLossy = FALSE;
+    DWORD err;
     if (lossy) *lossy = FALSE;
     if (!text && len > 0) return ERR_BADCP;
     if (len > DOC_MAX_CHARS) return ERR_TOO_BIG;
-    w = EolConvert(text, len < 0 ? 0 : len, eol, &wn, &own);
-    if (!w) return wn < 0 ? ERR_TOO_BIG : ERR_NOMEM;
+    wide = EolConvert(text, len < 0 ? 0 : len, eol, &wideLen, &own);
+    if (!wide) return wideLen < 0 ? ERR_TOO_BIG : ERR_NOMEM;
     if (enc == ENC_UTF16LE || enc == ENC_UTF16BE) {
-        on = 2 + (size_t)wn * 2;
-        out = (BYTE *)mem_alloc(on);
+        outLen = 2 + (size_t)wideLen * 2;
+        out = (BYTE *)mem_alloc(outLen);
         if (out) {
-            WCHAR *o = (WCHAR *)out;
-            o[0] = (enc == ENC_UTF16LE) ? 0xFEFF : 0xFFFE;
-            for (k = 0; k < wn; k++) o[1 + k] = (enc == ENC_UTF16LE) ? w[k] : (WCHAR)((w[k] << 8) | (w[k] >> 8));
+            WCHAR *outWide = (WCHAR *)out;
+            outWide[0] = (enc == ENC_UTF16LE) ? 0xFEFF : 0xFFFE;
+            for (k = 0; k < wideLen; k++) outWide[1 + k] = (enc == ENC_UTF16LE) ? wide[k] : (WCHAR)((wide[k] << 8) | (wide[k] >> 8));
         }
     } else if (CpOf(enc) == CP_UTF8) {
         size_t bom = (enc == ENC_UTF8BOM) ? 3 : 0;
         int need = 0;
-        if (wn > 0x2AAAAAAA) { er = ERR_TOO_BIG; goto fail; }
-        out = (BYTE *)mem_alloc(bom + (size_t)wn * 3 + 1);
+        if (wideLen > 0x2AAAAAAA) { err = ERR_TOO_BIG; goto fail; }
+        out = (BYTE *)mem_alloc(bom + (size_t)wideLen * 3 + 1);
         if (out) {
             if (bom) { out[0] = 0xEF; out[1] = 0xBB; out[2] = 0xBF; }
-            need = wn ? WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, wn, (LPSTR)(out + bom), wn * 3, NULL, NULL) : 0;
-            if (wn && !need && GetLastError() == ERR_LOSSY) {
-                used = TRUE;
+            need = wideLen ? WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, wideLen, (LPSTR)(out + bom), wideLen * 3, NULL, NULL) : 0;
+            if (wideLen && !need && GetLastError() == ERR_LOSSY) {
+                isLossy = TRUE;
                 if (lossy) *lossy = TRUE;
-                if (!allow) { er = ERR_LOSSY; goto fail; }
-                need = WideCharToMultiByte(CP_UTF8, 0, w, wn, (LPSTR)(out + bom), wn * 3, NULL, NULL);
+                if (!allowLossy) { err = ERR_LOSSY; goto fail; }
+                need = WideCharToMultiByte(CP_UTF8, 0, wide, wideLen, (LPSTR)(out + bom), wideLen * 3, NULL, NULL);
             }
-            if (wn && !need) { er = ERR_BADCP; goto fail; }
-            on = bom + (size_t)need;
+            if (wideLen && !need) { err = ERR_BADCP; goto fail; }
+            outLen = bom + (size_t)need;
         }
     } else {
         UINT cp = CpOf(enc);
         BOOL probe = CpHasDefaultChar(cp);
-        DWORD fl = probe ? WC_NO_BEST_FIT_CHARS : 0;
-        int need = wn ? WideCharToMultiByte(cp, fl, w, wn, NULL, 0, NULL, NULL) : 0;
-        if (wn && !need) { er = ERR_BADCP; goto fail; }
-        on = (size_t)need;
-        out = (BYTE *)mem_alloc(on + 1);
+        DWORD flags = probe ? WC_NO_BEST_FIT_CHARS : 0;
+        int need = wideLen ? WideCharToMultiByte(cp, flags, wide, wideLen, NULL, 0, NULL, NULL) : 0;
+        if (wideLen && !need) { err = ERR_BADCP; goto fail; }
+        outLen = (size_t)need;
+        out = (BYTE *)mem_alloc(outLen + 1);
         if (out) {
-            if (need && WideCharToMultiByte(cp, fl, w, wn, (LPSTR)out, need, NULL, probe ? &used : NULL) != need) { er = ERR_BADCP; goto fail; }
+            if (need && WideCharToMultiByte(cp, flags, wide, wideLen, (LPSTR)out, need, NULL, probe ? &isLossy : NULL) != need) { err = ERR_BADCP; goto fail; }
             if (need && !probe) {
                 int backLen = MultiByteToWideChar(cp, 0, (LPCSTR)out, need, NULL, 0);
                 WCHAR *back;
-                if (!backLen || backLen > DOC_MAX_CHARS) { er = ERR_BADCP; goto fail; }
+                if (!backLen || backLen > DOC_MAX_CHARS) { err = ERR_BADCP; goto fail; }
                 back = (WCHAR *)mem_alloc((size_t)backLen * sizeof(WCHAR));
-                if (!back) { er = ERR_NOMEM; goto fail; }
-                if (MultiByteToWideChar(cp, 0, (LPCSTR)out, need, back, backLen) != backLen) { mem_free(back); er = ERR_BADCP; goto fail; }
-                used = backLen != wn || memcmp(back, w, (size_t)wn * sizeof(WCHAR)) != 0;
+                if (!back) { err = ERR_NOMEM; goto fail; }
+                if (MultiByteToWideChar(cp, 0, (LPCSTR)out, need, back, backLen) != backLen) { mem_free(back); err = ERR_BADCP; goto fail; }
+                isLossy = backLen != wideLen || memcmp(back, wide, (size_t)wideLen * sizeof(WCHAR)) != 0;
                 mem_free(back);
             }
         }
     }
-    if (own) mem_free(w);
+    if (own) mem_free(wide);
     if (!out) return ERR_NOMEM;
-    if (used) {
+    if (isLossy) {
         if (lossy) *lossy = TRUE;
-        if (!allow) { mem_free(out); return ERR_LOSSY; }
+        if (!allowLossy) { mem_free(out); return ERR_LOSSY; }
     }
-    er = SaveBytes(path, out, on);
+    err = SaveBytes(path, out, outLen);
     mem_free(out);
-    return er;
+    return err;
 fail:
     mem_free(out);
-    if (own) mem_free(w);
-    return er;
+    if (own) mem_free(wide);
+    return err;
 }

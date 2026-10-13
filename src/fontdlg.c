@@ -6,8 +6,8 @@ enum { ID_LIST = 1301, ID_MONO, ID_SIZE, ID_BOLD, ID_ITALIC };
 #define ID_RESET   1370
 
 typedef struct {
-    DlgBase b;
-    HWND    list, edit, pv;
+    DlgBase base;
+    HWND    list, edit, preview;
     HFONT   font;
     WCHAR   face[32];
     int     pt, bold, italic, mono;
@@ -24,386 +24,386 @@ static const int g_sizes[24] = { 80, 85, 90, 95, 100, 105,  110, 115, 120, 125, 
 static const WCHAR g_sample[] = L"sphinx of black quartz, judge my vow. 0123456789";
 
 
-static int FaceFind(const WCHAR *name, int *at) {
-    int lo = 0, hi = g_nfonts, mid, c;
+static int FaceFind(const WCHAR *name, int *index) {
+    int lo = 0, hi = g_nfonts, mid, cmp;
     while (lo < hi) {
         mid = (lo + hi) / 2;
-        c = wcmpi(name, g_fonts[mid].name);
-        if (!c) { *at = mid; return mid; }
-        if (c < 0) hi = mid; else lo = mid + 1;
+        cmp = wcmpi(name, g_fonts[mid].name);
+        if (!cmp) { *index = mid; return mid; }
+        if (cmp < 0) hi = mid; else lo = mid + 1;
     }
-    *at = lo;
+    *index = lo;
     return -1;
 }
 
 static void FaceAdd(const WCHAR *name) {
-    int at;
-    if (!name[0] || name[0] == '@' || FaceFind(name, &at) >= 0) return;
+    int index;
+    if (!name[0] || name[0] == '@' || FaceFind(name, &index) >= 0) return;
     if (g_nfonts == g_capfonts) {
-        int cap = g_capfonts ? g_capfonts * 2 : 256;
-        FontEnt *p = (FontEnt *)mem_realloc(g_fonts, (size_t)cap * sizeof(FontEnt));
-        if (!p) return;
-        g_fonts = p;
-        g_capfonts = cap;
+        int newCapacity = g_capfonts ? g_capfonts * 2 : 256;
+        FontEnt *newFonts = (FontEnt *)mem_realloc(g_fonts, (size_t)newCapacity * sizeof(FontEnt));
+        if (!newFonts) return;
+        g_fonts = newFonts;
+        g_capfonts = newCapacity;
     }
-    memmove(g_fonts + at + 1, g_fonts + at, (size_t)(g_nfonts - at) * sizeof(FontEnt));
-    wcopy(g_fonts[at].name, name, 32);
-    g_fonts[at].mono = 0;
+    memmove(g_fonts + index + 1, g_fonts + index, (size_t)(g_nfonts - index) * sizeof(FontEnt));
+    wcopy(g_fonts[index].name, name, 32);
+    g_fonts[index].mono = 0;
     g_nfonts++;
 }
 
-static int CALLBACK EnumCb(const void *lf, const void *tm, DWORD type, LPARAM lp) {
-    (void)tm; (void)lp;
-    if (!(type & RASTER_FONTTYPE)) FaceAdd(((const ENUMLOGFONTEXW *)lf)->elfLogFont.lfFaceName);
+static int CALLBACK EnumCb(const void *logFont, const void *metrics, DWORD type, LPARAM lParam) {
+    (void)metrics; (void)lParam;
+    if (!(type & RASTER_FONTTYPE)) FaceAdd(((const ENUMLOGFONTEXW *)logFont)->elfLogFont.lfFaceName);
     return 1;
 }
 
 static void FaceEnum(void) {
-    LOGFONTW lf;
-    HDC dc = GetDC(NULL);
-    if (!dc) return;
-    memset(&lf, 0, sizeof lf);
-    lf.lfCharSet = DEFAULT_CHARSET;
-    EnumFontFamiliesExW(dc, &lf, EnumCb, 0, 0);
-    ReleaseDC(NULL, dc);
+    LOGFONTW logFont;
+    HDC hdc = GetDC(NULL);
+    if (!hdc) return;
+    memset(&logFont, 0, sizeof logFont);
+    logFont.lfCharSet = DEFAULT_CHARSET;
+    EnumFontFamiliesExW(hdc, &logFont, EnumCb, 0, 0);
+    ReleaseDC(NULL, hdc);
 }
 
-static BOOL IsMono(HDC dc, int i) {
-    FontEnt *e = &g_fonts[i];
-    if (!e->mono) {
-        HFONT f = CreateFontW(-32, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, e->name);
-        e->mono = 2;
-        if (f) {
-            SIZE a, b;
-            HGDIOBJ of = SelectObject(dc, f);
-            LONG dw;
-            a.cx = 0; b.cx = 0;
-            GetTextExtentPoint32W(dc, L"iiiiiiii", 8, &a);
-            GetTextExtentPoint32W(dc, L"WWWWWWWW", 8, &b);
-            SelectObject(dc, of);
-            DeleteObject(f);
-            dw = a.cx - b.cx;
-            if (dw < 0) dw = -dw;
-            if (a.cx > 0 && dw * 32 <= b.cx) e->mono = 1;
+static BOOL IsMono(HDC hdc, int index) {
+    FontEnt *entry = &g_fonts[index];
+    if (!entry->mono) {
+        HFONT font = CreateFontW(-32, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, entry->name);
+        entry->mono = 2;
+        if (font) {
+            SIZE narrow, wide;
+            HGDIOBJ oldFont = SelectObject(hdc, font);
+            LONG widthDiff;
+            narrow.cx = 0; wide.cx = 0;
+            GetTextExtentPoint32W(hdc, L"iiiiiiii", 8, &narrow);
+            GetTextExtentPoint32W(hdc, L"WWWWWWWW", 8, &wide);
+            SelectObject(hdc, oldFont);
+            DeleteObject(font);
+            widthDiff = narrow.cx - wide.cx;
+            if (widthDiff < 0) widthDiff = -widthDiff;
+            if (narrow.cx > 0 && widthDiff * 32 <= wide.cx) entry->mono = 1;
         }
     }
-    return e->mono == 1;
+    return entry->mono == 1;
 }
 
-static int Checked(HWND h, int id) { return SendMessageW(GetDlgItem(h, id), BM_GETCHECK, 0, 0) == BST_CHECKED; }
+static int Checked(HWND hwnd, int id) { return SendMessageW(GetDlgItem(hwnd, id), BM_GETCHECK, 0, 0) == BST_CHECKED; }
 
-static void SetCheck(HWND h, int id, int on) {
-    SendMessageW(GetDlgItem(h, id), BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
+static void SetCheck(HWND hwnd, int id, int on) {
+    SendMessageW(GetDlgItem(hwnd, id), BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
-static BOOL ItemText(HWND list, int i, WCHAR *out) {
-    LRESULT n;
-    if (i < 0) return FALSE;
-    n = SendMessageW(list, LB_GETTEXTLEN, (WPARAM)i, 0);
-    if (n < 0 || n >= 32) return FALSE;
-    SendMessageW(list, LB_GETTEXT, (WPARAM)i, (LPARAM)out);
+static BOOL ItemText(HWND list, int index, WCHAR *out) {
+    LRESULT length;
+    if (index < 0) return FALSE;
+    length = SendMessageW(list, LB_GETTEXTLEN, (WPARAM)index, 0);
+    if (length < 0 || length >= 32) return FALSE;
+    SendMessageW(list, LB_GETTEXT, (WPARAM)index, (LPARAM)out);
     return TRUE;
 }
 
-static void FillList(FontSt *d) {
-    HCURSOR cur = NULL;
-    HDC dc = NULL;
+static void FillList(FontSt *state) {
+    HCURSOR oldCursor = NULL;
+    HDC hdc = NULL;
     int i;
-    if (d->mono) {
-        cur = SetCursor(LoadCursorW(NULL, IDC_WAIT));
-        dc = CreateCompatibleDC(NULL);
+    if (state->mono) {
+        oldCursor = SetCursor(LoadCursorW(NULL, IDC_WAIT));
+        hdc = CreateCompatibleDC(NULL);
     }
-    SendMessageW(d->list, WM_SETREDRAW, FALSE, 0);
-    SendMessageW(d->list, LB_RESETCONTENT, 0, 0);
-    for (i = 0; i < g_nfonts; i++) if (!d->mono || !dc || IsMono(dc, i)) SendMessageW(d->list, LB_ADDSTRING, 0, (LPARAM)g_fonts[i].name);
-    if (dc) DeleteDC(dc);
-    if (d->mono) SetCursor(cur ? cur : LoadCursorW(NULL, IDC_ARROW));
-    SendMessageW(d->list, WM_SETREDRAW, TRUE, 0);
-    InvalidateRect(d->list, NULL, TRUE);
+    SendMessageW(state->list, WM_SETREDRAW, FALSE, 0);
+    SendMessageW(state->list, LB_RESETCONTENT, 0, 0);
+    for (i = 0; i < g_nfonts; i++) if (!state->mono || !hdc || IsMono(hdc, i)) SendMessageW(state->list, LB_ADDSTRING, 0, (LPARAM)g_fonts[i].name);
+    if (hdc) DeleteDC(hdc);
+    if (state->mono) SetCursor(oldCursor ? oldCursor : LoadCursorW(NULL, IDC_ARROW));
+    SendMessageW(state->list, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(state->list, NULL, TRUE);
 }
 
-static void SelectFace(FontSt *d, int force) {
-    int i = (int)SendMessageW(d->list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)d->face);
-    if (i == LB_ERR && d->mono && force) {
-        d->mono = 0;
-        SetCheck(d->b.hwnd, ID_MONO, 0);
-        FillList(d);
-        i = (int)SendMessageW(d->list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)d->face);
+static void SelectFace(FontSt *state, int force) {
+    int index = (int)SendMessageW(state->list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)state->face);
+    if (index == LB_ERR && state->mono && force) {
+        state->mono = 0;
+        SetCheck(state->base.hwnd, ID_MONO, 0);
+        FillList(state);
+        index = (int)SendMessageW(state->list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)state->face);
     }
-    SendMessageW(d->list, LB_SETCURSEL, (WPARAM)i, 0);
-    if (i < 0) return;
-    ItemText(d->list, i, d->face);
-    SendMessageW(d->list, LB_SETTOPINDEX, (WPARAM)(i > 3 ? i - 3 : 0), 0);
+    SendMessageW(state->list, LB_SETCURSEL, (WPARAM)index, 0);
+    if (index < 0) return;
+    ItemText(state->list, index, state->face);
+    SendMessageW(state->list, LB_SETTOPINDEX, (WPARAM)(index > 3 ? index - 3 : 0), 0);
 }
 
-static int SizeText(HWND e, int def) {
-    WCHAR t[16];
-    const WCHAR *p = t;
+static int SizeText(HWND edit, int fallback) {
+    WCHAR text[16];
+    const WCHAR *cursor = text;
     int whole = 0, frac = 0;
-    t[0] = 0;
-    GetWindowTextW(e, t, 16);
-    while (*p == ' ' || *p == '\t') p++;
-    if (*p < '0' || *p > '9') return def;
-    while (*p >= '0' && *p <= '9') whole = whole * 10 + (*p++ - '0');
-    if ((*p == '.' || *p == ',') && p[1] >= '0' && p[1] <= '9') frac = p[1] - '0';
+    text[0] = 0;
+    GetWindowTextW(edit, text, 16);
+    while (*cursor == ' ' || *cursor == '\t') cursor++;
+    if (*cursor < '0' || *cursor > '9') return fallback;
+    while (*cursor >= '0' && *cursor <= '9') whole = whole * 10 + (*cursor++ - '0');
+    if ((*cursor == '.' || *cursor == ',') && cursor[1] >= '0' && cursor[1] <= '9') frac = cursor[1] - '0';
     return ClampInt(whole * 10 + frac, FONT_MIN, FONT_MAX);
 }
 
-static void FormatPt(WCHAR *t, int tenths) {
-    if (tenths % 10) wsprintfW(t, L"%d.%d", tenths / 10, tenths % 10);
-    else wsprintfW(t, L"%d", tenths / 10);
+static void FormatPt(WCHAR *text, int tenths) {
+    if (tenths % 10) wsprintfW(text, L"%d.%d", tenths / 10, tenths % 10);
+    else wsprintfW(text, L"%d", tenths / 10);
 }
 
-static void SetSizeText(FontSt *d) {
-    WCHAR t[16], cur[16];
-    FormatPt(t, d->pt);
-    cur[0] = 0;
-    GetWindowTextW(d->edit, cur, 16);
-    if (wcmp(cur, t)) {
-        d->busy = 1;
-        SetWindowTextW(d->edit, t);
-        d->busy = 0;
+static void SetSizeText(FontSt *state) {
+    WCHAR text[16], current[16];
+    FormatPt(text, state->pt);
+    current[0] = 0;
+    GetWindowTextW(state->edit, current, 16);
+    if (wcmp(current, text)) {
+        state->busy = 1;
+        SetWindowTextW(state->edit, text);
+        state->busy = 0;
     }
 }
 
-static void Sync(FontSt *d) {
-    ItemText(d->list, (int)SendMessageW(d->list, LB_GETCURSEL, 0, 0), d->face);
-    d->pt = SizeText(d->edit, d->pt);
-    d->bold = Checked(d->b.hwnd, ID_BOLD);
-    d->italic = Checked(d->b.hwnd, ID_ITALIC);
+static void Sync(FontSt *state) {
+    ItemText(state->list, (int)SendMessageW(state->list, LB_GETCURSEL, 0, 0), state->face);
+    state->pt = SizeText(state->edit, state->pt);
+    state->bold = Checked(state->base.hwnd, ID_BOLD);
+    state->italic = Checked(state->base.hwnd, ID_ITALIC);
 }
 
-static HFONT MakeFont(const FontSt *d, int px) {
-    return CreateFontW(-(px < 1 ? 1 : px), 0, 0, 0, d->bold ? FW_BOLD : FW_NORMAL, (DWORD)(d->italic ? 1 : 0), 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, d->face);
+static HFONT MakeFont(const FontSt *state, int pixelHeight) {
+    return CreateFontW(-(pixelHeight < 1 ? 1 : pixelHeight), 0, 0, 0, state->bold ? FW_BOLD : FW_NORMAL, (DWORD)(state->italic ? 1 : 0), 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, state->face);
 }
 
 #define PV_L   S(10)
 #define PV_R   S(6)
-static void PreviewFont(FontSt *d) {
-    HFONT f;
-    if (!d->pv) return;
-    f = MakeFont(d, MulDiv(d->pt, g_dpi, 720));
-    if (!f) return;
-    if (d->font) DeleteObject(d->font);
-    d->font = f;
-    InvalidateRect(d->pv, NULL, FALSE);
+static void PreviewFont(FontSt *state) {
+    HFONT newFont;
+    if (!state->preview) return;
+    newFont = MakeFont(state, MulDiv(state->pt, g_dpi, 720));
+    if (!newFont) return;
+    if (state->font) DeleteObject(state->font);
+    state->font = newFont;
+    InvalidateRect(state->preview, NULL, FALSE);
 }
 
-static void PreviewDraw(HDC dc, const RECT *rc, const FontSt *d) {
-    RECT line = *rc;
-    HGDIOBJ of;
-    FillC(dc, rc, C_EDIT_BG);
-    if (!d || !d->font) return;
-    of = SelectObject(dc, d->font);
+static void PreviewDraw(HDC hdc, const RECT *client, const FontSt *state) {
+    RECT line = *client;
+    HGDIOBJ oldFont;
+    FillC(hdc, client, C_EDIT_BG);
+    if (!state || !state->font) return;
+    oldFont = SelectObject(hdc, state->font);
     line.left += PV_L; line.right -= PV_R;
-    TextC(dc, g_sample, -1, &line, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, C_EDIT_FG);
-    if (of) SelectObject(dc, of);
+    TextC(hdc, g_sample, -1, &line, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, C_EDIT_FG);
+    if (oldFont) SelectObject(hdc, oldFont);
 }
 
-static void PreviewPaint(HWND h, const FontSt *d) {
+static void PreviewPaint(HWND hwnd, const FontSt *state) {
     PAINTSTRUCT ps;
-    RECT rc;
-    HDC dc, mdc;
-    HBITMAP bmp = NULL;
-    HGDIOBJ ob = NULL;
+    RECT client;
+    HDC hdc, memDc;
+    HBITMAP bitmap = NULL;
+    HGDIOBJ oldBitmap = NULL;
     memset(&ps, 0, sizeof ps);
-    dc = BeginPaint(h, &ps);
-    if (!dc) { EndPaint(h, &ps); return; }
-    if (!GetClientRect(h, &rc) || rc.right <= 0 || rc.bottom <= 0) { EndPaint(h, &ps); return; }
-    mdc = CreateCompatibleDC(dc);
-    if (mdc) bmp = CreateCompatibleBitmap(dc, rc.right, rc.bottom);
-    if (bmp) ob = SelectObject(mdc, bmp);
-    if (ob && ob != (HGDIOBJ)(LONG_PTR)-1) {
-        PreviewDraw(mdc, &rc, d);
-        if (!BitBlt(dc, 0, 0, rc.right, rc.bottom, mdc, 0, 0, SRCCOPY)) PreviewDraw(dc, &rc, d);
-        SelectObject(mdc, ob);
+    hdc = BeginPaint(hwnd, &ps);
+    if (!hdc) { EndPaint(hwnd, &ps); return; }
+    if (!GetClientRect(hwnd, &client) || client.right <= 0 || client.bottom <= 0) { EndPaint(hwnd, &ps); return; }
+    memDc = CreateCompatibleDC(hdc);
+    if (memDc) bitmap = CreateCompatibleBitmap(hdc, client.right, client.bottom);
+    if (bitmap) oldBitmap = SelectObject(memDc, bitmap);
+    if (oldBitmap && oldBitmap != (HGDIOBJ)(LONG_PTR)-1) {
+        PreviewDraw(memDc, &client, state);
+        if (!BitBlt(hdc, 0, 0, client.right, client.bottom, memDc, 0, 0, SRCCOPY)) PreviewDraw(hdc, &client, state);
+        SelectObject(memDc, oldBitmap);
     } else {
-        PreviewDraw(dc, &rc, d);
+        PreviewDraw(hdc, &client, state);
     }
-    if (bmp) DeleteObject(bmp);
-    if (mdc) DeleteDC(mdc);
-    EndPaint(h, &ps);
+    if (bitmap) DeleteObject(bitmap);
+    if (memDc) DeleteDC(memDc);
+    EndPaint(hwnd, &ps);
 }
 
-static LRESULT CALLBACK PreviewProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    if (m == WM_NCCREATE) {
-        SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW *)l)->lpCreateParams);
-        return DefWindowProcW(h, m, w, l);
+static LRESULT CALLBACK PreviewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_NCCREATE) {
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW *)lParam)->lpCreateParams);
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
-    if (m == WM_ERASEBKGND) return 1;
-    if (m == WM_GETFONT) {
-        const FontSt *d = (const FontSt *)GetWindowLongPtrW(h, GWLP_USERDATA);
-        return d ? (LRESULT)d->font : 0;
+    if (msg == WM_ERASEBKGND) return 1;
+    if (msg == WM_GETFONT) {
+        const FontSt *state = (const FontSt *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+        return state ? (LRESULT)state->font : 0;
     }
-    if (m == WM_PRINTCLIENT) {
-        RECT rc;
-        GetClientRect(h, &rc);
-        PreviewDraw((HDC)w, &rc, (const FontSt *)GetWindowLongPtrW(h, GWLP_USERDATA));
+    if (msg == WM_PRINTCLIENT) {
+        RECT client;
+        GetClientRect(hwnd, &client);
+        PreviewDraw((HDC)wParam, &client, (const FontSt *)GetWindowLongPtrW(hwnd, GWLP_USERDATA));
         return 0;
     }
-    if (m == WM_PAINT) { PreviewPaint(h, (const FontSt *)GetWindowLongPtrW(h, GWLP_USERDATA)); return 0; }
-    return DefWindowProcW(h, m, w, l);
+    if (msg == WM_PAINT) { PreviewPaint(hwnd, (const FontSt *)GetWindowLongPtrW(hwnd, GWLP_USERDATA)); return 0; }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-static void ShowState(FontSt *d) {
-    SetCheck(d->b.hwnd, ID_BOLD, d->bold);
-    SetCheck(d->b.hwnd, ID_ITALIC, d->italic);
-    SetSizeText(d);
-    SelectFace(d, 1);
-    PreviewFont(d);
+static void ShowState(FontSt *state) {
+    SetCheck(state->base.hwnd, ID_BOLD, state->bold);
+    SetCheck(state->base.hwnd, ID_ITALIC, state->italic);
+    SetSizeText(state);
+    SelectFace(state, 1);
+    PreviewFont(state);
 }
 
-static void DrawItem(const DRAWITEMSTRUCT *di) {
-    WCHAR t[32];
-    RECT r = di->rcItem;
-    BOOL has = ItemText(di->hwndItem, (int)di->itemID, t), sel = has && (di->itemState & ODS_SELECTED);
-    HGDIOBJ of;
-    FillC(di->hDC, &r, sel ? C_ACCENT : C_FIELD);
-    if (has) {
-        of = SelectObject(di->hDC, g_fontUI);
-        r.left += S(6); r.right -= S(2);
-        TextC(di->hDC, t, -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, sel ? C_ON_ACCENT : C_TEXT);
-        SelectObject(di->hDC, of);
+static void DrawItem(const DRAWITEMSTRUCT *item) {
+    WCHAR text[32];
+    RECT rect = item->rcItem;
+    BOOL hasText = ItemText(item->hwndItem, (int)item->itemID, text), selected = hasText && (item->itemState & ODS_SELECTED);
+    HGDIOBJ oldFont;
+    FillC(item->hDC, &rect, selected ? C_ACCENT : C_FIELD);
+    if (hasText) {
+        oldFont = SelectObject(item->hDC, g_fontUI);
+        rect.left += S(6); rect.right -= S(2);
+        TextC(item->hDC, text, -1, &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, selected ? C_ON_ACCENT : C_TEXT);
+        SelectObject(item->hDC, oldFont);
     }
-    if (di->itemState & ODS_FOCUS) DrawFocusRect(di->hDC, &di->rcItem);
+    if (item->itemState & ODS_FOCUS) DrawFocusRect(item->hDC, &item->rcItem);
 }
 
-static void Opt(HWND h, const WCHAR *text, int x, int y, int w, int id, DWORD extra, int on) {
-    HWND c = UiButton(h, text, x, y, w, 20, id, BS_AUTOCHECKBOX | extra);
-    SendMessageW(c, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
+static void Opt(HWND parent, const WCHAR *text, int x, int y, int width, int id, DWORD extra, int on) {
+    HWND checkbox = UiButton(parent, text, x, y, width, 20, id, BS_AUTOCHECKBOX | extra);
+    SendMessageW(checkbox, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
-static void FontLayout(FontSt *d) {
-    DlgBase *b = &d->b;
-    HWND h = b->hwnd, c;
-    WCHAR t[8];
+static void FontLayout(FontSt *state) {
+    DlgBase *base = &state->base;
+    HWND hwnd = base->hwnd, button;
+    WCHAR text[8];
     int i;
-    UiLabel(h, L"font:", 12, 10, 236, 16, 0, SS_NOPREFIX);
-    UiLabel(h, L"size:", 264, 10, 120, 16, 0, SS_NOPREFIX);
-    UiLabel(h, L"7 to 100 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
-    UiLabel(h, L"preview:", 12, 228, 200, 16, 0, SS_NOPREFIX);
-    DlgFrame(b, 12, 246, 504, 146, BV_SUNKEN);
-    d->pv = CreateWindowExW(0, L"mp_fontpv", g_sample, WS_CHILD | WS_VISIBLE, S(12) + 2, S(246) + 2, S(504) - 4, S(146) - 4, h, (HMENU)(ULONG_PTR)ID_PREVIEW, g_hinst, d);
-    DlgFrame(b, 12, 28, 236, 166, BV_SUNKEN);
-    d->list = CreateWindowExW(0, L"LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | WS_VSCROLL | LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT, S(12) + 2, S(28) + 2, S(236) - 4, S(166) - 4, h, (HMENU)(ULONG_PTR)ID_LIST, g_hinst, NULL);
-    SendMessageW(d->list, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
-    DarkScroll(d->list);
-    Opt(h, L"monospaced fonts only", 12, 200, 236, ID_MONO, WS_GROUP, d->mono);
-    d->edit = UiEdit(b, L"", 264, 28, 56, 23, ID_SIZE, WS_GROUP);
-    SendMessageW(d->edit, EM_LIMITTEXT, 5, 0);
+    UiLabel(hwnd, L"font:", 12, 10, 236, 16, 0, SS_NOPREFIX);
+    UiLabel(hwnd, L"size:", 264, 10, 120, 16, 0, SS_NOPREFIX);
+    UiLabel(hwnd, L"7 to 100 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
+    UiLabel(hwnd, L"preview:", 12, 228, 200, 16, 0, SS_NOPREFIX);
+    DlgFrame(base, 12, 246, 504, 146, BV_SUNKEN);
+    state->preview = CreateWindowExW(0, L"mp_fontpv", g_sample, WS_CHILD | WS_VISIBLE, S(12) + 2, S(246) + 2, S(504) - 4, S(146) - 4, hwnd, (HMENU)(ULONG_PTR)ID_PREVIEW, g_hinst, state);
+    DlgFrame(base, 12, 28, 236, 166, BV_SUNKEN);
+    state->list = CreateWindowExW(0, L"LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | WS_VSCROLL | LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT, S(12) + 2, S(28) + 2, S(236) - 4, S(166) - 4, hwnd, (HMENU)(ULONG_PTR)ID_LIST, g_hinst, NULL);
+    SendMessageW(state->list, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
+    DarkScroll(state->list);
+    Opt(hwnd, L"monospaced fonts only", 12, 200, 236, ID_MONO, WS_GROUP, state->mono);
+    state->edit = UiEdit(base, L"", 264, 28, 56, 23, ID_SIZE, WS_GROUP);
+    SendMessageW(state->edit, EM_LIMITTEXT, 5, 0);
     for (i = 0; i < COUNTOF(g_sizes); i++) {
-        FormatPt(t, g_sizes[i]);
-        c = UiButton(h, t, 264 + (i % 6) * 42, 60 + (i / 6) * 26, 40, 22, ID_PRESET + i, BS_PUSHBUTTON | (i ? 0 : WS_GROUP));
-        if (i) SetWindowLongPtrW(c, GWL_STYLE, GetWindowLongPtrW(c, GWL_STYLE) & ~WS_TABSTOP);
+        FormatPt(text, g_sizes[i]);
+        button = UiButton(hwnd, text, 264 + (i % 6) * 42, 60 + (i / 6) * 26, 40, 22, ID_PRESET + i, BS_PUSHBUTTON | (i ? 0 : WS_GROUP));
+        if (i) SetWindowLongPtrW(button, GWL_STYLE, GetWindowLongPtrW(button, GWL_STYLE) & ~WS_TABSTOP);
     }
-    Opt(h, L"bold", 264, 170, 80, ID_BOLD, WS_GROUP, d->bold);
-    Opt(h, L"italic", 352, 170, 80, ID_ITALIC, 0, d->italic);
-    UiButton(h, L"reset", 12, 404, 88, 24, ID_RESET, BS_PUSHBUTTON | WS_GROUP);
-    UiButton(h, L"ok", 336, 404, 86, 24, IDOK, BS_DEFPUSHBUTTON | WS_GROUP);
-    UiButton(h, L"cancel", 430, 404, 86, 24, IDCANCEL, BS_PUSHBUTTON);
-    FillList(d);
-    ShowState(d);
-    b->focus = d->list;
+    Opt(hwnd, L"bold", 264, 170, 80, ID_BOLD, WS_GROUP, state->bold);
+    Opt(hwnd, L"italic", 352, 170, 80, ID_ITALIC, 0, state->italic);
+    UiButton(hwnd, L"reset", 12, 404, 88, 24, ID_RESET, BS_PUSHBUTTON | WS_GROUP);
+    UiButton(hwnd, L"ok", 336, 404, 86, 24, IDOK, BS_DEFPUSHBUTTON | WS_GROUP);
+    UiButton(hwnd, L"cancel", 430, 404, 86, 24, IDCANCEL, BS_PUSHBUTTON);
+    FillList(state);
+    ShowState(state);
+    base->focus = state->list;
 }
 
-static void FontCmd(FontSt *d, int id, int code) {
-    HWND h = d->b.hwnd;
-    if (d->b.done) return;
+static void FontCmd(FontSt *state, int id, int code) {
+    HWND hwnd = state->base.hwnd;
+    if (state->base.done) return;
     switch (id) {
     case IDOK:
-        Sync(d);
-        d->b.result = IDOK;
-        d->b.done = 1;
+        Sync(state);
+        state->base.result = IDOK;
+        state->base.done = 1;
         return;
     case IDCANCEL:
-        d->b.result = IDCANCEL;
-        d->b.done = 1;
+        state->base.result = IDCANCEL;
+        state->base.done = 1;
         return;
     case ID_LIST:
-        if (code != LBN_SELCHANGE || !ItemText(d->list, (int)SendMessageW(d->list, LB_GETCURSEL, 0, 0), d->face)) return;
+        if (code != LBN_SELCHANGE || !ItemText(state->list, (int)SendMessageW(state->list, LB_GETCURSEL, 0, 0), state->face)) return;
         break;
     case ID_MONO:
-        d->mono = g_monoOnly = Checked(h, ID_MONO);
-        FillList(d);
-        SelectFace(d, 0);
+        state->mono = g_monoOnly = Checked(hwnd, ID_MONO);
+        FillList(state);
+        SelectFace(state, 0);
         return;
     case ID_SIZE:
-        if (d->busy || (code != EN_CHANGE && code != EN_KILLFOCUS)) return;
-        d->pt = SizeText(d->edit, d->pt);
-        if (code == EN_KILLFOCUS) SetSizeText(d);
+        if (state->busy || (code != EN_CHANGE && code != EN_KILLFOCUS)) return;
+        state->pt = SizeText(state->edit, state->pt);
+        if (code == EN_KILLFOCUS) SetSizeText(state);
         break;
     case ID_BOLD:
     case ID_ITALIC:
-        d->bold = Checked(h, ID_BOLD);
-        d->italic = Checked(h, ID_ITALIC);
+        state->bold = Checked(hwnd, ID_BOLD);
+        state->italic = Checked(hwnd, ID_ITALIC);
         break;
     case ID_RESET:
-        wcopy(d->face, DEFAULT_FACE, 32);
-        FontResolve(d->face);
-        d->pt = 100;
-        d->bold = 0;
-        d->italic = 0;
-        ShowState(d);
+        wcopy(state->face, DEFAULT_FACE, 32);
+        FontResolve(state->face);
+        state->pt = 100;
+        state->bold = 0;
+        state->italic = 0;
+        ShowState(state);
         return;
     default:
         if (id < ID_PRESET || id >= ID_PRESET + COUNTOF(g_sizes)) return;
-        d->pt = g_sizes[id - ID_PRESET];
-        SetSizeText(d);
+        state->pt = g_sizes[id - ID_PRESET];
+        SetSizeText(state);
         break;
     }
-    PreviewFont(d);
+    PreviewFont(state);
 }
 
-static LRESULT CALLBACK FontProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    DlgBase *b = DlgFromHwnd(h, m, l);
-    FontSt *d = (FontSt *)b;
-    LRESULT r;
-    if (!b) return DefWindowProcW(h, m, w, l);
-    switch (m) {
+static LRESULT CALLBACK FontProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    DlgBase *base = DlgFromHwnd(hwnd, msg, lParam);
+    FontSt *state = (FontSt *)base;
+    LRESULT result;
+    if (!base) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    switch (msg) {
     case WM_CREATE:
-        FontLayout(d);
+        FontLayout(state);
         return 0;
     case WM_COMMAND:
-        FontCmd(d, LOWORD(w), HIWORD(w));
+        FontCmd(state, LOWORD(wParam), HIWORD(wParam));
         return 0;
     case WM_MEASUREITEM:
-        if (((MEASUREITEMSTRUCT *)l)->CtlID == ID_LIST) { ((MEASUREITEMSTRUCT *)l)->itemHeight = (UINT)S(18); return TRUE; }
+        if (((MEASUREITEMSTRUCT *)lParam)->CtlID == ID_LIST) { ((MEASUREITEMSTRUCT *)lParam)->itemHeight = (UINT)S(18); return TRUE; }
         break;
     case WM_DRAWITEM:
-        if (((DRAWITEMSTRUCT *)l)->CtlID == ID_LIST) { DrawItem((DRAWITEMSTRUCT *)l); return TRUE; }
+        if (((DRAWITEMSTRUCT *)lParam)->CtlID == ID_LIST) { DrawItem((DRAWITEMSTRUCT *)lParam); return TRUE; }
         break;
     case WM_NCDESTROY:
-        if (d->font) { DeleteObject(d->font); d->font = NULL; }
-        d->pv = NULL;
+        if (state->font) { DeleteObject(state->font); state->font = NULL; }
+        state->preview = NULL;
         break;
     }
-    if (DlgCommon(b, m, w, l, &r)) return r;
-    return DefWindowProcW(h, m, w, l);
+    if (DlgCommon(base, msg, wParam, lParam, &result)) return result;
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 BOOL FontDlg(HWND owner) {
     static BOOL reg;
-    FontSt d;
+    FontSt state;
     if (!reg) {
         RegClass(L"mp_font", FontProc, 0, NULL);
         RegClass(L"mp_fontpv", PreviewProc, 0, NULL);
         reg = TRUE;
     }
-    memset(&d, 0, sizeof d);
-    DlgBaseInit(&d.b, owner);
-    wcopy(d.face, g_pf.font, 32);
-    d.pt = ClampInt(g_pf.pt, FONT_MIN, FONT_MAX);
-    d.bold = g_pf.bold != 0;
-    d.italic = g_pf.italic != 0;
-    d.mono = g_monoOnly;
+    memset(&state, 0, sizeof state);
+    DlgBaseInit(&state.base, owner);
+    wcopy(state.face, g_pf.font, 32);
+    state.pt = ClampInt(g_pf.pt, FONT_MIN, FONT_MAX);
+    state.bold = g_pf.bold != 0;
+    state.italic = g_pf.italic != 0;
+    state.mono = g_monoOnly;
     FaceEnum();
-    FaceAdd(d.face);
-    if (!DlgOpen(&d.b, L"mp_font", L"font", 528, 440, 0)) return FALSE;
-    DlgRunModal(&d.b);
-    if (d.b.result != IDOK) return FALSE;
-    wcopy(g_pf.font, d.face, 32);
-    g_pf.pt = ClampInt(d.pt, FONT_MIN, FONT_MAX);
-    g_pf.bold = d.bold;
-    g_pf.italic = d.italic;
+    FaceAdd(state.face);
+    if (!DlgOpen(&state.base, L"mp_font", L"font", 528, 440, 0)) return FALSE;
+    DlgRunModal(&state.base);
+    if (state.base.result != IDOK) return FALSE;
+    wcopy(g_pf.font, state.face, 32);
+    g_pf.pt = ClampInt(state.pt, FONT_MIN, FONT_MAX);
+    g_pf.bold = state.bold;
+    g_pf.italic = state.italic;
     return TRUE;
 }

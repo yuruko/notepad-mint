@@ -3,146 +3,146 @@
 #define SS_ICON     0x03
 #define STM_SETICON 0x0170
 
-typedef struct { DlgBase b; HICON icon; HWND edit; } InfoDlg;
+typedef struct { DlgBase base; HICON icon; HWND edit; } InfoDlg;
 
 #define ID_LINK 1060
 typedef struct { int hot, focus, down; } LinkSt;
 
-static void LinkOpen(HWND h) {
+static void LinkOpen(HWND hwnd) {
     typedef HINSTANCE (WINAPI *ShellExecFn)(HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, int);
     WCHAR url[160];
-    HMODULE m = LoadLibraryW(L"shell32.dll");
-    ShellExecFn f = m ? (ShellExecFn)GetProcAddress(m, "ShellExecuteW") : NULL;
+    HMODULE module = LoadLibraryW(L"shell32.dll");
+    ShellExecFn shellExecute = module ? (ShellExecFn)GetProcAddress(module, "ShellExecuteW") : NULL;
     wcopy(url, L"https://", COUNTOF(url));
-    GetWindowTextW(h, url + 8, COUNTOF(url) - 8);
-    if (f) f(GetParent(h), L"open", url, NULL, NULL, SW_SHOWNORMAL);
+    GetWindowTextW(hwnd, url + 8, COUNTOF(url) - 8);
+    if (shellExecute) shellExecute(GetParent(hwnd), L"open", url, NULL, NULL, SW_SHOWNORMAL);
 }
 
-static LRESULT CALLBACK LinkProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    LinkSt *s = (LinkSt *)GetWindowLongPtrW(h, GWLP_USERDATA);
-    if (m == WM_NCCREATE) {
-        s = (LinkSt *)mem_zalloc(sizeof *s);
-        SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)s);
-        return DefWindowProcW(h, m, w, l);
+static LRESULT CALLBACK LinkProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    LinkSt *state = (LinkSt *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    if (msg == WM_NCCREATE) {
+        state = (LinkSt *)mem_zalloc(sizeof *state);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)state);
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
-    if (!s) return DefWindowProcW(h, m, w, l);
-    switch (m) {
+    if (!state) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    switch (msg) {
     case WM_NCDESTROY:
-        mem_free(s);
-        SetWindowLongPtrW(h, GWLP_USERDATA, 0);
+        mem_free(state);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
         break;
     case WM_ERASEBKGND:
         return 1;
     case WM_GETDLGCODE:
         return DLGC_BUTTON | DLGC_UNDEFPUSHBUTTON;
-    case WM_SETFOCUS:  s->focus = 1; InvalidateRect(h, NULL, FALSE); return 0;
-    case WM_KILLFOCUS: s->focus = 0; InvalidateRect(h, NULL, FALSE); return 0;
+    case WM_SETFOCUS:  state->focus = 1; InvalidateRect(hwnd, NULL, FALSE); return 0;
+    case WM_KILLFOCUS: state->focus = 0; InvalidateRect(hwnd, NULL, FALSE); return 0;
     case WM_SETCURSOR:
         SetCursor(LoadCursorW(NULL, IDC_HAND));
         return TRUE;
     case WM_MOUSEMOVE:
-        if (!s->hot) {
-            TRACKMOUSEEVENT te;
-            s->hot = 1;
-            te.cbSize = sizeof te; te.dwFlags = TME_LEAVE; te.hwndTrack = h; te.dwHoverTime = 0;
-            TrackMouseEvent(&te);
-            InvalidateRect(h, NULL, FALSE);
+        if (!state->hot) {
+            TRACKMOUSEEVENT trackEvent;
+            state->hot = 1;
+            trackEvent.cbSize = sizeof trackEvent; trackEvent.dwFlags = TME_LEAVE; trackEvent.hwndTrack = hwnd; trackEvent.dwHoverTime = 0;
+            TrackMouseEvent(&trackEvent);
+            InvalidateRect(hwnd, NULL, FALSE);
         }
         return 0;
     case WM_MOUSELEAVE:
-        s->hot = 0;
-        InvalidateRect(h, NULL, FALSE);
+        state->hot = 0;
+        InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     case WM_LBUTTONDOWN:
-        SetFocus(h);
-        SetCapture(h);
-        s->down = 1;
+        SetFocus(hwnd);
+        SetCapture(hwnd);
+        state->down = 1;
         return 0;
     case WM_LBUTTONUP:
-        if (s->down) {
-            RECT rc;
+        if (state->down) {
+            RECT client;
             POINT pt;
-            s->down = 0;
+            state->down = 0;
             ReleaseCapture();
-            pt.x = GET_X_LPARAM(l); pt.y = GET_Y_LPARAM(l);
-            GetClientRect(h, &rc);
-            if (PtInRect(&rc, pt)) LinkOpen(h);
+            pt.x = GET_X_LPARAM(lParam); pt.y = GET_Y_LPARAM(lParam);
+            GetClientRect(hwnd, &client);
+            if (PtInRect(&client, pt)) LinkOpen(hwnd);
         }
         return 0;
     case WM_KEYUP:
-        if (w == VK_SPACE) { LinkOpen(h); return 0; }
+        if (wParam == VK_SPACE) { LinkOpen(hwnd); return 0; }
         break;
     case WM_PAINT: {
         PAINTSTRUCT ps;
-        HDC dc = BeginPaint(h, &ps);
-        RECT rc, tr, cr, ul;
-        WCHAR t[96];
-        int n, th;
-        HGDIOBJ of = SelectObject(dc, g_fontUI);
-        GetClientRect(h, &rc);
-        FillC(dc, &rc, s->hot ? C_ACCENT : C_FACE);
-        n = GetWindowTextW(h, t, COUNTOF(t));
-        tr = rc; tr.left += S(2);
-        cr = tr;
-        DrawTextW(dc, t, n, &cr, DT_LEFT | DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
-        th = cr.bottom - cr.top;
-        TextC(dc, t, n, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, s->hot ? C_ON_ACCENT : C_ACCENT_FG);
-        ul.left = tr.left; ul.right = cr.right; ul.top = (rc.bottom + th) / 2 - 1; ul.bottom = ul.top + 1;
-        FillC(dc, &ul, s->hot ? C_ON_ACCENT : C_ACCENT_FG);
-        if (s->focus) {
-            RECT f = rc;
-            InflateRect(&f, -1, -1);
-            DrawFocusRect(dc, &f);
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT client, textRect, measured, underline;
+        WCHAR text[96];
+        int length, textHeight;
+        HGDIOBJ oldFont = SelectObject(hdc, g_fontUI);
+        GetClientRect(hwnd, &client);
+        FillC(hdc, &client, state->hot ? C_ACCENT : C_FACE);
+        length = GetWindowTextW(hwnd, text, COUNTOF(text));
+        textRect = client; textRect.left += S(2);
+        measured = textRect;
+        DrawTextW(hdc, text, length, &measured, DT_LEFT | DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
+        textHeight = measured.bottom - measured.top;
+        TextC(hdc, text, length, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, state->hot ? C_ON_ACCENT : C_ACCENT_FG);
+        underline.left = textRect.left; underline.right = measured.right; underline.top = (client.bottom + textHeight) / 2 - 1; underline.bottom = underline.top + 1;
+        FillC(hdc, &underline, state->hot ? C_ON_ACCENT : C_ACCENT_FG);
+        if (state->focus) {
+            RECT focusRect = client;
+            InflateRect(&focusRect, -1, -1);
+            DrawFocusRect(hdc, &focusRect);
         }
-        SelectObject(dc, of);
-        EndPaint(h, &ps);
+        SelectObject(hdc, oldFont);
+        EndPaint(hwnd, &ps);
         return 0; }
     }
-    return DefWindowProcW(h, m, w, l);
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-static LRESULT CALLBACK AboutProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    DlgBase *b = DlgFromHwnd(h, m, l);
-    InfoDlg *d = (InfoDlg *)b;
-    LRESULT r;
-    if (!b) return DefWindowProcW(h, m, w, l);
-    switch (m) {
+static LRESULT CALLBACK AboutProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    DlgBase *base = DlgFromHwnd(hwnd, msg, lParam);
+    InfoDlg *dlg = (InfoDlg *)base;
+    LRESULT result;
+    if (!base) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    switch (msg) {
     case WM_CREATE: {
-        HWND c;
-        d->icon = (HICON)LoadImageW(g_hinst, MAKEINTRESOURCEW(1), IMAGE_ICON, S(32), S(32), LR_DEFAULTCOLOR);
-        c = CreateWindowExW(0, L"STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_ICON, S(20), S(20), S(32), S(32), h, NULL, g_hinst, NULL);
-        if (d->icon) SendMessageW(c, STM_SETICON, (WPARAM)d->icon, 0);
-        c = UiLabel(h, L"notepad mint", 68, 18, 290, 20, 0, SS_NOPREFIX);
-        SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUIB, FALSE);
-        UiLabel(h, L"version " APP_VERSION L"  (32-bit)", 68, 40, 290, 16, IDC_DIM, SS_NOPREFIX);
-        DlgFrame(b, 20, 68, 340, 2, BV_ETCHED);
-        UiLabel(h, L"a free replacement for notepad.exe.\nplain text, dark or light, and nothing else:\nno ai, no sign-in, no telemetry, no cloud.", 20, 80, 340, 52, 0, SS_NOPREFIX);
-        UiLabel(h, L"written in c and assembly with no runtime libraries. one small 32-bit exe runs on 32-bit, 64-bit and arm windows.", 20, 138, 340, 34, IDC_DIM, SS_NOPREFIX);
-        UiLabel(h, L"settings: %appdata%\\notepad-mint\\settings.ini", 20, 176, 340, 16, IDC_DIM, SS_NOPREFIX);
-        c = CreateWindowExW(0, L"mp_link", L"yuru.be", WS_CHILD | WS_VISIBLE | WS_TABSTOP, S(20), S(206), S(76), S(20), h, (HMENU)(ULONG_PTR)ID_LINK, g_hinst, NULL);
-        SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
-        b->focus = UiButton(h, L"ok", 272, 204, 88, 24, IDOK, BS_DEFPUSHBUTTON);
+        HWND control;
+        dlg->icon = (HICON)LoadImageW(g_hinst, MAKEINTRESOURCEW(1), IMAGE_ICON, S(32), S(32), LR_DEFAULTCOLOR);
+        control = CreateWindowExW(0, L"STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_ICON, S(20), S(20), S(32), S(32), hwnd, NULL, g_hinst, NULL);
+        if (dlg->icon) SendMessageW(control, STM_SETICON, (WPARAM)dlg->icon, 0);
+        control = UiLabel(hwnd, L"notepad mint", 68, 18, 290, 20, 0, SS_NOPREFIX);
+        SendMessageW(control, WM_SETFONT, (WPARAM)g_fontUIB, FALSE);
+        UiLabel(hwnd, L"version " APP_VERSION L"  (32-bit)", 68, 40, 290, 16, IDC_DIM, SS_NOPREFIX);
+        DlgFrame(base, 20, 68, 340, 2, BV_ETCHED);
+        UiLabel(hwnd, L"a free replacement for notepad.exe.\nplain text, dark or light, and nothing else:\nno ai, no sign-in, no telemetry, no cloud.", 20, 80, 340, 52, 0, SS_NOPREFIX);
+        UiLabel(hwnd, L"written in c and assembly with no runtime libraries. one small 32-bit exe runs on 32-bit, 64-bit and arm windows.", 20, 138, 340, 34, IDC_DIM, SS_NOPREFIX);
+        UiLabel(hwnd, L"settings: %appdata%\\notepad-mint\\settings.ini", 20, 176, 340, 16, IDC_DIM, SS_NOPREFIX);
+        control = CreateWindowExW(0, L"mp_link", L"yuru.be", WS_CHILD | WS_VISIBLE | WS_TABSTOP, S(20), S(206), S(76), S(20), hwnd, (HMENU)(ULONG_PTR)ID_LINK, g_hinst, NULL);
+        SendMessageW(control, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
+        base->focus = UiButton(hwnd, L"ok", 272, 204, 88, 24, IDOK, BS_DEFPUSHBUTTON);
         return 0; }
     case WM_COMMAND:
-        if (LOWORD(w) == IDOK || LOWORD(w) == IDCANCEL) { b->result = 1; b->done = 1; return 0; }
-        if (LOWORD(w) == ID_LINK) { LinkOpen(GetDlgItem(h, ID_LINK)); return 0; }
+        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) { base->result = 1; base->done = 1; return 0; }
+        if (LOWORD(wParam) == ID_LINK) { LinkOpen(GetDlgItem(hwnd, ID_LINK)); return 0; }
         break;
     case WM_NCDESTROY:
-        if (d->icon) { DestroyIcon(d->icon); d->icon = NULL; }
+        if (dlg->icon) { DestroyIcon(dlg->icon); dlg->icon = NULL; }
         break;
     }
-    if (DlgCommon(b, m, w, l, &r)) return r;
-    return DefWindowProcW(h, m, w, l);
+    if (DlgCommon(base, msg, wParam, lParam, &result)) return result;
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 void AboutDlg(HWND owner) {
     static BOOL reg;
-    InfoDlg d;
+    InfoDlg dlg;
     if (!reg) { RegClass(L"mp_about", AboutProc, 0, NULL); RegClass(L"mp_link", LinkProc, 0, NULL); reg = TRUE; }
-    memset(&d, 0, sizeof d);
-    DlgBaseInit(&d.b, owner);
-    if (!DlgOpen(&d.b, L"mp_about", L"about notepad mint", 380, 244, 0)) return;
-    DlgRunModal(&d.b);
+    memset(&dlg, 0, sizeof dlg);
+    DlgBaseInit(&dlg.base, owner);
+    if (!DlgOpen(&dlg.base, L"mp_about", L"about notepad mint", 380, 244, 0)) return;
+    DlgRunModal(&dlg.base);
 }
 
 static const WCHAR g_help[] = L"notepad mint - keyboard shortcuts and tips\r\n"
@@ -227,43 +227,43 @@ static const WCHAR g_help[] = L"notepad mint - keyboard shortcuts and tips\r\n"
 #define HELP_W 560
 #define HELP_H 420
 
-static LRESULT CALLBACK HelpProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    DlgBase *b = DlgFromHwnd(h, m, l);
-    InfoDlg *d = (InfoDlg *)b;
-    LRESULT r;
-    if (!b) return DefWindowProcW(h, m, w, l);
-    switch (m) {
+static LRESULT CALLBACK HelpProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    DlgBase *base = DlgFromHwnd(hwnd, msg, lParam);
+    InfoDlg *dlg = (InfoDlg *)base;
+    LRESULT result;
+    if (!base) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    switch (msg) {
     case WM_CREATE: {
-        RECT tr;
-        d->edit = CreateWindowExW(0, L"EDIT", g_help, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 0, 0, S(HELP_W), S(HELP_H), h, (HMENU)(ULONG_PTR)1001, g_hinst, NULL);
-        SendMessageW(d->edit, WM_SETFONT, (WPARAM)g_fontMenu, FALSE);
-        GetClientRect(d->edit, &tr);
-        InflateRect(&tr, -S(10), -S(8));
-        SendMessageW(d->edit, EM_SETRECTNP, 0, (LPARAM)&tr);
-        DarkScroll(d->edit);
-        b->focus = d->edit;
+        RECT textRect;
+        dlg->edit = CreateWindowExW(0, L"EDIT", g_help, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 0, 0, S(HELP_W), S(HELP_H), hwnd, (HMENU)(ULONG_PTR)1001, g_hinst, NULL);
+        SendMessageW(dlg->edit, WM_SETFONT, (WPARAM)g_fontMenu, FALSE);
+        GetClientRect(dlg->edit, &textRect);
+        InflateRect(&textRect, -S(10), -S(8));
+        SendMessageW(dlg->edit, EM_SETRECTNP, 0, (LPARAM)&textRect);
+        DarkScroll(dlg->edit);
+        base->focus = dlg->edit;
         return 0; }
     case WM_CTLCOLORSTATIC:
-        if ((HWND)l == d->edit) {
-            SetTextColor((HDC)w, C_TEXT);
-            SetBkColor((HDC)w, C_FIELD);
+        if ((HWND)lParam == dlg->edit) {
+            SetTextColor((HDC)wParam, C_TEXT);
+            SetBkColor((HDC)wParam, C_FIELD);
             return (LRESULT)g_brField;
         }
         break;
     case WM_COMMAND:
-        if (LOWORD(w) == IDOK || LOWORD(w) == IDCANCEL) { b->result = 1; b->done = 1; return 0; }
+        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) { base->result = 1; base->done = 1; return 0; }
         break;
     }
-    if (DlgCommon(b, m, w, l, &r)) return r;
-    return DefWindowProcW(h, m, w, l);
+    if (DlgCommon(base, msg, wParam, lParam, &result)) return result;
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 void HelpDlg(HWND owner) {
     static BOOL reg;
-    InfoDlg d;
+    InfoDlg dlg;
     if (!reg) { RegClass(L"mp_help", HelpProc, 0, NULL); reg = TRUE; }
-    memset(&d, 0, sizeof d);
-    DlgBaseInit(&d.b, owner);
-    if (!DlgOpen(&d.b, L"mp_help", L"help topics", HELP_W, HELP_H, 0)) return;
-    DlgRunModal(&d.b);
+    memset(&dlg, 0, sizeof dlg);
+    DlgBaseInit(&dlg.base, owner);
+    if (!DlgOpen(&dlg.base, L"mp_help", L"help topics", HELP_W, HELP_H, 0)) return;
+    DlgRunModal(&dlg.base);
 }
