@@ -1,4 +1,3 @@
-/* find.c - find / replace (one modeless dialog, two modes) and go to line. every search goes through search.c */
 #include "mp.h"
 
 enum { ID_WHAT = 1001, ID_CASE, ID_WRAP, ID_UP, ID_DOWN, ID_WITH, ID_REPLACE, ID_REPLACEALL, ID_WORD };
@@ -9,17 +8,15 @@ typedef struct { DlgBase b; HWND edit; } GotoSt;
 
 static WCHAR  g_findWhat[256], g_findWith[256];
 static int    g_findUp;
-static FindSt g_fd;                         /* the modeless dialog (b.hwnd = NULL while it is closed) */
-static int    g_switching;                  /* recreating it for the other mode: don't hand the focus back */
-static RECT   g_pos;                        /* where it was last: it reopens there */
+static FindSt g_fd;
+static int    g_switching;
+static RECT   g_pos;
 static int    g_havePos;
 
 HWND FindDlgHwnd(void) { return g_fd.b.hwnd; }
 BOOL FindHasText(void) { return g_findWhat[0] != 0; }
 
-/* ------------------------------------------------------------- search -- */
-static void NotFound(HWND owner)
-{
+static void NotFound(HWND owner) {
     WCHAR msg[300];
     wcopy(msg, L"cannot find \"", COUNTOF(msg));
     wcat(msg, g_findWhat, COUNTOF(msg));
@@ -27,9 +24,7 @@ static void NotFound(HWND owner)
     MpNote(owner, APP_NAME, msg);
 }
 
-/* like notepad: move the dialog above (else below) the match when it covers it */
-static void Dodge(HWND dlg, int at)
-{
+static void Dodge(HWND dlg, int at) {
     MONITORINFO mi;
     POINT pt;
     RECT r;
@@ -51,9 +46,7 @@ static void Dodge(HWND dlg, int at)
     SetWindowPos(dlg, NULL, r.left, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-/* down from the end of the selection / up from its start, then once more from the other end (wrap around) */
-static void Search(HWND owner, int up)
-{
+static void Search(HWND owner, int up) {
     DWORD s = 0, e = 0;
     void *hl = NULL;
     int n = 0, m = wlen(g_findWhat), at = -1;
@@ -71,35 +64,28 @@ static void Search(HWND owner, int up)
     Dodge(g_fd.b.hwnd, at);
 }
 
-/* f3 / shift+f3: the remembered text + options, the direction from the key */
-void FindNext(int dirUp)
-{
-    if (!g_findWhat[0]) { FindDlgShow(g_fd.b.hwnd ? g_fd.rep : 0); return; }     /* nothing remembered: ask */
+void FindNext(int dirUp) {
+    if (!g_findWhat[0]) { FindDlgShow(g_fd.b.hwnd ? g_fd.rep : 0); return; }
     Search(g_hwnd, dirUp);
 }
 
-/* the selection is replaced only when it is a match (honouring match case); then find next */
-static void Replace(HWND owner)
-{
+static void Replace(HWND owner) {
     DWORD s = 0, e = 0;
     void *hl = NULL;
     int n = 0, m = wlen(g_findWhat), hit = 0;
     const WCHAR *t;
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
     t = EditLockText(&hl, &n);
-    if (t && (int)(e - s) == m && (int)e <= n)
-        hit = FindInTextEx(t, n, g_findWhat, m, (int)s, 0, g_pf.matchCase, g_pf.wholeWord) == (int)s;
+    if (t && (int)(e - s) == m && (int)e <= n) hit = FindInTextEx(t, n, g_findWhat, m, (int)s, 0, g_pf.matchCase, g_pf.wholeWord) == (int)s;
     EditUnlockText(hl);
     if (hit) {
         SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)g_findWith);
-        if (g_findUp) SendMessageW(g_edit, EM_SETSEL, (WPARAM)s, (LPARAM)s);    /* going up: continue before it */
+        if (g_findUp) SendMessageW(g_edit, EM_SETSEL, (WPARAM)s, (LPARAM)s);
     }
     Search(owner, g_findUp);
 }
 
-/* one pass over the zero-copy view, then the whole text is swapped in one EM_REPLACESEL (= one undo step) */
-static void ReplaceAll(HWND owner)
-{
+static void ReplaceAll(HWND owner) {
     DWORD s = 0, e = 0;
     void *hl = NULL;
     int n = 0, m = wlen(g_findWhat), wn = wlen(g_findWith), len = 0, cnt = 0, k = 0, i, p, caret, found = 0;
@@ -108,11 +94,11 @@ static void ReplaceAll(HWND owner)
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
     t = EditLockText(&hl, &n);
     if (t) {
-        found = FindInTextEx(t, n, g_findWhat, m, 0, 0, g_pf.matchCase, g_pf.wholeWord) >= 0; /* avoid copying the whole text for zero matches */
+        found = FindInTextEx(t, n, g_findWhat, m, 0, 0, g_pf.matchCase, g_pf.wholeWord) >= 0;
         if (found) {
             out = ReplaceAllTextEx(t, n, g_findWhat, m, g_findWith, wn, g_pf.matchCase, g_pf.wholeWord, &len, &cnt);
             if ((int)s > n) s = (DWORD)n;
-            for (i = 0; (p = FindInTextEx(t, n, g_findWhat, m, i, 0, g_pf.matchCase, g_pf.wholeWord)) >= 0 && p + m <= (int)s; i = p + m) k++; /* full document boundaries, matches before the caret */
+            for (i = 0; (p = FindInTextEx(t, n, g_findWhat, m, i, 0, g_pf.matchCase, g_pf.wholeWord)) >= 0 && p + m <= (int)s; i = p + m) k++;
         }
     }
     EditUnlockText(hl);
@@ -121,7 +107,7 @@ static void ReplaceAll(HWND owner)
         return;
     }
     if (!found || !cnt) { mem_free(out); NotFound(owner); return; }
-    caret = (int)s + k * (wn - m);                  /* the caret stays at the same place in the text */
+    caret = (int)s + k * (wn - m);
     if (caret < 0) caret = 0;
     if (caret > len) caret = len;
     SendMessageW(g_edit, EM_SETSEL, 0, (LPARAM)-1);
@@ -131,16 +117,12 @@ static void ReplaceAll(HWND owner)
     SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);
 }
 
-/* ------------------------------------------------------------- dialog -- */
-static void Flag(HWND h, int id, int *v)
-{
+static void Flag(HWND h, int id, int *v) {
     HWND c = GetDlgItem(h, id);
     if (c) *v = SendMessageW(c, BM_GETCHECK, 0, 0) == BST_CHECKED;
 }
 
-/* the dialog's texts and options -> the remembered state (main saves the search options) */
-static void Sync(HWND h)
-{
+static void Sync(HWND h) {
     HWND c;
     if ((c = GetDlgItem(h, ID_WHAT)) != NULL) GetWindowTextW(c, g_findWhat, 256);
     if ((c = GetDlgItem(h, ID_WITH)) != NULL) GetWindowTextW(c, g_findWith, 256);
@@ -150,9 +132,7 @@ static void Sync(HWND h)
     Flag(h, ID_UP, &g_findUp);
 }
 
-/* find next / replace / replace all only while "find what" has text */
-static void Enable(HWND h)
-{
+static void Enable(HWND h) {
     static const int ids[3] = { IDOK, ID_REPLACE, ID_REPLACEALL };
     BOOL on = GetWindowTextLengthW(GetDlgItem(h, ID_WHAT)) > 0;
     int i;
@@ -162,15 +142,12 @@ static void Enable(HWND h)
     }
 }
 
-static void Opt(HWND h, const WCHAR *text, int x, int y, int w, int id, DWORD style, int on)
-{
+static void Opt(HWND h, const WCHAR *text, int x, int y, int w, int id, DWORD style, int on) {
     HWND c = UiButton(h, text, x, y, w, 20, id, style);
     SendMessageW(c, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
-/* etched frame whose caption sits on its top line (the label hides the line behind the text) */
-static void Group(DlgBase *b, const WCHAR *text, int x, int y, int w, int h)
-{
+static void Group(DlgBase *b, const WCHAR *text, int x, int y, int w, int h) {
     HWND c = UiLabel(b->hwnd, text, x + 6, y, 8, 16, 0, SS_CENTER | SS_NOPREFIX);
     HDC dc = GetDC(c);
     HGDIOBJ of = SelectObject(dc, g_fontUI);
@@ -181,8 +158,7 @@ static void Group(DlgBase *b, const WCHAR *text, int x, int y, int w, int h)
     DlgFrame(b, x, y + 8, w, h - 8, BV_ETCHED);
 }
 
-static void FindLayout(DlgBase *b, int rep)
-{
+static void FindLayout(DlgBase *b, int rep) {
     HWND h = b->hwnd, e;
     int dy = rep ? 32 : 0;
     UiLabel(h, L"find what:", 12, 16, 78, 16, 0, SS_NOPREFIX);
@@ -209,11 +185,10 @@ static void FindLayout(DlgBase *b, int rep)
     Enable(h);
 }
 
-static void FindCmd(HWND h, int id, int code)
-{
-    if (id == IDCANCEL) { SendMessageW(h, WM_CLOSE, 0, 0); return; }     /* DlgCommon destroys a modeless dialog */
+static void FindCmd(HWND h, int id, int code) {
+    if (id == IDCANCEL) { SendMessageW(h, WM_CLOSE, 0, 0); return; }
     if ((id == ID_WHAT || id == ID_WITH) && code != EN_CHANGE) return;
-    Sync(h);                                                             /* typed text, checks, radios */
+    Sync(h);
     if (id == ID_WHAT) Enable(h);
     if (!g_findWhat[0]) return;
     if (id == IDOK) Search(h, g_findUp);
@@ -221,12 +196,10 @@ static void FindCmd(HWND h, int id, int code)
     else if (id == ID_REPLACEALL) ReplaceAll(h);
 }
 
-static LRESULT CALLBACK FindProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+static LRESULT CALLBACK FindProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     DlgBase *b = DlgFromHwnd(h, m, l);
     LRESULT r;
     if (!b) return DefWindowProcW(h, m, w, l);
-
     switch (m) {
     case WM_CREATE:
         FindLayout(b, ((FindSt *)b)->rep);
@@ -247,9 +220,7 @@ static LRESULT CALLBACK FindProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-/* the main edit's selection when it is non-empty, single line and <= 255 chars (never the clipboard) */
-static BOOL SelText(WCHAR *out)
-{
+static BOOL SelText(WCHAR *out) {
     DWORD s = 0, e = 0;
     void *hl = NULL;
     int n = 0, len, i = 0;
@@ -267,9 +238,7 @@ static BOOL SelText(WCHAR *out)
     return i == len;
 }
 
-/* put the new (hidden) dialog where the last one was, kept inside that monitor's work area */
-static void PlaceAgain(HWND h)
-{
+static void PlaceAgain(HWND h) {
     MONITORINFO mi;
     POINT pt;
     RECT r;
@@ -289,16 +258,14 @@ static void PlaceAgain(HWND h)
     SetWindowPos(h, NULL, pt.x, pt.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-void FindDlgShow(int replaceMode)
-{
+void FindDlgShow(int replaceMode) {
     static BOOL reg;
     WCHAR sel[256];
     HWND h = g_fd.b.hwnd, e;
     int rep = replaceMode ? 1 : 0, pre;
-
     if (!reg) { RegClass(L"mp_find", FindProc, 0, NULL); reg = TRUE; }
-    if (h && !IsWindowEnabled(h)) return;               /* its "cannot find" box is up */
-    if (h) Sync(h);                                     /* keep what was typed */
+    if (h && !IsWindowEnabled(h)) return;
+    if (h) Sync(h);
     pre = SelText(sel);
     if (pre) wcopy(g_findWhat, sel, 256);
     if (h && g_fd.rep == rep) {
@@ -318,14 +285,11 @@ void FindDlgShow(int replaceMode)
     SendMessageW(e, EM_SETSEL, 0, (LPARAM)-1);
 }
 
-/* -------------------------------------------------------------- go to -- */
-static LRESULT CALLBACK GotoProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+static LRESULT CALLBACK GotoProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     DlgBase *b = DlgFromHwnd(h, m, l);
     GotoSt *d = (GotoSt *)b;
     LRESULT r;
     if (!b) return DefWindowProcW(h, m, w, l);
-
     switch (m) {
     case WM_CREATE: {
         WCHAR num[16];
@@ -359,8 +323,7 @@ static LRESULT CALLBACK GotoProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-void GotoDlg(HWND owner)
-{
+void GotoDlg(HWND owner) {
     static BOOL reg;
     GotoSt d;
     if (!reg) { RegClass(L"mp_goto", GotoProc, 0, NULL); reg = TRUE; }

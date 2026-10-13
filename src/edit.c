@@ -1,10 +1,7 @@
-/* edit.c - native EDIT lifetime, font/zoom, layout, scrollbars and painting.
- * Text commands live in edit_text.c; native caret geometry lives in edit_caret.c.
- * The native control retains its own selection, caret and undo behavior. */
 #include "edit_internal.h"
 
 #define IDC_EDIT 100
-#define SIZE_TIMER 0x4D50                           /* timer id: the re-wrap deferred during a drag */
+#define SIZE_TIMER 0x4D50
 
 HWND g_edit;
 
@@ -12,66 +9,51 @@ static WNDPROC g_orig;
 static HFONT   g_font;
 static HBRUSH  g_brEdit;
 static int     g_wheel;
-static int     g_paintDepth;                    /* nested native paint / print calls may erase; a standalone resize erase must wait */
-static int     g_shiftDir;                      /* ctrl + a shift key is down with nothing else pressed since: 2 = right shift, 1 = left shift (EditProc) */
-static int     g_stubW, g_stubMax;               /* width of a selected line break's block, widest character of the font (see "selected line breaks" below); g_stubW 0 = measure again (the font changed) */
+static int     g_paintDepth;
+static int     g_shiftDir;
+static int     g_stubW, g_stubMax;
 
-/* -------------------------------------------------- scrollbars on demand -- */
-/* a native multiline edit always shows its bars (greyed out when there is nothing to scroll). we want them only when
- * needed, so after anything that can change the content or the room for it we ask the control for the range / page it
- * keeps for each bar and show or hide the bar to match. the check runs from a posted message so the control has finished
- * its own layout first; toggling a bar resizes the client area, which comes back here until nothing changes (it always
- * converges: showing a bar only ever makes the other one more needed, hiding one only ever less). */
 #define WM_BARS (WM_APP + 7)
 static int g_barsPending, g_inBars;
-static int g_revealPending, g_sizeDeferred;      /* only layout changes request a reveal; normal scrollbar polling must not move the view */
+static int g_revealPending, g_sizeDeferred;
 static int g_allowTallReveal, g_revealing, g_tallCaret;
 
-void EditScrollSoon(void)
-{
+void EditScrollSoon(void) {
     if (g_edit && !g_barsPending && !g_inBars) { g_barsPending = 1; PostMessageW(g_edit, WM_BARS, 0, 0); }
 }
 
-/* NB: once a bar is hidden (ShowScrollBar clears its WS_xSCROLL style) the control stops maintaining the range it keeps for it,
- * so a hidden bar can't be asked. vertical: exact from the line count vs the lines that fit (works with the bar hidden).
- * horizontal: show the bar for a moment (redraw off, nothing flickers) so the control reports its range, then hide it again if unneeded. */
-static int LineHeight(void)
-{
-    HDC dc = GetDC(g_edit);
+static int LineHeight(void) {
+    static int lh;
+    static HFONT lf;
+    HDC dc;
     HGDIOBJ of;
     TEXTMETRICW tm;
+    if (lh && lf == g_font) return lh;
+    dc = GetDC(g_edit);
     if (!dc) return 1;
     memset(&tm, 0, sizeof tm);
     of = SelectObject(dc, g_font);
     GetTextMetricsW(dc, &tm);
     SelectObject(dc, of);
     ReleaseDC(g_edit, dc);
-    return tm.tmHeight + tm.tmExternalLeading > 0 ? tm.tmHeight + tm.tmExternalLeading : 1;
+    lf = g_font;
+    return lh = tm.tmHeight + tm.tmExternalLeading > 0 ? tm.tmHeight + tm.tmExternalLeading : 1;
 }
 
-/* Native layout messages can re-enter the subclass. Keep their intermediate
- * caret positions private until geometry and the active-end hint are final. */
-static void FitTallCaret(HWND h)
-{
-    int wasRevealing;
+static void FitTallCaret(HWND h) {
     if (!g_allowTallReveal || g_inBars || g_revealing) return;
-    wasRevealing = g_revealing;
     g_revealing = 1;
     EditCaretFit(h, g_font, g_orig, &g_tallCaret);
-    g_revealing = wasRevealing;
+    g_revealing = 0;
 }
 
-static void RevealCaret(HWND h)
-{
+static void RevealCaret(HWND h) {
     if (g_revealPending && !g_inBars && !g_sizeDeferred) {
         SendMessageW(h, EM_SCROLLCARET, 0, 0);
     }
-    /* Native scrolling preserves the active end of a backward selection. Setting
-     * the selection ourselves would change where the next Shift+arrow extends it. */
 }
 
-static int VNeeded(void)
-{
+static int VNeeded(void) {
     RECT r;
     int lines = (int)SendMessageW(g_edit, EM_GETLINECOUNT, 0, 0), vis;
     SendMessageW(g_edit, EM_GETRECT, 0, (LPARAM)&r);
@@ -80,8 +62,7 @@ static int VNeeded(void)
     return lines > vis;
 }
 
-static int HNeeded(void)                          /* only meaningful while the bar exists */
-{
+static int HNeeded(void) {
     SCROLLINFO si;
     memset(&si, 0, sizeof si);
     si.cbSize = sizeof si;
@@ -93,32 +74,30 @@ static int HNeeded(void)                          /* only meaningful while the b
 
 #define BARS(e) (GetWindowLongPtrW(e, GWL_STYLE) & (WS_VSCROLL | WS_HSCROLL))
 
-static void UpdateBars(void)
-{
+static void UpdateBars(void) {
     int pass;
     LONG_PTR before;
     if (!g_edit) return;
     before = BARS(g_edit);
-    g_inBars = 1;                                 /* our own show / hide resizes the edit: that must not schedule another check
-                                                     (an endless posted-message loop would starve WM_PAINT) */
+    g_inBars = 1;
     SendMessageW(g_edit, WM_SETREDRAW, FALSE, 0);
-    for (pass = 0; pass < 4; pass++) {            /* toggling one bar can change the other one's need: repeat until stable */
+    for (pass = 0; pass < 4; pass++) {
         int changed = 0, v = VNeeded(), hadV = (GetWindowLongPtrW(g_edit, GWL_STYLE) & WS_VSCROLL) != 0;
         if (v != hadV) {
-            if (!v) {                             /* going away: make sure nothing is left scrolled out of view */
+            if (!v) {
                 int first = (int)SendMessageW(g_edit, EM_GETFIRSTVISIBLELINE, 0, 0);
                 if (first) SendMessageW(g_edit, EM_LINESCROLL, 0, (LPARAM)-first);
             }
             ShowScrollBar(g_edit, SB_VERT, v);
             changed = 1;
         }
-        if (!g_pf.wrap) {                         /* (a wrapping edit has no horizontal bar at all) */
+        if (!g_pf.wrap) {
             int hadH = (GetWindowLongPtrW(g_edit, GWL_STYLE) & WS_HSCROLL) != 0, h;
             if (!hadH) ShowScrollBar(g_edit, SB_HORZ, TRUE);
             h = HNeeded();
             DBG(L"bars pass v/h", v, h);
             if (!h) {
-                SendMessageW(g_edit, EM_LINESCROLL, (WPARAM)-100000, 0);       /* back to column 0 */
+                SendMessageW(g_edit, EM_LINESCROLL, (WPARAM)-100000, 0);
                 ShowScrollBar(g_edit, SB_HORZ, FALSE);
             }
             if (h != hadH) changed = 1;
@@ -126,23 +105,20 @@ static void UpdateBars(void)
         if (!changed) break;
     }
     SendMessageW(g_edit, WM_SETREDRAW, TRUE, 0);
-    if (BARS(g_edit) != before) RedrawWindow(g_edit, NULL, NULL, RDW_INVALIDATE | RDW_FRAME);   /* only when a bar really came or went */
+    if (BARS(g_edit) != before) RedrawWindow(g_edit, NULL, NULL, RDW_INVALIDATE | RDW_FRAME);
     g_inBars = 0;
-    RevealCaret(g_edit);                          /* a newly shown bar may have clipped the caret after the first reveal */
+    RevealCaret(g_edit);
     if (!g_sizeDeferred) g_revealPending = 0;
-    SbarSync(g_edit);                             /* the classic bars over the native ones show / hide with them */
+    SbarSync(g_edit);
 }
 
-/* ---------------------------------------------------- font / colors / zoom - */
-static int CALLBACK FoundCb(const void *lf, const void *tm, DWORD type, LPARAM lp)
-{
+static int CALLBACK FoundCb(const void *lf, const void *tm, DWORD type, LPARAM lp) {
     (void)lf; (void)tm; (void)type;
     *(int *)lp = 1;
     return 0;
 }
 
-static BOOL FontInstalled(const WCHAR *face)
-{
+static BOOL FontInstalled(const WCHAR *face) {
     LOGFONTW lf;
     int found = 0;
     HDC dc = GetDC(NULL);
@@ -154,8 +130,7 @@ static BOOL FontInstalled(const WCHAR *face)
     return found != 0;
 }
 
-void FontResolve(WCHAR *face)
-{
+void FontResolve(WCHAR *face) {
     static const WCHAR *const fb[] = { L"Consolas", L"Lucida Console", L"Courier New" };
     int i;
     if (face[0] && FontInstalled(face)) return;
@@ -165,24 +140,7 @@ void FontResolve(WCHAR *face)
     wcopy(face, L"Courier New", 32);
 }
 
-/* ----------------------------------------------------------------- caret -- */
-/* the stock edit draws the selection in the system highlight colour, and its own caret stays too: an inverting rectangle, so it comes out
- * pure white on the dark theme's black editor and pure black on the light theme's white one (nothing here creates a caret of its own) */
-
-/* the space around the text (no frame): the formatting rectangle, shrunk from the client area by EDIT_PAD on the left and bottom and by
- * EDIT_PAD_TOP on the top (a rectangle set with EM_SETRECT replaces the margins, so the left / right ones are part of it; EM_SETMARGINS keeps
- * them for whatever the control redoes by itself). the control resets that rectangle to the client area on every size change, so this runs
- * after those too.
- * it is a margin, not a padding: the control clips its text at that rectangle, so text that is scrolled out of the rectangle would stop short of the
- * edge of the editor and leave a blank frame. the blank strips at the left and at the top (and the band at the bottom) are therefore painted by BandDraw
- * (the rows that reach into them are drawn there), and with word wrap off the rectangle runs to the right edge of the client area. (a wrapped text, and a
- * right to left editor, keep the space on the right: nothing is ever scrolled out sideways there) */
-BOOL EditIsRtl(void);
-
-/* the part of the client area that can be seen. the window overhangs the visible area by SBAR_TRIM at the bottom and on the side of the vertical
- * scrollbar (the right; the left in a right to left editor, see EditArea in main.c): a shown bar fills that part, without one it is client area out of sight */
-void EditViewRect(HWND h, RECT *r)
-{
+void EditViewRect(HWND h, RECT *r) {
     LONG_PTR st = GetWindowLongPtrW(h, GWL_STYLE);
     GetClientRect(h, r);
     if (!(st & WS_VSCROLL)) {
@@ -192,8 +150,7 @@ void EditViewRect(HWND h, RECT *r)
     if (!(st & WS_HSCROLL)) r->bottom -= S(SBAR_TRIM);
 }
 
-static void EditPad2(HWND h, int margins)
-{
+static void EditPad2(HWND h, int margins) {
     RECT r;
     int pad = S(EDIT_PAD), top = S(EDIT_PAD_TOP), height = LineHeight(), visibleBottom;
     if (margins) SendMessageW(h, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(pad, pad));
@@ -207,24 +164,17 @@ static void EditPad2(HWND h, int margins)
     if (r.right <= r.left) r.right = r.left + 1;
     if (r.bottom <= r.top) r.bottom = r.top + 1;
     if (r.bottom - r.top < height) {
-        r.top = 0;                              /* give up vertical padding before giving up any of the visible row */
+        r.top = 0;
         r.bottom = visibleBottom > height ? visibleBottom : height;
-        /* EDIT hides its native caret at (-20000,-20000) when no complete row
-         * fits its formatting rectangle. Reserve one row even if the viewport
-         * can only show its top; the editing position stays on screen. */
     }
-    SendMessageW(h, EM_SETRECTNP, 0, (LPARAM)&r);   /* tiny viewports must replace the previous, larger rectangle too */
+    SendMessageW(h, EM_SETRECTNP, 0, (LPARAM)&r);
 }
 
 static void EditPad(HWND h) { EditPad2(h, 1); }
 
-/* the tab size (format > tab size): a tab stop every g_pf.tab average characters. EM_SETTABSTOPS counts in dialog units, a quarter of the font's average
- * character width, so 4 units per column; g_tabPx is the same distance in pixels, for the rows edit.c draws itself (TabbedTextOutW). the control
- * measures its text with the font it has, so this runs after every font change too */
 static int g_tabPx;
 
-void EditApplyTabs(void)
-{
+void EditApplyTabs(void) {
     HDC dc;
     HGDIOBJ of;
     TEXTMETRICW tm;
@@ -233,7 +183,7 @@ void EditApplyTabs(void)
     g_allowTallReveal = 1;
     EditCaretInvalidate();
     KillTimer(g_edit, SIZE_TIMER);
-    g_sizeDeferred = 0;                           /* a font/tab change already needs a fresh wrap, so finish any deferred resize with it */
+    g_sizeDeferred = 0;
     dc = GetDC(g_edit);
     of = SelectObject(dc, g_font);
     GetTextMetricsW(dc, &tm);
@@ -241,15 +191,14 @@ void EditApplyTabs(void)
     ReleaseDC(g_edit, dc);
     g_tabPx = g_pf.tab * tm.tmAveCharWidth;
     SendMessageW(g_edit, EM_SETTABSTOPS, 1, (LPARAM)&u);
-    EditPad(g_edit);                                /* (a wrapped text breaks its rows again with the new tabs) */
+    EditPad(g_edit);
     g_revealPending = 1;
     RevealCaret(g_edit);
     InvalidateRect(g_edit, NULL, TRUE);
     EditScrollSoon();
 }
 
-void EditApplyFont(void)
-{
+void EditApplyFont(void) {
     LOGFONTW lf;
     HFONT nf, old = g_font;
     int px = MulDiv(g_pf.cur, g_dpi, 720);
@@ -258,7 +207,7 @@ void EditApplyFont(void)
     lf.lfHeight = -px;
     lf.lfWeight = g_pf.bold ? FW_BOLD : FW_NORMAL;
     lf.lfItalic = (BYTE)(g_pf.italic ? 1 : 0);
-    lf.lfCharSet = DEFAULT_CHARSET;                 /* (ANSI_CHARSET would draw '\' as a yen sign in segoe ui / arial on a japanese system) */
+    lf.lfCharSet = DEFAULT_CHARSET;
     lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
     lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
     lf.lfQuality = CLEARTYPE_QUALITY;
@@ -266,38 +215,32 @@ void EditApplyFont(void)
     wcopy(lf.lfFaceName, g_pf.font, 32);
     nf = CreateFontIndirectW(&lf);
     if (!nf) return;
-    if (g_edit) EditCaretRemember(g_edit, g_font);   /* retain selection orientation and native EOF advance before font layout can hide the caret */
+    if (g_edit) EditCaretRemember(g_edit, g_font);
     g_font = nf;
-    g_stubW = 0;                                    /* (the width of a selected line break's block follows the font) */
+    g_stubW = 0;
     if (g_edit) {
         SendMessageW(g_edit, WM_SETFONT, (WPARAM)nf, TRUE);
-        EditApplyTabs();                            /* (the tab size is in units of this font's width; it also pads) */
-        EditScrollSoon();
+        EditApplyTabs();
     }
     if (old) DeleteObject(old);
 }
 
-HBRUSH EditBrush(void)
-{
+HBRUSH EditBrush(void) {
     if (!g_brEdit) g_brEdit = CreateSolidBrush(C_EDIT_BG);
     return g_brEdit;
 }
 
-void EditApplyColors(void)
-{
+void EditApplyColors(void) {
     HBRUSH old = g_brEdit;
     g_brEdit = CreateSolidBrush(C_EDIT_BG);
     if (g_edit) InvalidateRect(g_edit, NULL, TRUE);
     if (old) DeleteObject(old);
 }
 
-/* ctrl+plus / ctrl+minus / ctrl+wheel change the font size itself (not a percentage): one step along this ladder.
- * 1pt steps while text is small, bigger jumps further up. the ladder is 8..48: a size typed in the font dialog may be 7..100 pt, and ctrl+minus takes it down to the next ladder step */
 static const int g_ladder[] = { 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 220, 240, 260, 280, 300, 320, 340, 360,
-                                400, 440, 480 };     /* tenths of a point */
+                                400, 440, 480 };
 
-static int Ladder(int cur, int dir)            /* the next size in that direction, or cur if there is none */
-{
+static int Ladder(int cur, int dir) {
     int i;
     if (dir > 0) {
         for (i = 0; i < COUNTOF(g_ladder); i++) if (g_ladder[i] > cur) return g_ladder[i];
@@ -307,13 +250,11 @@ static int Ladder(int cur, int dir)            /* the next size in that directio
     return cur;
 }
 
-BOOL EditZoomCan(int dir)
-{
+BOOL EditZoomCan(int dir) {
     return Ladder(g_pf.cur, dir) != g_pf.cur;
 }
 
-void EditZoomStep(int dir)
-{
+void EditZoomStep(int dir) {
     int n = Ladder(g_pf.cur, dir);
     if (n == g_pf.cur) return;
     g_pf.cur = n;
@@ -321,38 +262,30 @@ void EditZoomStep(int dir)
     AppUpdateStatus();
 }
 
-void EditZoomReset(void)                       /* ctrl+0: the size picked in the font dialog (or the default) */
-{
+void EditZoomReset(void) {
     if (g_pf.cur == g_pf.pt) return;
     g_pf.cur = g_pf.pt;
     EditApplyFont();
     AppUpdateStatus();
 }
 
-/* -------------------------------------------------------------- rtl ------- */
-/* right to left reading order: the paragraph direction of the whole editor (text right aligned, the vertical scrollbar on the left). the stock
- * control takes it from these extended styles when they change. main.c picks it from the first strong letter of the text (EditStrongDir)
- * until the user sets it (the context menu, ctrl+right shift / ctrl+left shift) */
 #define RTL_BITS (WS_EX_RTLREADING | WS_EX_RIGHT | WS_EX_LEFTSCROLLBAR)
 
 static void StubSync(HWND h);
 static void BandSync(HWND h);
 
-BOOL EditIsRtl(void)
-{
+BOOL EditIsRtl(void) {
     return (GetWindowLongPtrW(g_edit, GWL_EXSTYLE) & WS_EX_RTLREADING) != 0;
 }
 
-/* FALSE when it already was that way. the caller moves the window afterwards: its overhang changes sides with the scrollbar (EditArea) */
-BOOL EditSetRtl(BOOL rtl)
-{
+BOOL EditSetRtl(BOOL rtl) {
     LONG_PTR ex;
     if (!g_edit || !rtl == !EditIsRtl()) return FALSE;
     ex = GetWindowLongPtrW(g_edit, GWL_EXSTYLE);
     EditCaretInvalidate();
     SetWindowLongPtrW(g_edit, GWL_EXSTYLE, rtl ? (ex | RTL_BITS) : (ex & ~(LONG_PTR)RTL_BITS));
     SetWindowPos(g_edit, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    EditPad(g_edit);                                /* (the padded rectangle keeps its space on the other side now) */
+    EditPad(g_edit);
     g_revealPending = 1;
     RevealCaret(g_edit);
     InvalidateRect(g_edit, NULL, TRUE);
@@ -364,10 +297,7 @@ BOOL EditSetRtl(BOOL rtl)
 
 void EditDirKeyCancel(void) { g_shiftDir = 0; }
 
-/* the direction of the first letter that has one (2 = right to left: hebrew, arabic, syriac, thaana ...; 1 = left to right), 0 when the first
- * `limit` characters have none (digits, spaces, punctuation and symbols are neutral). bounded: it runs on every change while the direction is automatic */
-int EditStrongDir(int limit)
-{
+int EditStrongDir(int limit) {
     void *lock;
     const WCHAR *t;
     WORD ty[64];
@@ -377,58 +307,41 @@ int EditStrongDir(int limit)
     if (n > limit) n = limit;
     for (i = 0; i < n && !dir; i += k) {
         k = n - i < COUNTOF(ty) ? n - i : COUNTOF(ty);
-        if (!GetStringTypeW(2, t + i, k, ty)) break;    /* CT_CTYPE2: C2_LEFTTORIGHT 1, C2_RIGHTTOLEFT 2 */
-        for (j = 0; j < k; j++)
-            if (ty[j] == 1 || ty[j] == 2) { dir = ty[j]; break; }
+        if (!GetStringTypeW(2, t + i, k, ty)) break;
+        for (j = 0; j < k; j++) if (ty[j] == 1 || ty[j] == 2) { dir = ty[j]; break; }
     }
     EditUnlockText(lock);
     return dir;
 }
 
-/* ------------------------------------------------- selected line breaks ---- */
-/* the stock control highlights the characters of a selection and nothing else, so a selected line break (CR LF) leaves no trace: an empty line
- * inside a selection looks unselected and the end of a selected line looks like the selection stops there. like other editors we draw a block
- * (the width of a space, a full row high, in the selection colour) at the end of the text of every row whose hard line break is selected.
- * a soft wrap (word wrap on) is not a line break: no block there, and none after the last line.
- *
- * the control paints a changed selection straight onto its window, not through WM_PAINT (painting over it in WM_PAINT flickered once, see NOTES), so
- * the blocks are drawn straight onto the window too: right after the control has handled a message that can change what it shows (StubSync)
- * and after each paint of its own (WM_PAINT, WM_PRINTCLIENT). a block that has to go is never painted over: its spot is invalidated and
- * updated, so the control repaints that spot itself (whatever it holds is then drawn exactly as the control draws it). */
 #define STUB_MAX 512
 #ifdef SHOTDC
-static int g_shotWiped, g_shotKept;                 /* probe builds: blocks that were found wiped by the control / blocks that stayed, over the syncs so far */
+static int g_shotWiped, g_shotKept;
 #endif
 
 typedef struct StubGeom {
-    RECT fr;                                        /* the formatting rectangle (client coordinates) */
-    int  first, total;                              /* first visible row, rows in all (a wrapped line is several rows) */
-    int  y0, pitch, hoff;                           /* client y of the first visible row, the row height, pixels the text is scrolled sideways (0 when right to left) */
-    int  w;                                         /* the width of a block */
-    int  maxRow;                                    /* rows longer than this (characters) are skipped: EM_POSFROMCHAR packs x into 16 bits, a position that far out would wrap around
-                                                       into view (the horizontal scroll range stops far short of such an end anyway) */
+    RECT fr;
+    int  first, total;
+    int  y0, pitch, hoff;
+    int  w;
+    int  maxRow;
 } StubGeom;
 
-/* one block: the row, the client position of the end of the row's text (where the next character would go) and which way the block grows from there
- * (+1 right, -1 left: right to left text, and an empty row in a right to left editor, end at the right margin and grow towards the middle) */
 typedef struct Stub { int row, x, y, dir; } Stub;
 
-static struct { int n, row[STUB_MAX], xd[STUB_MAX], dir[STUB_MAX]; } g_stub;     /* what the last sync drew; xd = x in text space (x - left edge + scroll) */
+static struct { int n, row[STUB_MAX], xd[STUB_MAX], dir[STUB_MAX]; } g_stub;
 
-static LRESULT Ctl(HWND h, UINT m, WPARAM w, LPARAM l)   /* straight to the stock control: none of our own bookkeeping (the scrollbar overlays poll on every EM_*) */
-{
+static LRESULT Ctl(HWND h, UINT m, WPARAM w, LPARAM l) {
     return CallWindowProcW(g_orig, h, m, w, l);
 }
 
-static int StubHasSel(HWND h)
-{
+static int StubHasSel(HWND h) {
     DWORD s = 0, e = 0;
     Ctl(h, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
     return e > s;
 }
 
-static void StubMetrics(HWND h)                     /* g_stubW = a space of the editor font, g_stubMax = its widest character */
-{
+static void StubMetrics(HWND h) {
     HDC dc = GetDC(h);
     SIZE sz;
     TEXTMETRICW tm;
@@ -445,9 +358,7 @@ static void StubMetrics(HWND h)                     /* g_stubW = a space of the 
     g_stubMax = tm.tmMaxCharWidth > g_stubW ? (int)tm.tmMaxCharWidth : g_stubW;
 }
 
-/* where the rows are: FALSE when no visible row can have a line break after it */
-static int StubGeomGet(HWND h, StubGeom *g)
-{
+static int StubGeomGet(HWND h, StubGeom *g) {
     int s0, s1;
     LRESULT p0, p1;
     Ctl(h, EM_GETRECT, 0, (LPARAM)&g->fr);
@@ -469,29 +380,25 @@ static int StubGeomGet(HWND h, StubGeom *g)
     return 1;
 }
 
-static void StubRect(RECT *r, const StubGeom *g, int x, int y, int dir)
-{
+static void StubRect(RECT *r, const StubGeom *g, int x, int y, int dir) {
     r->left = dir > 0 ? x : x - g->w;
     r->right = dir > 0 ? x + g->w : x;
     r->top = y;
     r->bottom = y + g->pitch;
 }
 
-/* the visible rows whose hard line break (CR LF at the end of the row) is inside the selection, top to bottom */
-static int StubList(HWND h, const StubGeom *g, Stub *out, int cap)
-{
+static int StubList(HWND h, const StubGeom *g, Stub *out, int cap) {
     DWORD s = 0, e = 0;
     HLOCAL hl;
     const WCHAR *t;
     int n = 0, r, last, cur, nxt, rtl = EditIsRtl();
-
     Ctl(h, EM_GETSEL, (WPARAM)&s, (LPARAM)&e);
     if (e <= s) return 0;
     hl = (HLOCAL)Ctl(h, EM_GETHANDLE, 0, 0);
     t = hl ? (const WCHAR *)LocalLock(hl) : NULL;
     if (!t) return 0;
-    last = g->first + (g->fr.bottom - g->fr.top + g->pitch - 1) / g->pitch - 1;      /* the last row that is (partly) in view */
-    if (last > g->total - 2) last = g->total - 2;                                     /* (the final row has no break after it) */
+    last = g->first + (g->fr.bottom - g->fr.top + g->pitch - 1) / g->pitch - 1;
+    if (last > g->total - 2) last = g->total - 2;
     cur = (int)Ctl(h, EM_LINEINDEX, (WPARAM)g->first, 0);
     for (r = g->first; r <= last && n < cap; r++) {
         int b;
@@ -499,12 +406,12 @@ static int StubList(HWND h, const StubGeom *g, Stub *out, int cap)
         if (nxt < 2) break;
         b = nxt - 2;
         if (b >= cur && b - cur <= g->maxRow && t[b] == '\r' && t[b + 1] == '\n' && (int)s <= b && (int)e > b) {
-            LRESULT p = Ctl(h, EM_POSFROMCHAR, (WPARAM)b, 0);      /* the break's own position = the end of the row's text */
+            LRESULT p = Ctl(h, EM_POSFROMCHAR, (WPARAM)b, 0);
             out[n].row = r;
             out[n].x = (short)LOWORD(p);
             out[n].y = (short)HIWORD(p);
             out[n].dir = 1;
-            if (rtl) {                                              /* the row's end is left of (or at) its start: the text runs right to left */
+            if (rtl) {
                 LRESULT q = Ctl(h, EM_POSFROMCHAR, (WPARAM)cur, 0);
                 if (out[n].x <= (short)LOWORD(q)) out[n].dir = -1;
             }
@@ -516,16 +423,12 @@ static int StubList(HWND h, const StubGeom *g, Stub *out, int cap)
     return n;
 }
 
-/* the blocks, onto `dc` (a DC given by a print request) or straight onto the window (the caret is taken away for the moment: it is drawn by
- * inverting, so a block painted under it would leave the next blink inverting the wrong pixels). clip = only what touches this rectangle */
-static void StubDrawAll(HWND h, HDC dc, const StubGeom *g, const Stub *s, int n, const RECT *clip)
-{
-    HBRUSH br = CreateSolidBrush(GetSysColor(COLOR_HIGHLIGHT));
+static void StubDrawAll(HWND h, HDC dc, const StubGeom *g, const Stub *s, int n, const RECT *clip) {
     int i, hid = 0;
     HDC own = NULL;
     if (!dc) {
         own = dc = GetDC(h);
-        if (!dc) { DeleteObject(br); return; }
+        if (!dc) return;
         hid = GetFocus() == h && HideCaret(h);
     }
     for (i = 0; i < n; i++) {
@@ -533,16 +436,13 @@ static void StubDrawAll(HWND h, HDC dc, const StubGeom *g, const Stub *s, int n,
         StubRect(&r, g, s[i].x, s[i].y, s[i].dir);
         if (!IntersectRect(&r, &r, &g->fr)) continue;
         if (clip && !IntersectRect(&r, &r, clip)) continue;
-        FillRect(dc, &r, br);
+        FillRect(dc, &r, (HBRUSH)(COLOR_HIGHLIGHT + 1));
     }
     if (hid) ShowCaret(h);
     if (own) ReleaseDC(h, own);
-    DeleteObject(br);
 }
 
-/* the control has painted (or was asked to paint into `dc`): put the blocks on top of what it drew */
-static void StubPaint(HWND h, HDC dc, const RECT *clip)
-{
+static void StubPaint(HWND h, HDC dc, const RECT *clip) {
     StubGeom g;
     Stub cur[STUB_MAX];
     int n;
@@ -551,25 +451,22 @@ static void StubPaint(HWND h, HDC dc, const RECT *clip)
     if (n) StubDrawAll(h, dc, &g, cur, n, clip);
 }
 
-/* the control has handled a message that can change the selection or what is on screen: bring the blocks up to date */
-static void StubSync(HWND h)
-{
+static void StubSync(HWND h) {
     StubGeom g;
     Stub cur[STUB_MAX];
     int n = 0, i, j, any = 0, vis;
-
-    if (h != g_edit || !(GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) return;      /* (not while redraw is off: that clears WS_VISIBLE) */
-    if (!StubHasSel(h) && !g_stub.n) return;                                           /* nothing selected, nothing drawn: the usual case */
+    if (h != g_edit || !(GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) return;
+    if (!StubHasSel(h) && !g_stub.n) return;
     if (!StubGeomGet(h, &g)) { g_stub.n = 0; return; }
     n = StubList(h, &g, cur, STUB_MAX);
     vis = (g.fr.bottom - g.fr.top + g.pitch - 1) / g.pitch;
-    for (i = 0, j = 0; i < g_stub.n; i++) {                                            /* blocks that were drawn and are not wanted any more */
+    for (i = 0, j = 0; i < g_stub.n; i++) {
         int row = g_stub.row[i];
         RECT r;
         while (j < n && cur[j].row < row) j++;
         if (j < n && cur[j].row == row && cur[j].dir == g_stub.dir[i] && cur[j].x - g.fr.left + g.hoff == g_stub.xd[i]) {
 #ifdef SHOTDC
-            HDC pdc = GetDC(h);                                                        /* probe: did the control wipe a block that stays? (counted, read with WM_APP + 91) */
+            HDC pdc = GetDC(h);
             if (pdc) {
                 int px = cur[j].dir > 0 ? cur[j].x + 2 : cur[j].x - 3, py = cur[j].y + g.pitch / 2;
                 if (px < g.fr.right && GetPixel(pdc, px, py) != GetSysColor(COLOR_HIGHLIGHT)) g_shotWiped++;
@@ -579,66 +476,47 @@ static void StubSync(HWND h)
 #endif
             continue;
         }
-        if (row < g.first || row >= g.first + vis) continue;                           /* out of view */
+        if (row < g.first || row >= g.first + vis) continue;
         StubRect(&r, &g, g.fr.left - g.hoff + g_stub.xd[i], g.y0 + (row - g.first) * g.pitch, g_stub.dir[i]);
         if (IntersectRect(&r, &r, &g.fr)) { InvalidateRect(h, &r, TRUE); any = 1; }
     }
-    if (any) UpdateWindow(h);                                                          /* (the control paints those spots now) */
+    if (any) UpdateWindow(h);
     if (n) StubDrawAll(h, NULL, &g, cur, n, NULL);
     g_stub.n = n;
     for (i = 0; i < n; i++) { g_stub.row[i] = cur[i].row; g_stub.xd[i] = cur[i].x - g.fr.left + g.hoff; g_stub.dir[i] = cur[i].dir; }
 }
 
-static int StubWatch(UINT m, WPARAM w)              /* messages after which the blocks may be out of date (the queries are not: they come by the dozen) */
-{
+static int StubWatch(UINT m, WPARAM w) {
     switch (m) {
     case WM_KEYDOWN: case WM_KEYUP: case WM_CHAR:
     case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK: case WM_TIMER:
     case WM_SETFOCUS: case WM_KILLFOCUS:
     case WM_CUT: case WM_PASTE: case WM_CLEAR: case WM_UNDO:
     case WM_MOUSEWHEEL: case WM_VSCROLL: case WM_HSCROLL:
-    case WM_SIZE: case WM_SETFONT: case WM_SETTEXT:
+    case WM_SETFONT: case WM_SETTEXT:
     case EM_SETSEL: case EM_SETRECTNP: case EM_SCROLL: case EM_LINESCROLL: case EM_SCROLLCARET: case EM_REPLACESEL: case EM_UNDO: case EM_SETMARGINS:
         return 1;
-    case WM_IME_COMPOSITION: case WM_IME_CHAR: case WM_IME_ENDCOMPOSITION:                /* (text typed through an input method) */
+    case WM_IME_COMPOSITION: case WM_IME_CHAR: case WM_IME_ENDCOMPOSITION:
         return 1;
     case WM_MOUSEMOVE:
-        return (w & 1) != 0;                        /* dragging a selection */
+        return (w & 1) != 0;
     }
     return 0;
 }
 
-/* ------------------------------------------------ partly visible rows ----- */
-/* the stock control draws whole rows only, and rounds its formatting rectangle down to whole rows: below the last whole row is a band (the bottom
- * padding and what is left of the height, a row and a bit at most) where the next row is cut off by blankness instead of by the edge of the editor.
- * like other editors we draw the rows that are partly in view there ourselves, clipped at the bottom of the editor (EDIT_BAND_INSET). what the control
- * counts as in view stays the whole rows: its scroll ranges, its page size and EM_SCROLLCARET are the stock ones.
- *
- * the band is painted in one go: into a bitmap, then one blit over what is there (EditProc keeps the control from erasing it: there is never a moment
- * with just the background in it). it is painted after each paint of the control's own (WM_PAINT, WM_PRINTCLIENT) and right after a message that can
- * change what it shows (BandSync: the control's scrolling only moves the pixels of its formatting rectangle, and the text under the band moves too).
- *
- * the text is drawn with TabbedTextOutW, which is what the control uses for text (same font, the default tab stops, the same language pack for shaped
- * scripts), in up to three pieces (before / inside / after the selection), pixel for pixel like the control (tests\ui T25). what is NOT drawn, and stays
- * blank: a right to left editor's band; rows of arabic / hebrew presentation forms, and rows with right to left letters
- * or bidi marks while any of the row is selected (BandKind); rows too wide for the 16 bits a text width has (like for the blocks above). */
-#define BAND_SEL_EXTRA 1                            /* the control's highlight is this many pixels wider than the text it covers */
+#define BAND_SEL_EXTRA 1
 
 typedef struct BandGeom {
-    RECT fr, band;                                  /* the formatting rectangle (whole rows), the strip below it that is ours */
-    RECT top, left;                                 /* the strips above and to the left of it that are ours too (the space around the text is a margin: text scrolled out of the rectangle runs into them) */
-    int  first, total, rows;                        /* first visible row, rows in all, whole rows in view */
-    int  y0, x0, pitch;                             /* client y of the first visible row, client x where a row starts (scrolled sideways: left of the rectangle), row height */
-    int  text;                                      /* 1 = rows below the last whole one exist and can be placed (else only the blank band is kept) */
-    int  topText;                                   /* 1 = the row above the first whole one exists and reaches into the top strip */
-    int  leftText;                                  /* 1 = the text is scrolled sideways: the rows reach into the left strip */
+    RECT fr, band;
+    RECT top, left;
+    int  first, total, rows;
+    int  y0, x0, pitch;
+    int  text;
+    int  topText;
+    int  leftText;
 } BandGeom;
 
-/* the strips around the formatting rectangle (g->fr, g->band, g->top, g->left; they tile the client area together with it, the one on the right
- * exists only for a wrapped text and has nothing in it): FALSE when none of it is ours (no room, or a right to left editor: it stays what the
- * control makes of it) */
-static int BandRect(HWND h, BandGeom *g)
-{
+static int BandRect(HWND h, BandGeom *g) {
     RECT cr, f;
     if (EditIsRtl()) return 0;
     GetClientRect(h, &cr);
@@ -655,11 +533,9 @@ static int BandRect(HWND h, BandGeom *g)
     return g->band.bottom > g->band.top && g->band.right > g->band.left;
 }
 
-static int BandGeomGet(HWND h, BandGeom *g)
-{
+static int BandGeomGet(HWND h, BandGeom *g) {
     int s0, s1;
     LRESULT p0, p1;
-
     memset(g, 0, sizeof *g);
     if (!BandRect(h, g)) return 0;
     g->total = (int)Ctl(h, EM_GETLINECOUNT, 0, 0);
@@ -669,53 +545,41 @@ static int BandGeomGet(HWND h, BandGeom *g)
     s1 = g->first + 1 < g->total ? (int)Ctl(h, EM_LINEINDEX, (WPARAM)(g->first + 1), 0) : -1;
     if (s0 < 0) return 1;
     p0 = Ctl(h, EM_POSFROMCHAR, (WPARAM)s0, 0);
-    p1 = s1 >= 0 ? Ctl(h, EM_POSFROMCHAR, (WPARAM)s1, 0) : -1;   /* (-1 when the next row is an empty last one, or there is none: the pitch falls back to the font's) */
+    p1 = s1 >= 0 ? Ctl(h, EM_POSFROMCHAR, (WPARAM)s1, 0) : -1;
     g->y0 = (short)HIWORD(p0);
     g->x0 = (short)LOWORD(p0);
     g->pitch = (short)HIWORD(p1) - g->y0;
     if (g->pitch <= 0) g->pitch = LineHeight();
     g->rows = (g->fr.bottom - g->y0) / g->pitch;
-    if (g->x0 > g->fr.left || g->fr.left - g->x0 > 30000) return 1;                      /* (EM_POSFROMCHAR packs x into 16 bits: a text scrolled further out can't be placed) */
+    if (g->x0 > g->fr.left || g->fr.left - g->x0 > 30000) return 1;
     g->topText = g->first >= 1 && g->top.bottom > g->top.top;
     g->leftText = g->x0 < g->fr.left && g->left.right > g->left.left;
-    if (g->rows < 1 || g->first + 1 >= g->total || g->first + g->rows >= g->total) return 1;   /* (the last row is in view: nothing below it) */
+    if (g->rows < 1 || g->first + 1 >= g->total || g->first + g->rows >= g->total) return 1;
     g->text = 1;
     return 1;
 }
 
-/* what a character means for a band row: 0 = nothing special. 1 = it can be reordered (hebrew, arabic ..., bidi marks): the row is drawn like the control
- * draws it, but while any of it is selected it stays blank (the highlight of a selection in reordered text is not one rectangle that measuring the text
- * would find). 2 = the presentation forms: plain GDI text output draws them differently from the control, the row stays blank. (shaped scripts that run
- * left to right, thai and the indic scripts, come out the same as the control's up to one level in one colour channel of the text inside a selection.) */
-static int BandKind(WCHAR c)
-{
+static int BandKind(WCHAR c) {
     if ((c >= 0xFB1D && c < 0xFE00) || (c >= 0xFE70 && c < 0xFF00)) return 2;
     if ((c >= 0x0590 && c < 0x0900) || (c >= 0x200E && c <= 0x200F) || (c >= 0x202A && c <= 0x202E) || (c >= 0x2066 && c <= 0x2069)) return 1;
     return 0;
 }
 
-static int BandWidth(HDC dc, const WCHAR *p, int n)  /* how far the text of a row gets (from the row's start: tab stops count from there) */
-{
+static int BandWidth(HDC dc, const WCHAR *p, int n) {
     return n > 0 ? (int)LOWORD(GetTabbedTextExtentW(dc, p, n, g_tabPx > 0, &g_tabPx)) : 0;
 }
 
-static int BandText(HDC dc, int x, int y, const WCHAR *p, int n, int x0)    /* one piece of a row; returns where the next piece starts */
-{
+static int BandText(HDC dc, int x, int y, const WCHAR *p, int n, int x0) {
     return n > 0 ? x + (int)LOWORD(TabbedTextOutW(dc, x, y, p, n, g_tabPx > 0, &g_tabPx, x0)) : x;
 }
 
-/* rows r0 .. r1 - 1 (those that exist), cut off at `cut`, into `dc` (a strip's bitmap: client coordinates, origin moved to the strip). sideways they are
- * cut off where the control cuts them off, at the right of its rectangle, and not at the left: the text runs on into the margin there */
-static void BandRows(HWND h, HDC dc, const BandGeom *g, int r0, int r1, const RECT *cut)
-{
+static void BandRows(HWND h, HDC dc, const BandGeom *g, int r0, int r1, const RECT *cut) {
     DWORD ss = 0, se = 0;
     HLOCAL hl;
     const WCHAR *t;
     HGDIOBJ of;
-    HBRUSH hb;
     COLORREF hit = GetSysColor(COLOR_HIGHLIGHTTEXT);
     int n, r, s, maxRow;
-
     hl = (HLOCAL)Ctl(h, EM_GETHANDLE, 0, 0);
     t = hl ? (const WCHAR *)LocalLock(hl) : NULL;
     if (!t) return;
@@ -723,7 +587,6 @@ static void BandRows(HWND h, HDC dc, const BandGeom *g, int r0, int r1, const RE
     maxRow = 30000 / g_stubMax;
     n = (int)Ctl(h, WM_GETTEXTLENGTH, 0, 0);
     Ctl(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se);
-    hb = CreateSolidBrush(GetSysColor(COLOR_HIGHLIGHT));
     of = SelectObject(dc, g_font);
     SetBkMode(dc, TRANSPARENT);
     IntersectClipRect(dc, cut->left, cut->top, g->fr.right < cut->right ? g->fr.right : cut->right, cut->bottom);
@@ -738,27 +601,27 @@ static void BandRows(HWND h, HDC dc, const BandGeom *g, int r0, int r1, const RE
         if (e < s || e > n) break;
         rs = s; re = e;
         s = e;
-        if (r + 1 < g->total && re - rs >= 2 && t[re - 2] == '\r' && t[re - 1] == '\n') { re -= 2; hard = 1; }     /* (a soft wrap, and the last row, have no line break) */
+        if (r + 1 < g->total && re - rs >= 2 && t[re - 2] == '\r' && t[re - 1] == '\n') { re -= 2; hard = 1; }
         if (re - rs > maxRow) continue;
         for (i = rs, cost = 0; i < re && kind < 2; i++) {
             int k = BandKind(t[i]);
             if (k > kind) kind = k;
-            cost += t[i] == '\t' ? 8 : 1;                                                   /* (a tab is up to 8 widest characters wide) */
+            cost += t[i] == '\t' ? 8 : 1;
         }
         if (cost > maxRow || kind == 2) continue;
-        if (kind == 1 && se > ss && (int)ss < e && (int)se > rs) continue;                  /* (anything of the row selected, its line break too) */
-        a = (int)ss < rs ? rs : ((int)ss > re ? re : (int)ss);                              /* the selected part of the row */
+        if (kind == 1 && se > ss && (int)ss < e && (int)se > rs) continue;
+        a = (int)ss < rs ? rs : ((int)ss > re ? re : (int)ss);
         b = (int)se < rs ? rs : ((int)se > re ? re : (int)se);
         q.top = y; q.bottom = y + g->pitch;
-        if (b > a) {                                                                        /* the highlight goes under the text */
+        if (b > a) {
             q.left = g->x0 + BandWidth(dc, t + rs, a - rs);
             q.right = g->x0 + BandWidth(dc, t + rs, b - rs) + BAND_SEL_EXTRA;
-            FillRect(dc, &q, hb);
+            FillRect(dc, &q, (HBRUSH)(COLOR_HIGHLIGHT + 1));
         }
-        if (hard && (int)ss <= re && (int)se > re) {                                        /* the row's line break is selected: a block after its text, like StubDrawAll's */
+        if (hard && (int)ss <= re && (int)se > re) {
             q.left = g->x0 + BandWidth(dc, t + rs, re - rs);
             q.right = q.left + g_stubW;
-            FillRect(dc, &q, hb);
+            FillRect(dc, &q, (HBRUSH)(COLOR_HIGHLIGHT + 1));
         }
         {
             int x = g->x0;
@@ -771,19 +634,14 @@ static void BandRows(HWND h, HDC dc, const BandGeom *g, int r0, int r1, const RE
         }
     }
     SelectObject(dc, of);
-    DeleteObject(hb);
     LocalUnlock(hl);
 }
 
-/* one strip (`area`, and the rows r0 .. r1 - 1 that reach into it when `text`) onto `dc` (a DC handed over by a print request, or the window's own):
- * only what touches `clip` when there is one */
-static void BandStrip(HWND h, HDC dc, const BandGeom *g, const RECT *area, int text, int r0, int r1, const RECT *clip)
-{
+static void BandStrip(HWND h, HDC dc, const BandGeom *g, const RECT *area, int text, int r0, int r1, const RECT *clip) {
     RECT v = *area;
     HDC mdc;
     HBITMAP bmp;
     HGDIOBJ ob = NULL;
-
     if (area->right <= area->left || area->bottom <= area->top) return;
     if (clip && !IntersectRect(&v, &v, clip)) return;
     mdc = CreateCompatibleDC(dc);
@@ -800,23 +658,18 @@ static void BandStrip(HWND h, HDC dc, const BandGeom *g, const RECT *area, int t
     if (mdc) DeleteDC(mdc);
 }
 
-/* the strips below, above and left of the control's rectangle onto `dc` */
-static void BandDraw(HWND h, HDC dc, const BandGeom *g, const RECT *clip)
-{
-    BandStrip(h, dc, g, &g->band, g->text, g->first + g->rows, g->total, clip);                 /* the rows below the whole ones */
-    BandStrip(h, dc, g, &g->top, g->topText, g->first - 1, g->first, clip);                     /* the end of the row above the first whole one */
-    BandStrip(h, dc, g, &g->left, g->leftText, g->first, g->first + g->rows, clip);             /* the start of every row, when the text is scrolled sideways */
+static void BandDraw(HWND h, HDC dc, const BandGeom *g, const RECT *clip) {
+    BandStrip(h, dc, g, &g->band, g->text, g->first + g->rows, g->total, clip);
+    BandStrip(h, dc, g, &g->top, g->topText, g->first - 1, g->first, clip);
+    BandStrip(h, dc, g, &g->left, g->leftText, g->first, g->first + g->rows, clip);
 }
 
-/* the control has painted (or was asked to paint into `dc`): the strips on top. dc NULL = straight onto the window, clip = what was invalid */
-static void BandPaint(HWND h, HDC dc, const RECT *clip)
-{
+static void BandPaint(HWND h, HDC dc, const RECT *clip) {
     BandGeom g;
     RECT t;
     HDC own = NULL;
-
     if (h != g_edit || !BandRect(h, &g)) return;
-    if (clip && !IntersectRect(&t, &g.band, clip) && !IntersectRect(&t, &g.top, clip) && !IntersectRect(&t, &g.left, clip)) return;   /* (a repaint of some rows: the usual case) */
+    if (clip && !IntersectRect(&t, &g.band, clip) && !IntersectRect(&t, &g.top, clip) && !IntersectRect(&t, &g.left, clip)) return;
     if (!BandGeomGet(h, &g)) return;
     if (!dc) {
         own = dc = GetDC(h);
@@ -826,21 +679,16 @@ static void BandPaint(HWND h, HDC dc, const RECT *clip)
     if (own) ReleaseDC(h, own);
 }
 
-/* the control has handled a message that can change what the band shows */
-static void BandSync(HWND h)
-{
-    if (h != g_edit || !(GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) return;           /* (not while redraw is off: that clears WS_VISIBLE) */
+static void BandSync(HWND h) {
+    if (h != g_edit || !(GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) return;
     BandPaint(h, NULL, NULL);
 }
 
-/* WM_ERASEBKGND: the stock erase without the strips (what it would erase is painted over in one go by BandPaint) */
-static LRESULT BandErase(HWND h, WPARAM w, LPARAM l)
-{
+static LRESULT BandErase(HWND h, WPARAM w, LPARAM l) {
     BandGeom g;
     HDC dc = (HDC)w;
     int saved;
     LRESULT r;
-
     if (h != g_edit || !BandRect(h, &g)) return Ctl(h, WM_ERASEBKGND, w, l);
     saved = SaveDC(dc);
     ExcludeClipRect(dc, g.band.left, g.band.top, g.band.right, g.band.bottom);
@@ -851,18 +699,13 @@ static LRESULT BandErase(HWND h, WPARAM w, LPARAM l)
     return r;
 }
 
-/* ordinary WM_PAINT: keep the previous frame visible while the native control shapes mixed-script text. prepare every buffer resource
- * before BeginPaint validates the update region; a failed allocation leaves the original painter free to handle it. supplied-DC paints
- * and the native control's direct selection / editing paths retain their normal handling. BeginPaint / EndPaint manage its caret. */
-static int EditPaintBuffered(HWND h, const RECT *dirty)
-{
+static int EditPaintBuffered(HWND h, const RECT *dirty) {
     RECT cr;
     PAINTSTRUCT ps;
     HDC own = NULL, mdc = NULL, dc;
     HBITMAP bmp = NULL;
     HGDIOBJ ob = NULL;
     int saved = 0, depth, done = 0, copied = 0;
-
     if (!GetClientRect(h, &cr) || cr.right <= 0 || cr.bottom <= 0) return 0;
     own = GetDC(h);
     if (!own) return 0;
@@ -870,36 +713,34 @@ static int EditPaintBuffered(HWND h, const RECT *dirty)
     if (!mdc) goto cleanup;
     bmp = CreateCompatibleBitmap(own, cr.right, cr.bottom);
     if (!bmp) goto cleanup;
-    ob = SelectObject(mdc, bmp);                               /* a bitmap selection fails with NULL */
+    ob = SelectObject(mdc, bmp);
     if (!ob) goto cleanup;
-    IntersectClipRect(mdc, dirty->left, dirty->top, dirty->right, dirty->bottom);   /* only the dirty part is blitted: the rest is neither filled nor drawn (a one row repaint cost the same as a full one) */
+    IntersectClipRect(mdc, dirty->left, dirty->top, dirty->right, dirty->bottom);
     saved = SaveDC(mdc);
     if (!saved || !FillRect(mdc, &cr, EditBrush())) goto cleanup;
     ReleaseDC(h, own);
     own = NULL;
-
     memset(&ps, 0, sizeof ps);
     depth = g_paintDepth;
-    g_paintDepth = 0;                                         /* BeginPaint's live erase must wait for the complete offscreen frame */
+    g_paintDepth = 0;
     dc = BeginPaint(h, &ps);
     g_paintDepth = depth;
     if (!dc) {
         EndPaint(h, &ps);
-        InvalidateRect(h, dirty, TRUE);                       /* a failed BeginPaint may have consumed the update region */
+        InvalidateRect(h, dirty, TRUE);
         goto cleanup;
     }
     g_paintDepth++;
     SendMessageW(h, WM_ERASEBKGND, (WPARAM)mdc, 0);
     Ctl(h, WM_PRINTCLIENT, (WPARAM)mdc, PRF_CLIENT | PRF_ERASEBKGND);
     g_paintDepth--;
-    if (RestoreDC(mdc, saved)) {                              /* native DC state must not clip the overlays or move the final blit */
+    if (RestoreDC(mdc, saved)) {
         StubPaint(h, mdc, NULL);
         BandPaint(h, mdc, NULL);
-        copied = BitBlt(dc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top,
-                       mdc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+        copied = BitBlt(dc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top, mdc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
     }
     saved = 0;
-    if (!copied) {                                           /* the update was consumed: draw into this paint DC if presentation failed */
+    if (!copied) {
         int state = SaveDC(dc);
         g_paintDepth++;
         SendMessageW(h, WM_ERASEBKGND, (WPARAM)dc, 0);
@@ -921,15 +762,10 @@ cleanup:
 }
 
 #ifdef SHOTDC
-/* probe builds only (tools\probe.bat /DSHOTDC): WM_APP + 90 writes what is on the editor's window right now to %TEMP%\mint_dc.ppm (binary ppm,
- * wParam pixels wide, the low word of lParam rows high, from the row in the high word of lParam: 0 = the top left corner). it is read from the window's
- * own DC and nothing is repainted first, so it shows what the control painted straight onto the window (PrintWindow would repaint through WM_PAINT
- * and hide that). a process on another desktop cannot do this itself. a pixel read costs about 20 us: ask for the rows you need, not the whole window. */
 API DWORD WINAPI GetTempPathW(DWORD, LPWSTR);
 static int g_shotPaintW, g_shotPaintH, g_shotPaintY, g_shotPaintHit;
 
-static int ShotInt(char *d, int v)
-{
+static int ShotInt(char *d, int v) {
     char t[12];
     int n = 0, i = 0;
     do { t[n++] = (char)('0' + v % 10); v /= 10; } while (v);
@@ -937,8 +773,7 @@ static int ShotInt(char *d, int v)
     return i;
 }
 
-static void ShotDc(HWND h, int w, int ht, int y0)
-{
+static void ShotDc(HWND h, int w, int ht, int y0) {
     WCHAR path[300];
     char hdr[40];
     int n = 0, x, y;
@@ -955,11 +790,8 @@ static void ShotDc(HWND h, int w, int ht, int y0)
     hdr[n++] = '\n'; hdr[n++] = '2'; hdr[n++] = '5'; hdr[n++] = '5'; hdr[n++] = '\n';
     buf = (BYTE *)mem_alloc((size_t)w * ht * 3);
     if (!buf) { ReleaseDC(h, dc); return; }
-    /* Pixel comparisons cover text/background, as PrintWindow does. The native
-     * blinking caret may now be visible after a resize; balance its hide count. */
     caretHidden = HideCaret(h);
-    for (y = 0; y < ht; y++)
-        for (x = 0; x < w; x++) {
+    for (y = 0; y < ht; y++) for (x = 0; x < w; x++) {
             COLORREF c = GetPixel(dc, x, y0 + y);
             BYTE *p = buf + ((size_t)y * w + x) * 3;
             p[0] = (BYTE)(c & 255); p[1] = (BYTE)((c >> 8) & 255); p[2] = (BYTE)((c >> 16) & 255);
@@ -978,9 +810,7 @@ static void ShotDc(HWND h, int w, int ht, int y0)
 }
 #endif
 
-/* ------------------------------------------------------------ subclass ---- */
-static int CaretMoveMessage(UINT m, WPARAM w)
-{
+static int CaretMoveMessage(UINT m, WPARAM w) {
     switch (m) {
     case WM_KEYDOWN: case WM_CHAR: case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
     case WM_CUT: case WM_PASTE: case WM_CLEAR: case WM_UNDO: case WM_TIMER:
@@ -992,8 +822,7 @@ static int CaretMoveMessage(UINT m, WPARAM w)
     return 0;
 }
 
-static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     LRESULT r;
     int anchor = -1;
     int wasRevealing;
@@ -1005,19 +834,18 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (m != WM_TIMER) g_allowTallReveal = 1;
     }
     if (m == EM_SCROLLCARET) g_allowTallReveal = 1;
-
     switch (m) {
 #ifdef SHOTDC
     case WM_APP + 90:
         ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
         return 0;
-    case WM_APP + 97:                                          /* hold the native caret hidden across live and full-window reference captures */
-        return w ? ShowCaret(h) : HideCaret(h);                 /* caller balances a successful hide in a finally block */
-    case WM_APP + 91: {                                         /* (wiped << 16 | kept) so far, then back to zero */
+    case WM_APP + 97:
+        return w ? ShowCaret(h) : HideCaret(h);
+    case WM_APP + 91: {
         LRESULT v = (LRESULT)((g_shotWiped << 16) | g_shotKept);
         g_shotWiped = g_shotKept = 0;
         return v; }
-    case WM_APP + 92: {                                         /* standalone resize erase, captured before the next WM_PAINT can run */
+    case WM_APP + 92: {
         HDC dc;
         if (!w) return PROBE_ID;
         dc = GetDC(h);
@@ -1027,7 +855,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
         return 0; }
-    case WM_APP + 93: {                                         /* a real invalidated repaint must clear stale pixels as well as draw the text */
+    case WM_APP + 93: {
         HDC dc = GetDC(h);
         HBRUSH br = CreateSolidBrush(0x00FF00FF);
         RECT cr;
@@ -1038,7 +866,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         UpdateWindow(h);
         ShotDc(h, (int)w, (int)(l & 0xFFFF), (int)((l >> 16) & 0xFFFF));
         return 0; }
-    case WM_APP + 94:                                           /* live pixels after the actual repaint erase, before native text drawing */
+    case WM_APP + 94:
         if (!w) return PROBE_ID;
         g_shotPaintW = (int)w;
         g_shotPaintH = (int)(l & 0xFFFF);
@@ -1048,7 +876,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         UpdateWindow(h);
         g_shotPaintW = 0;
         return g_shotPaintHit;
-    case WM_APP + 95: {                                         /* a partial repaint must preserve a marked pixel outside its dirty rectangle */
+    case WM_APP + 95: {
         RECT dirty = { 17, 19, 157, 51 };
         HDC dc;
         int ht = (int)(l & 0xFFFF), y0 = (int)((l >> 16) & 0xFFFF);
@@ -1062,7 +890,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         UpdateWindow(h);
         ShotDc(h, (int)w, ht, y0);
         return 0; }
-    case WM_APP + 96: {                                         /* isolated caret/status calculation benchmark, alternating nearby positions near EOF */
+    case WM_APP + 96: {
         DWORD ss = 0, se = 0, now, elapsed;
         int n, i, a, b, line, col;
         if (!w) return PROBE_ID;
@@ -1072,7 +900,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         Ctl(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se);
         SendMessageW(h, WM_SETREDRAW, FALSE, 0);
         Ctl(h, EM_SETSEL, (WPARAM)a, (LPARAM)a);
-        EditCaretPos(&line, &col);                               /* the initial full-prefix calculation is outside the measurement */
+        EditCaretPos(&line, &col);
         now = GetTickCount();
         for (i = 0; i < (int)w; i++) {
             int idx = (i & 1) ? a : b;
@@ -1086,8 +914,8 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         AppUpdateStatus();
         return (LRESULT)elapsed; }
 #endif
-    case WM_ERASEBKGND:                                         /* resize can erase now and paint later: leave the text visible until the native painter is ready */
-        if (!g_paintDepth) return 0;                            /* keep erasure pending for BeginPaint, which then erases and draws in the same call */
+    case WM_ERASEBKGND:
+        if (!g_paintDepth) return 0;
         r = BandErase(h, w, l);
 #ifdef SHOTDC
         if (g_shotPaintW && !g_shotPaintHit) {
@@ -1096,10 +924,10 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
 #endif
 #ifdef FLICKER_PROBE
-        Sleep(8);                                               /* calibration only (tools\flicker_test.ps1 must see this): a visible gap between the erase and the text */
+        Sleep(8);
 #endif
         return r;
-    case WM_SIZE: {                                             /* with word wrap on every size change re-wraps ALL the text (45 ms per 3000 lines): a size that is already the control's is skipped, and a new one sets the padded rectangle only (the same function behind EM_SETRECT does the work of WM_SIZE): one wrap */
+    case WM_SIZE: {
         static HWND szH;
         static LPARAM szL;
         static DWORD lastAt, lastCost;
@@ -1108,7 +936,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         szH = h; szL = l;
         EditCaretRemember(h, g_font);
         if (!g_inBars) { g_revealPending = 1; g_allowTallReveal = 1; }
-        if (!g_inBars && lastCost > 25 && now - lastAt < 2 * lastCost && EditCaretInView(h, LineHeight())) { /* defer expensive wrapping only while the caret fits the new viewport */
+        if (!g_inBars && lastCost > 25 && now - lastAt < 2 * lastCost && EditCaretInView(h, LineHeight())) {
             g_sizeDeferred = 1;
             SetTimer(h, SIZE_TIMER, 40, NULL);
             return 0;
@@ -1124,7 +952,7 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         BandSync(h);
         return 0; }
     case WM_TIMER:
-        if (w == SIZE_TIMER) {                                  /* the deferred re-wrap, when the drag paused */
+        if (w == SIZE_TIMER) {
             KillTimer(h, SIZE_TIMER);
             g_sizeDeferred = 0;
             EditPad2(h, 0);
@@ -1143,18 +971,18 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         g_paintDepth++;
         r = CallWindowProcW(g_orig, h, m, w, l);
         g_paintDepth--;
-        if (w) { StubPaint(h, (HDC)w, NULL); BandPaint(h, (HDC)w, NULL); }      /* (painting into a DC somebody handed over) */
+        if (w) { StubPaint(h, (HDC)w, NULL); BandPaint(h, (HDC)w, NULL); }
         else if (have) { StubPaint(h, NULL, &ur); BandPaint(h, NULL, &ur); }
         FitTallCaret(h);
         return r; }
-    case WM_PRINTCLIENT:                                        /* PrintWindow / WM_PRINT: the whole client area into a DC */
+    case WM_PRINTCLIENT:
         g_paintDepth++;
         r = CallWindowProcW(g_orig, h, m, w, l);
         g_paintDepth--;
         StubPaint(h, (HDC)w, NULL);
         BandPaint(h, (HDC)w, NULL);
         return r;
-    case WM_PRINT:                                              /* its erase can precede the nested WM_PRINTCLIENT */
+    case WM_PRINT:
         g_paintDepth++;
         r = CallWindowProcW(g_orig, h, m, w, l);
         g_paintDepth--;
@@ -1162,62 +990,54 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_BARS:
         g_barsPending = 0;
         UpdateBars();
-        if (g_tallCaret) FitTallCaret(h);         /* ordinary bar checks also re-layout; their temporary geometry must not place the caret */
+        if (g_tallCaret) FitTallCaret(h);
         return 0;
     case WM_MOUSEWHEEL:
         g_shiftDir = 0;
-        if (w & MK_CONTROL) {                                  /* ctrl+wheel = font size, one step per notch; modifiers belong to this input message */
+        if (w & MK_CONTROL) {
             g_wheel += GET_WHEEL_DELTA_WPARAM(w);
             while (g_wheel >= 120)  { g_wheel -= 120; EditZoomStep(1); }
             while (g_wheel <= -120) { g_wheel += 120; EditZoomStep(-1); }
             return 0;
         }
-        g_revealPending = 0;                                  /* a deliberate scroll after resizing takes priority over the posted layout check */
+        g_revealPending = 0;
         g_allowTallReveal = 0;
         break;
     case WM_VSCROLL: case WM_HSCROLL:
         if (!g_inBars && !g_revealing) { g_revealPending = 0; g_allowTallReveal = 0; }
         break;
     case WM_CHAR:
-        if (w == 0x7F) { EditDeleteWord(-1); return 0; }              /* ctrl+backspace arrives as DEL */
+        if (w == 0x7F) { EditDeleteWord(-1); return 0; }
         break;
-    case WM_SYSCHAR:                                            /* alt+letter: our menu bar (the default path never reaches the main window) */
+    case WM_SYSCHAR:
         if (w != ' ' && w != VK_BACK && MenuBarMnemonic((WCHAR)w) >= 0) {
             SendMessageW(GetParent(h), WM_SYSCOMMAND, SC_KEYMENU, (LPARAM)w);
             return 0;
         }
         break;
-    case WM_KEYUP:                                              /* ctrl + one shift key and nothing else, like notepad: right shift = right to left, left shift = left to right */
+    case WM_KEYUP:
         if ((w == VK_SHIFT || w == VK_CONTROL) && g_shiftDir) {
             PostMessageW(GetParent(h), WM_COMMAND, g_shiftDir == 2 ? IDM_DIR_RTL : IDM_DIR_LTR, 0);
             g_shiftDir = 0;
         }
         break;
     case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_SYSKEYDOWN:
-        g_shiftDir = 0;                                         /* (ctrl+shift+click extends a selection: not a direction) */
+        g_shiftDir = 0;
         break;
     case WM_KEYDOWN:
-        if (w == VK_SHIFT && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000))
-            g_shiftDir = ((l >> 16) & 0xFF) == 0x36 ? 2 : 1;    /* scan code 0x36 = right shift, 0x2a = left */
-        else if (w != VK_SHIFT && w != VK_CONTROL)
-            g_shiftDir = 0;
+        if (w == VK_SHIFT && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) g_shiftDir = ((l >> 16) & 0xFF) == 0x36 ? 2 : 1;
+        else if (w != VK_SHIFT && w != VK_CONTROL) g_shiftDir = 0;
         if (w == VK_DELETE && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000)) {
             EditDeleteWord(1);
             return 0;
         }
-        if (w >= VK_PRIOR && w <= VK_DOWN &&
-            !((w == VK_UP || w == VK_DOWN) && (GetKeyState(VK_CONTROL) & 0x8000)) &&
-            !EditCaretInView(h, LineHeight())) {
-            /* EDIT navigates vertically from its display caret. Manual scrolling
-             * can park that caret offscreen: reveal the unchanged logical
-             * selection before asking the native control to move it. Ctrl+up /
-             * down do not move the logical caret; retain their native behavior. */
+        if (w >= VK_PRIOR && w <= VK_DOWN && !((w == VK_UP || w == VK_DOWN) && (GetKeyState(VK_CONTROL) & 0x8000)) && !EditCaretInView(h, LineHeight())) {
             SendMessageW(h, EM_SCROLLCARET, 0, 0);
         }
         break;
     case WM_CONTEXTMENU: {
         int x = GET_X_LPARAM(l), y = GET_Y_LPARAM(l);
-        if (x == -1 && y == -1) {                               /* from the keyboard: at the caret */
+        if (x == -1 && y == -1) {
             POINT p;
             if (!GetCaretPos(&p)) { p.x = 8; p.y = 8; }
             ClientToScreen(h, &p);
@@ -1226,42 +1046,38 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         MenuPopup(GetParent(h), &g_mdEditCtx, x, y, 0);
         return 0; }
     }
-
     wasRevealing = g_revealing;
-    if (anchor >= 0 || m == EM_SCROLLCARET || m == WM_SETFONT || m == EM_SETRECTNP || m == EM_SETTABSTOPS || m == EM_SETMARGINS)
-        g_revealing = 1;
+    if (anchor >= 0 || m == EM_SCROLLCARET || m == WM_SETFONT || m == EM_SETRECTNP || m == EM_SETTABSTOPS || m == EM_SETMARGINS) g_revealing = 1;
     r = CallWindowProcW(g_orig, h, m, w, l);
     g_revealing = wasRevealing;
-    if (m == WM_SETTEXT) { g_textRev++; g_stub.n = 0; }         /* (a multiline edit sends no EN_CHANGE for WM_SETTEXT; it repaints all of itself: no selected line break block is left) */
+    if (m == WM_SETTEXT) { g_textRev++; g_stub.n = 0; }
     if (anchor >= 0) {
         DWORD ss = 0, se = 0;
-        Ctl(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se); /* record the new endpoint before any nested maintenance can repair the display */
-        if (m == EM_SETSEL && (int)w >= 0)
-            EditCaretHint(l >= 0 && (int)w > l ? (int)ss : (int)se);
+        Ctl(h, EM_GETSEL, (WPARAM)&ss, (LPARAM)&se);
+        if (m == EM_SETSEL && (int)w >= 0) EditCaretHint(l >= 0 && (int)w > l ? (int)ss : (int)se);
         else if (ss == se || (int)se == anchor) EditCaretHint((int)ss);
         else if ((int)ss == anchor) EditCaretHint((int)se);
     }
     if (anchor >= 0 || m == WM_SETFOCUS || m == WM_KEYUP || m == EM_SCROLLCARET) FitTallCaret(h);
-
-    switch (m) {                                                /* anything that can change the room the text needs */
-    case WM_SIZE: case WM_SETFONT: case WM_SETTEXT:
-        if (m != WM_SETTEXT) EditPad(h);                        /* (the control puts its formatting rectangle back to the client area) */
+    switch (m) {
+    case WM_SETFONT: case WM_SETTEXT:
+        if (m != WM_SETTEXT) EditPad(h);
         EditScrollSoon();
         break;
     }
-    if (!g_inBars) switch (m) {                                 /* anything that can scroll the text or change a native bar: the classic bars over them follow at once (they poll too; not while UpdateBars shows the native horizontal bar for a moment to probe it: the overlay must not flash) */
-    case WM_KEYDOWN: case WM_CHAR: case WM_MOUSEWHEEL: case WM_VSCROLL: case WM_HSCROLL: case WM_SIZE: case WM_SETTEXT:
+    if (!g_inBars) switch (m) {
+    case WM_KEYDOWN: case WM_CHAR: case WM_MOUSEWHEEL: case WM_VSCROLL: case WM_HSCROLL: case WM_SETTEXT:
     case WM_PASTE: case WM_CUT: case WM_CLEAR: case WM_UNDO: case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_TIMER: case WM_SETFONT:
         SbarSync(h);
         break;
     case WM_MOUSEMOVE:
-        if (w & 1) SbarSync(h);                                 /* dragging a selection past the edge scrolls */
+        if (w & 1) SbarSync(h);
         break;
     default:
-        if (m >= 0x00B0 && m <= 0x00D8) SbarSync(h);            /* EM_* */
+        if (m >= 0x00B0 && m <= 0x00D8) SbarSync(h);
         break;
     }
-    switch (m) {                                                /* anything that can move the caret / change the text */
+    switch (m) {
     case WM_KEYDOWN: case WM_KEYUP: case WM_CHAR:
     case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_TIMER:
     case WM_SETFOCUS: case WM_KILLFOCUS:
@@ -1270,26 +1086,23 @@ static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l)
         AppUpdateStatus();
         break;
     case WM_MOUSEMOVE:
-        if (w & 1) AppUpdateStatus();                           /* dragging a selection */
+        if (w & 1) AppUpdateStatus();
         break;
     }
     if (StubWatch(m, w)) {
-        StubSync(h);                                            /* the blocks for the selected line breaks */
-        BandSync(h);                                            /* the partly visible rows at the bottom */
+        StubSync(h);
+        BandSync(h);
     }
-    if (g_tallCaret) FitTallCaret(h);             /* native timers and other maintenance messages can park an oversized caret again */
+    if (g_tallCaret) FitTallCaret(h);
     return r;
 }
 
-/* ---------------------------------------------------------------- create -- */
-HWND EditCreate(HWND parent)
-{
+HWND EditCreate(HWND parent) {
     HWND old = g_edit, e;
     WCHAR *text = NULL;
     DWORD s = 0, en = 0, st = WS_CHILD | WS_CLIPSIBLINGS | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_NOHIDESEL;
     LONG_PTR ex = 0;
     int mod = 0, focus = 0, x = 0, y = 0, w = 0, h = 0, back = 0;
-
     if (!g_pf.wrap) st |= WS_HSCROLL | ES_AUTOHSCROLL;
     if (old) {
         RECT rc;
@@ -1297,7 +1110,7 @@ HWND EditCreate(HWND parent)
         text = EditGetDocText(NULL);
         if (!text) return NULL;
         SendMessageW(old, EM_GETSEL, (WPARAM)&s, (LPARAM)&en);
-        back = en > s && EditCaretIndex() == (int)s;  /* a selection made backwards (shift+left): its caret is at the start */
+        back = en > s && EditCaretIndex() == (int)s;
         mod = (int)SendMessageW(old, EM_GETMODIFY, 0, 0);
         ex = GetWindowLongPtrW(old, GWL_EXSTYLE) & RTL_BITS;
         focus = (GetFocus() == old);
@@ -1307,11 +1120,9 @@ HWND EditCreate(HWND parent)
         ScreenToClient(parent, &b);
         x = a.x; y = a.y; w = b.x - a.x; h = b.y - a.y;
     }
-
     e = CreateWindowExW((DWORD)ex, L"EDIT", NULL, st, x, y, w, h, parent, (HMENU)(ULONG_PTR)IDC_EDIT, g_hinst, NULL);
     if (!e) { mem_free(text); return NULL; }
     SendMessageW(e, EM_LIMITTEXT, 0, 0);
-    /* Populate the hidden native control before committing any global state. */
     if (text && !SetWindowTextW(e, text)) { DestroyWindow(e); mem_free(text); return NULL; }
     g_edit = e;
     g_barsPending = 0;
@@ -1321,24 +1132,22 @@ HWND EditCreate(HWND parent)
     EditCaretInvalidate();
     EditCaretHint(0);
     EditCaretDisplayAdjusted(FALSE);
-    SetWindowPos(e, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);        /* (the overhang of the editor goes under the status bar, see Layout) */
-    g_stub.n = 0;                                  /* nothing of the old control's selected line break blocks is on this one */
+    SetWindowPos(e, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    g_stub.n = 0;
     g_orig = (WNDPROC)SetWindowLongPtrW(e, GWLP_WNDPROC, (LONG_PTR)EditProc);
-    SendMessageW(e, EM_LIMITTEXT, 0, 0);
     DarkScroll(e);
-    SbarTrim(e, S(SBAR_TRIM), S(SBAR_TRIM));         /* (the editor's window overhangs the visible area by that much: thinner bars, see Layout) */
+    SbarTrim(e, S(SBAR_TRIM), S(SBAR_TRIM));
     EditApplyFont();
-
     if (text) {
         SendMessageW(e, WM_SETREDRAW, FALSE, 0);
-        SendMessageW(e, EM_SETSEL, back ? en : s, back ? s : en);   /* (the caret goes to the second one) */
+        SendMessageW(e, EM_SETSEL, back ? en : s, back ? s : en);
         SendMessageW(e, EM_SCROLLCARET, 0, 0);
         SendMessageW(e, EM_EMPTYUNDOBUFFER, 0, 0);
         SendMessageW(e, EM_SETMODIFY, (WPARAM)mod, 0);
         SendMessageW(e, WM_SETREDRAW, TRUE, 0);
         mem_free(text);
     }
-    UpdateBars();                                   /* before it is shown: no flash of empty scrollbars */
+    UpdateBars();
     EditScrollSoon();
     ShowWindow(e, SW_SHOW);
     SbarSync(e);

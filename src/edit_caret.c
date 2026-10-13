@@ -1,17 +1,10 @@
-/* edit_caret.c - native caret geometry across font and viewport changes.
- * EDIT keeps selection and undo ownership. These helpers observe its caret and,
- * only when a row is taller than the viewport, position that same native object. */
 #include "edit_internal.h"
 
 static struct { HFONT font; DWORD rev; int n, dx, start, width, tab, rtl, ok; } g_endCaret;
 
 void EditCaretInvalidate(void) { g_endCaret.ok = 0; }
 
-/* During an expensive drag we can keep the previous wrap only while its caret is
- * still visible in the new viewport. In particular, the old formatting rectangle
- * can extend beyond a shrinking window until the deferred layout catches up. */
-int EditCaretInView(HWND h, int height)
-{
+int EditCaretInView(HWND h, int height) {
     POINT p;
     RECT r, fr;
     if (GetFocus() != h || !GetCaretPos(&p)) return 0;
@@ -22,18 +15,16 @@ int EditCaretInView(HWND h, int height)
     return p.x >= r.left && p.x < r.right && p.y >= r.top && p.y + height <= r.bottom;
 }
 
-void EditCaretRemember(HWND h, HFONT font)
-{
+void EditCaretRemember(HWND h, HFONT font) {
     GUITHREADINFO gi;
     RECT view, fr;
     LRESULT previous;
     int n = GetWindowTextLengthW(h);
     memset(&gi, 0, sizeof gi);
     gi.cbSize = sizeof gi;
-    if (n <= 0 || EditCaretIndex() != n || !GetGUIThreadInfo(GetCurrentThreadId(), &gi) ||
-        gi.hwndCaret != h || gi.hwndFocus != h || gi.rcCaret.top <= -20000) return;
+    if (n <= 0 || EditCaretIndex() != n || !GetGUIThreadInfo(GetCurrentThreadId(), &gi) || gi.hwndCaret != h || gi.hwndFocus != h || gi.rcCaret.top <= -20000) return;
     EditViewRect(h, &view);
-    if (gi.rcCaret.bottom - gi.rcCaret.top > view.bottom - view.top) return; /* never cache a position we clipped ourselves */
+    if (gi.rcCaret.bottom - gi.rcCaret.top > view.bottom - view.top) return;
     previous = SendMessageW(h, EM_POSFROMCHAR, (WPARAM)(n - 1), 0);
     if (previous == -1) return;
     SendMessageW(h, EM_GETRECT, 0, (LPARAM)&fr);
@@ -44,32 +35,24 @@ void EditCaretRemember(HWND h, HFONT font)
     g_endCaret.ok = 1;
 }
 
-/* EM_POSFROMCHAR excludes EOF. Its previous UTF-16 position already includes a
- * trailing low surrogate or combining mark; otherwise add that final glyph's
- * advance, in its native reading direction. A bounded suffix supplies shaping
- * context without measuring or allocating a whole, potentially huge line. */
-static int CaretEndX(HWND h, HFONT font, int index, const RECT *fr)
-{
+static int CaretEndX(HWND h, HFONT font, int index, const RECT *fr) {
     void *lock;
     const WCHAR *text;
-    int n, start = (int)SendMessageW(h, EM_LINEINDEX,
-        (WPARAM)SendMessageW(h, EM_LINEFROMCHAR, (WPARAM)index, 0), 0);
+    int n, start = (int)SendMessageW(h, EM_LINEINDEX, (WPARAM)SendMessageW(h, EM_LINEFROMCHAR, (WPARAM)index, 0), 0);
     int x = EditIsRtl() ? fr->right - 1 : fr->left;
     LRESULT pos;
     if (index <= start || index <= 0) return x;
     pos = SendMessageW(h, EM_POSFROMCHAR, (WPARAM)(index - 1), 0);
     if (pos == -1) return x;
     x = (short)LOWORD(pos);
-    if (g_endCaret.ok && g_endCaret.font == font && g_endCaret.rev == g_textRev && g_endCaret.n == index &&
-        g_endCaret.start == start && g_endCaret.width == fr->right - fr->left && g_endCaret.tab == g_pf.tab && g_endCaret.rtl == EditIsRtl())
-        return x + g_endCaret.dx;
+    if (g_endCaret.ok && g_endCaret.font == font && g_endCaret.rev == g_textRev && g_endCaret.n == index && g_endCaret.start == start && g_endCaret.width == fr->right - fr->left && g_endCaret.tab == g_pf.tab && g_endCaret.rtl == EditIsRtl()) return x + g_endCaret.dx;
     text = EditLockText(&lock, &n);
     if (text && index <= n) {
         WCHAR last = text[index - 1];
         WORD type = 0, direction = 0;
         int advance = 0;
         GetStringTypeW(CT_CTYPE3, &last, 1, &type);
-        GetStringTypeW(2, &last, 1, &direction);    /* CT_CTYPE2; C2_RIGHTTOLEFT = 2 */
+        GetStringTypeW(2, &last, 1, &direction);
         if (last == '\t' && g_pf.tab > 0) {
             HDC dc = GetDC(h);
             TEXTMETRICW tm;
@@ -94,10 +77,9 @@ static int CaretEndX(HWND h, HFONT font, int index, const RECT *fr)
             SIZE size = { 0, 0 };
             if (dc) {
                 HGDIOBJ old = SelectObject(dc, font);
-                INT widths[32], fit = 0;
+                INT widths[32];
                 int a = index - start > COUNTOF(widths) ? index - COUNTOF(widths) : start, count = index - a;
-                if (GetTextExtentExPointW(dc, text + a, count, 0x7FFFFFFF, &fit, widths, &size))
-                    advance = widths[count - 1] - (count > 1 ? widths[count - 2] : 0);
+                if (GetTextExtentExPointW(dc, text + a, count, 0x7FFFFFFF, NULL, widths, &size)) advance = widths[count - 1] - (count > 1 ? widths[count - 2] : 0);
                 SelectObject(dc, old);
                 ReleaseDC(h, dc);
             }
@@ -109,8 +91,7 @@ static int CaretEndX(HWND h, HFONT font, int index, const RECT *fr)
     return x;
 }
 
-void EditCaretFit(HWND h, HFONT font, WNDPROC nativeProc, int *tall)
-{
+void EditCaretFit(HWND h, HFONT font, WNDPROC nativeProc, int *tall) {
     static int fitting;
     GUITHREADINFO gi;
     RECT view, fr;
@@ -130,8 +111,7 @@ void EditCaretFit(HWND h, HFONT font, WNDPROC nativeProc, int *tall)
     }
     *tall = 1;
     if (view.right <= view.left || view.bottom <= view.top) goto done;
-    if (gi.rcCaret.right > view.left && gi.rcCaret.left < view.right &&
-        gi.rcCaret.bottom > view.top && gi.rcCaret.top < view.bottom) goto done;
+    if (gi.rcCaret.right > view.left && gi.rcCaret.left < view.right && gi.rcCaret.bottom > view.top && gi.rcCaret.top < view.bottom) goto done;
     index = EditCaretIndex();
     CallWindowProcW(nativeProc, h, EM_SCROLLCARET, 0, 0);
     SendMessageW(h, EM_GETRECT, 0, (LPARAM)&fr);
@@ -143,11 +123,9 @@ void EditCaretFit(HWND h, HFONT font, WNDPROC nativeProc, int *tall)
     if (x > view.right - width) x = view.right - width;
     if (x < view.left) x = view.left;
     if (y >= view.bottom || y < view.top) y = view.top;
-    /* Keep the native caret object. EDIT parks it off screen when its height
-     * exceeds the client; positioning that same object exposes its visible top. */
     if (SetCaretPos(x, y)) {
         EditCaretHint(index);
-        EditCaretDisplayAdjusted(TRUE);          /* status / Ctrl+K must use the logical endpoint, not the clipped display position */
+        EditCaretDisplayAdjusted(TRUE);
     }
 done:
     fitting = 0;

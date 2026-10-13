@@ -1,8 +1,6 @@
-/* Inspect resource ownership in the app's thread, without remote pointers. */
 #include "ui_probe.h"
 #ifdef SHOTDC
-LRESULT UiProbeFontAndDialogs(WPARAM operation, LPARAM font)
-{
+LRESULT UiProbeFontAndDialogs(WPARAM operation, LPARAM font) {
     if (operation == 0) return (LRESULT)g_fontUI;
     if (operation == 1) return (LRESULT)g_fontUIB;
     if (operation == 4) {

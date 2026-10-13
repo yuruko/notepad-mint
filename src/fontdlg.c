@@ -1,36 +1,30 @@
-/* fontdlg.c - the font dialog: family (optionally monospaced only), size 7..100, bold / italic, live preview.
- * the editor colours come from the theme (view > theme), so there are no colour settings here */
 #include "mp.h"
 
 enum { ID_LIST = 1301, ID_MONO, ID_SIZE, ID_BOLD, ID_ITALIC };
-#define ID_PRESET  1310                             /* + index into g_sizes */
+#define ID_PRESET  1310
 #define ID_PREVIEW 1360
 #define ID_RESET   1370
 
 typedef struct {
     DlgBase b;
     HWND    list, edit, pv;
-    HFONT   font;                                   /* the preview's font (rebuilt on every change) */
+    HFONT   font;
     WCHAR   face[32];
     int     pt, bold, italic, mono;
-    int     busy;                                   /* SetSizeText is writing the size edit: its EN_CHANGE echo is ignored */
+    int     busy;
 } FontSt;
 
-typedef struct { WCHAR name[32]; int mono; } FontEnt;   /* mono: 0 not measured yet, 1 monospaced, 2 proportional */
+typedef struct { WCHAR name[32]; int mono; } FontEnt;
 
-static FontEnt *g_fonts;                            /* every family, sorted with wcmpi, no duplicates. kept for the */
-static int      g_nfonts, g_capfonts;               /* whole process: measuring hundreds of fonts is slow */
-static int      g_monoOnly = 1;                     /* the filter's last explicit setting */
+static FontEnt *g_fonts;
+static int      g_nfonts, g_capfonts;
+static int      g_monoOnly = 1;
 
-static const int g_sizes[24] = { 80, 85, 90, 95, 100, 105,  110, 115, 120, 125, 130, 135,  140, 160, 180, 200, 220, 240,  260, 280, 320, 360, 400, 480 };     /* tenths of a point, 6 per row */
+static const int g_sizes[24] = { 80, 85, 90, 95, 100, 105,  110, 115, 120, 125, 130, 135,  140, 160, 180, 200, 220, 240,  260, 280, 320, 360, 400, 480 };
 static const WCHAR g_sample[] = L"sphinx of black quartz, judge my vow. 0123456789";
 
-static int Clamp(int v) { return v < FONT_MIN ? FONT_MIN : (v > FONT_MAX ? FONT_MAX : v); }
 
-/* ----------------------------------------------------------- families -- */
-/* binary search: the index, or -1 with *at = where it would go */
-static int FaceFind(const WCHAR *name, int *at)
-{
+static int FaceFind(const WCHAR *name, int *at) {
     int lo = 0, hi = g_nfonts, mid, c;
     while (lo < hi) {
         mid = (lo + hi) / 2;
@@ -42,10 +36,9 @@ static int FaceFind(const WCHAR *name, int *at)
     return -1;
 }
 
-static void FaceAdd(const WCHAR *name)
-{
+static void FaceAdd(const WCHAR *name) {
     int at;
-    if (!name[0] || name[0] == '@' || FaceFind(name, &at) >= 0) return;     /* '@' = the vertical (cjk) variants */
+    if (!name[0] || name[0] == '@' || FaceFind(name, &at) >= 0) return;
     if (g_nfonts == g_capfonts) {
         int cap = g_capfonts ? g_capfonts * 2 : 256;
         FontEnt *p = (FontEnt *)mem_realloc(g_fonts, (size_t)cap * sizeof(FontEnt));
@@ -59,17 +52,13 @@ static void FaceAdd(const WCHAR *name)
     g_nfonts++;
 }
 
-/* one call per family and charset. bitmap fonts are left out: they don't scale over 7..100 pt */
-static int CALLBACK EnumCb(const void *lf, const void *tm, DWORD type, LPARAM lp)
-{
+static int CALLBACK EnumCb(const void *lf, const void *tm, DWORD type, LPARAM lp) {
     (void)tm; (void)lp;
     if (!(type & RASTER_FONTTYPE)) FaceAdd(((const ENUMLOGFONTEXW *)lf)->elfLogFont.lfFaceName);
     return 1;
 }
 
-/* every open: fonts installed meanwhile show up, the measurements of the known ones stay */
-static void FaceEnum(void)
-{
+static void FaceEnum(void) {
     LOGFONTW lf;
     HDC dc = GetDC(NULL);
     if (!dc) return;
@@ -79,13 +68,10 @@ static void FaceEnum(void)
     ReleaseDC(NULL, dc);
 }
 
-/* monospaced = "iiiiiiii" as wide as "WWWWWWWW" (the pitch flags lie too often). measured once, then cached */
-static BOOL IsMono(HDC dc, int i)
-{
+static BOOL IsMono(HDC dc, int i) {
     FontEnt *e = &g_fonts[i];
     if (!e->mono) {
-        HFONT f = CreateFontW(-32, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                              DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, e->name);
+        HFONT f = CreateFontW(-32, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, e->name);
         e->mono = 2;
         if (f) {
             SIZE a, b;
@@ -104,17 +90,13 @@ static BOOL IsMono(HDC dc, int i)
     return e->mono == 1;
 }
 
-/* ---------------------------------------------------------- controls --- */
 static int Checked(HWND h, int id) { return SendMessageW(GetDlgItem(h, id), BM_GETCHECK, 0, 0) == BST_CHECKED; }
 
-static void SetCheck(HWND h, int id, int on)
-{
+static void SetCheck(HWND h, int id, int on) {
     SendMessageW(GetDlgItem(h, id), BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
-/* list item i -> out (32 chars). FALSE for no / a bad item */
-static BOOL ItemText(HWND list, int i, WCHAR *out)
-{
+static BOOL ItemText(HWND list, int i, WCHAR *out) {
     LRESULT n;
     if (i < 0) return FALSE;
     n = SendMessageW(list, LB_GETTEXTLEN, (WPARAM)i, 0);
@@ -123,29 +105,24 @@ static BOOL ItemText(HWND list, int i, WCHAR *out)
     return TRUE;
 }
 
-static void FillList(FontSt *d)
-{
+static void FillList(FontSt *d) {
     HCURSOR cur = NULL;
     HDC dc = NULL;
     int i;
-    if (d->mono) {                                  /* the first time this measures every family */
+    if (d->mono) {
         cur = SetCursor(LoadCursorW(NULL, IDC_WAIT));
         dc = CreateCompatibleDC(NULL);
     }
     SendMessageW(d->list, WM_SETREDRAW, FALSE, 0);
     SendMessageW(d->list, LB_RESETCONTENT, 0, 0);
-    for (i = 0; i < g_nfonts; i++)
-        if (!d->mono || !dc || IsMono(dc, i)) SendMessageW(d->list, LB_ADDSTRING, 0, (LPARAM)g_fonts[i].name);
+    for (i = 0; i < g_nfonts; i++) if (!d->mono || !dc || IsMono(dc, i)) SendMessageW(d->list, LB_ADDSTRING, 0, (LPARAM)g_fonts[i].name);
     if (dc) DeleteDC(dc);
-    if (d->mono) SetCursor(cur ? cur : LoadCursorW(NULL, IDC_ARROW));     /* SetCursor(NULL) would hide the cursor */
+    if (d->mono) SetCursor(cur ? cur : LoadCursorW(NULL, IDC_ARROW));
     SendMessageW(d->list, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(d->list, NULL, TRUE);
 }
 
-/* select d->face, scrolled into view. force: a face the filter hides switches the filter off (open, reset);
- * otherwise (the filter was just switched on) nothing is selected and the face stays what it was */
-static void SelectFace(FontSt *d, int force)
-{
+static void SelectFace(FontSt *d, int force) {
     int i = (int)SendMessageW(d->list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)d->face);
     if (i == LB_ERR && d->mono && force) {
         d->mono = 0;
@@ -155,14 +132,11 @@ static void SelectFace(FontSt *d, int force)
     }
     SendMessageW(d->list, LB_SETCURSEL, (WPARAM)i, 0);
     if (i < 0) return;
-    ItemText(d->list, i, d->face);                  /* the installed spelling */
+    ItemText(d->list, i, d->face);
     SendMessageW(d->list, LB_SETTOPINDEX, (WPARAM)(i > 3 ? i - 3 : 0), 0);
 }
 
-/* the size edit's number in tenths of a point, clamped: "8" = 80, "8.5" = 85 (one decimal digit, the rest is dropped);
- * def when it doesn't start with a digit (empty) */
-static int SizeText(HWND e, int def)
-{
+static int SizeText(HWND e, int def) {
     WCHAR t[16];
     const WCHAR *p = t;
     int whole = 0, frac = 0;
@@ -172,21 +146,15 @@ static int SizeText(HWND e, int def)
     if (*p < '0' || *p > '9') return def;
     while (*p >= '0' && *p <= '9') whole = whole * 10 + (*p++ - '0');
     if ((*p == '.' || *p == ',') && p[1] >= '0' && p[1] <= '9') frac = p[1] - '0';
-    return Clamp(whole * 10 + frac);
+    return ClampInt(whole * 10 + frac, FONT_MIN, FONT_MAX);
 }
 
-/* tenths -> "8" or "8.5" */
-static void FormatPt(WCHAR *t, int tenths)
-{
+static void FormatPt(WCHAR *t, int tenths) {
     if (tenths % 10) wsprintfW(t, L"%d.%d", tenths / 10, tenths % 10);
     else wsprintfW(t, L"%d", tenths / 10);
 }
 
-/* d->pt -> the size edit. WM_SETTEXT on an edit does send EN_CHANGE, synchronously: FontCmd re-enters from inside
- * SetWindowTextW. busy makes that echo return early (every caller rebuilds the preview itself afterwards), and the text is
- * only written when it differs, so this cannot loop */
-static void SetSizeText(FontSt *d)
-{
+static void SetSizeText(FontSt *d) {
     WCHAR t[16], cur[16];
     FormatPt(t, d->pt);
     cur[0] = 0;
@@ -198,39 +166,30 @@ static void SetSizeText(FontSt *d)
     }
 }
 
-/* the dialog's controls -> the local state. ok runs it because a scripted LB_SETCURSEL / BM_SETCHECK sends no notification
- * (WM_SETTEXT on the size edit does notify with EN_CHANGE, but the edit is read here anyway) */
-static void Sync(FontSt *d)
-{
+static void Sync(FontSt *d) {
     ItemText(d->list, (int)SendMessageW(d->list, LB_GETCURSEL, 0, 0), d->face);
     d->pt = SizeText(d->edit, d->pt);
     d->bold = Checked(d->b.hwnd, ID_BOLD);
     d->italic = Checked(d->b.hwnd, ID_ITALIC);
 }
 
-/* ----------------------------------------------------------- preview --- */
-static HFONT MakeFont(const FontSt *d, int px)
-{
-    return CreateFontW(-(px < 1 ? 1 : px), 0, 0, 0, d->bold ? FW_BOLD : FW_NORMAL, (DWORD)(d->italic ? 1 : 0), 0, 0,
-                       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, d->face);
+static HFONT MakeFont(const FontSt *d, int px) {
+    return CreateFontW(-(px < 1 ? 1 : px), 0, 0, 0, d->bold ? FW_BOLD : FW_NORMAL, (DWORD)(d->italic ? 1 : 0), 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, d->face);
 }
 
-/* one line at the actual selected size. long samples are clipped horizontally rather than shrinking the font */
 #define PV_L   S(10)
 #define PV_R   S(6)
-static void PreviewFont(FontSt *d)
-{
+static void PreviewFont(FontSt *d) {
     HFONT f;
     if (!d->pv) return;
     f = MakeFont(d, MulDiv(d->pt, g_dpi, 720));
-    if (!f) return;                                 /* preserve the last preview if a GDI allocation fails */
+    if (!f) return;
     if (d->font) DeleteObject(d->font);
     d->font = f;
     InvalidateRect(d->pv, NULL, FALSE);
 }
 
-static void PreviewDraw(HDC dc, const RECT *rc, const FontSt *d)
-{
+static void PreviewDraw(HDC dc, const RECT *rc, const FontSt *d) {
     RECT line = *rc;
     HGDIOBJ of;
     FillC(dc, rc, C_EDIT_BG);
@@ -241,9 +200,7 @@ static void PreviewDraw(HDC dc, const RECT *rc, const FontSt *d)
     if (of) SelectObject(dc, of);
 }
 
-/* double buffered, in the editor colours of the current theme (read here, never cached) */
-static void PreviewPaint(HWND h, const FontSt *d)
-{
+static void PreviewPaint(HWND h, const FontSt *d) {
     PAINTSTRUCT ps;
     RECT rc;
     HDC dc, mdc;
@@ -268,8 +225,7 @@ static void PreviewPaint(HWND h, const FontSt *d)
     EndPaint(h, &ps);
 }
 
-static LRESULT CALLBACK PreviewProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+static LRESULT CALLBACK PreviewProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_NCCREATE) {
         SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW *)l)->lpCreateParams);
         return DefWindowProcW(h, m, w, l);
@@ -289,10 +245,7 @@ static LRESULT CALLBACK PreviewProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-/* ------------------------------------------------------------ dialog --- */
-/* local state -> the controls (open, reset) */
-static void ShowState(FontSt *d)
-{
+static void ShowState(FontSt *d) {
     SetCheck(d->b.hwnd, ID_BOLD, d->bold);
     SetCheck(d->b.hwnd, ID_ITALIC, d->italic);
     SetSizeText(d);
@@ -300,8 +253,7 @@ static void ShowState(FontSt *d)
     PreviewFont(d);
 }
 
-static void DrawItem(const DRAWITEMSTRUCT *di)
-{
+static void DrawItem(const DRAWITEMSTRUCT *di) {
     WCHAR t[32];
     RECT r = di->rcItem;
     BOOL has = ItemText(di->hwndItem, (int)di->itemID, t), sel = has && (di->itemState & ODS_SELECTED);
@@ -316,16 +268,12 @@ static void DrawItem(const DRAWITEMSTRUCT *di)
     if (di->itemState & ODS_FOCUS) DrawFocusRect(di->hDC, &di->rcItem);
 }
 
-static void Opt(HWND h, const WCHAR *text, int x, int y, int w, int id, DWORD extra, int on)
-{
+static void Opt(HWND h, const WCHAR *text, int x, int y, int w, int id, DWORD extra, int on) {
     HWND c = UiButton(h, text, x, y, w, 20, id, BS_AUTOCHECKBOX | extra);
     SendMessageW(c, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
-/* client 528 x 440: family list | size + presets + bold / italic, preview below, buttons at the bottom.
- * the labels and the preview come first so they never sit inside a control group (arrow keys) */
-static void FontLayout(FontSt *d)
-{
+static void FontLayout(FontSt *d) {
     DlgBase *b = &d->b;
     HWND h = b->hwnd, c;
     WCHAR t[8];
@@ -335,40 +283,32 @@ static void FontLayout(FontSt *d)
     UiLabel(h, L"7 to 100 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
     UiLabel(h, L"preview:", 12, 228, 200, 16, 0, SS_NOPREFIX);
     DlgFrame(b, 12, 246, 504, 146, BV_SUNKEN);
-    d->pv = CreateWindowExW(0, L"mp_fontpv", g_sample, WS_CHILD | WS_VISIBLE, S(12) + 2, S(246) + 2, S(504) - 4, S(146) - 4,
-                            h, (HMENU)(ULONG_PTR)ID_PREVIEW, g_hinst, d);
-
+    d->pv = CreateWindowExW(0, L"mp_fontpv", g_sample, WS_CHILD | WS_VISIBLE, S(12) + 2, S(246) + 2, S(504) - 4, S(146) - 4, h, (HMENU)(ULONG_PTR)ID_PREVIEW, g_hinst, d);
     DlgFrame(b, 12, 28, 236, 166, BV_SUNKEN);
-    d->list = CreateWindowExW(0, L"LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | WS_VSCROLL | LBS_NOTIFY |
-                              LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
-                              S(12) + 2, S(28) + 2, S(236) - 4, S(166) - 4, h, (HMENU)(ULONG_PTR)ID_LIST, g_hinst, NULL);
+    d->list = CreateWindowExW(0, L"LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | WS_VSCROLL | LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT, S(12) + 2, S(28) + 2, S(236) - 4, S(166) - 4, h, (HMENU)(ULONG_PTR)ID_LIST, g_hinst, NULL);
     SendMessageW(d->list, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
     DarkScroll(d->list);
     Opt(h, L"monospaced fonts only", 12, 200, 236, ID_MONO, WS_GROUP, d->mono);
-
-    d->edit = UiEdit(b, L"", 264, 28, 56, 23, ID_SIZE, WS_GROUP);      /* no ES_NUMBER: a decimal point is typed too */
-    SendMessageW(d->edit, EM_LIMITTEXT, 5, 0);                         /* "100.5" */
-    for (i = 0; i < COUNTOF(g_sizes); i++) {                       /* one tab stop: the arrow keys move along */
+    d->edit = UiEdit(b, L"", 264, 28, 56, 23, ID_SIZE, WS_GROUP);
+    SendMessageW(d->edit, EM_LIMITTEXT, 5, 0);
+    for (i = 0; i < COUNTOF(g_sizes); i++) {
         FormatPt(t, g_sizes[i]);
         c = UiButton(h, t, 264 + (i % 6) * 42, 60 + (i / 6) * 26, 40, 22, ID_PRESET + i, BS_PUSHBUTTON | (i ? 0 : WS_GROUP));
         if (i) SetWindowLongPtrW(c, GWL_STYLE, GetWindowLongPtrW(c, GWL_STYLE) & ~WS_TABSTOP);
     }
     Opt(h, L"bold", 264, 170, 80, ID_BOLD, WS_GROUP, d->bold);
     Opt(h, L"italic", 352, 170, 80, ID_ITALIC, 0, d->italic);
-
     UiButton(h, L"reset", 12, 404, 88, 24, ID_RESET, BS_PUSHBUTTON | WS_GROUP);
     UiButton(h, L"ok", 336, 404, 86, 24, IDOK, BS_DEFPUSHBUTTON | WS_GROUP);
     UiButton(h, L"cancel", 430, 404, 86, 24, IDCANCEL, BS_PUSHBUTTON);
-
     FillList(d);
     ShowState(d);
     b->focus = d->list;
 }
 
-static void FontCmd(FontSt *d, int id, int code)
-{
+static void FontCmd(FontSt *d, int id, int code) {
     HWND h = d->b.hwnd;
-    if (d->b.done) return;                                          /* closing: the focus moving away still notifies */
+    if (d->b.done) return;
     switch (id) {
     case IDOK:
         Sync(d);
@@ -388,9 +328,9 @@ static void FontCmd(FontSt *d, int id, int code)
         SelectFace(d, 0);
         return;
     case ID_SIZE:
-        if (d->busy || (code != EN_CHANGE && code != EN_KILLFOCUS)) return;     /* busy: the echo of SetSizeText */
+        if (d->busy || (code != EN_CHANGE && code != EN_KILLFOCUS)) return;
         d->pt = SizeText(d->edit, d->pt);
-        if (code == EN_KILLFOCUS) SetSizeText(d);                  /* the clamped value replaces what was typed */
+        if (code == EN_KILLFOCUS) SetSizeText(d);
         break;
     case ID_BOLD:
     case ID_ITALIC:
@@ -414,13 +354,11 @@ static void FontCmd(FontSt *d, int id, int code)
     PreviewFont(d);
 }
 
-static LRESULT CALLBACK FontProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+static LRESULT CALLBACK FontProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     DlgBase *b = DlgFromHwnd(h, m, l);
     FontSt *d = (FontSt *)b;
     LRESULT r;
     if (!b) return DefWindowProcW(h, m, w, l);
-
     switch (m) {
     case WM_CREATE:
         FontLayout(d);
@@ -443,9 +381,7 @@ static LRESULT CALLBACK FontProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-/* works on a copy of g_pf's face / size / bold / italic; ok copies it back (main then applies it) */
-BOOL FontDlg(HWND owner)
-{
+BOOL FontDlg(HWND owner) {
     static BOOL reg;
     FontSt d;
     if (!reg) {
@@ -456,17 +392,17 @@ BOOL FontDlg(HWND owner)
     memset(&d, 0, sizeof d);
     DlgBaseInit(&d.b, owner);
     wcopy(d.face, g_pf.font, 32);
-    d.pt = Clamp(g_pf.pt);
+    d.pt = ClampInt(g_pf.pt, FONT_MIN, FONT_MAX);
     d.bold = g_pf.bold != 0;
     d.italic = g_pf.italic != 0;
-    d.mono = g_monoOnly;                            /* SelectFace switches it off when the current face isn't monospaced */
+    d.mono = g_monoOnly;
     FaceEnum();
-    FaceAdd(d.face);                                /* the current face is always listed (even a bitmap font) */
+    FaceAdd(d.face);
     if (!DlgOpen(&d.b, L"mp_font", L"font", 528, 440, 0)) return FALSE;
     DlgRunModal(&d.b);
     if (d.b.result != IDOK) return FALSE;
     wcopy(g_pf.font, d.face, 32);
-    g_pf.pt = Clamp(d.pt);
+    g_pf.pt = ClampInt(d.pt, FONT_MIN, FONT_MAX);
     g_pf.bold = d.bold;
     g_pf.italic = d.italic;
     return TRUE;

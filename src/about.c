@@ -1,4 +1,3 @@
-/* about.c - "about notepad mint" box and the help topics (a keyboard / features cheat sheet) */
 #include "mp.h"
 
 #define SS_ICON     0x03
@@ -6,14 +5,10 @@
 
 typedef struct { DlgBase b; HICON icon; HWND edit; } InfoDlg;
 
-/* ------------------------------------------------------------------- link -- */
-/* a text link: accent coloured and underlined, accent background while hovered, opens its address in the default browser
- * (shell32 is loaded at run time like everywhere else). the address is the control's text ("yuru.be" -> https://yuru.be) */
 #define ID_LINK 1060
 typedef struct { int hot, focus, down; } LinkSt;
 
-static void LinkOpen(HWND h)
-{
+static void LinkOpen(HWND h) {
     typedef HINSTANCE (WINAPI *ShellExecFn)(HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, int);
     WCHAR url[160];
     HMODULE m = LoadLibraryW(L"shell32.dll");
@@ -23,13 +18,12 @@ static void LinkOpen(HWND h)
     if (f) f(GetParent(h), L"open", url, NULL, NULL, SW_SHOWNORMAL);
 }
 
-static LRESULT CALLBACK LinkProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+static LRESULT CALLBACK LinkProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     LinkSt *s = (LinkSt *)GetWindowLongPtrW(h, GWLP_USERDATA);
     if (m == WM_NCCREATE) {
         s = (LinkSt *)mem_zalloc(sizeof *s);
         SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)s);
-        return DefWindowProcW(h, m, w, l);                          /* this is what stores the caption text */
+        return DefWindowProcW(h, m, w, l);
     }
     if (!s) return DefWindowProcW(h, m, w, l);
     switch (m) {
@@ -93,7 +87,7 @@ static LRESULT CALLBACK LinkProc(HWND h, UINT m, WPARAM w, LPARAM l)
         DrawTextW(dc, t, n, &cr, DT_LEFT | DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
         th = cr.bottom - cr.top;
         TextC(dc, t, n, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, s->hot ? C_ON_ACCENT : C_ACCENT_FG);
-        ul.left = tr.left; ul.right = cr.right; ul.top = (rc.bottom + th) / 2 - 1; ul.bottom = ul.top + 1;      /* the underline */
+        ul.left = tr.left; ul.right = cr.right; ul.top = (rc.bottom + th) / 2 - 1; ul.bottom = ul.top + 1;
         FillC(dc, &ul, s->hot ? C_ON_ACCENT : C_ACCENT_FG);
         if (s->focus) {
             RECT f = rc;
@@ -107,39 +101,31 @@ static LRESULT CALLBACK LinkProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-/* ------------------------------------------------------------------ about -- */
-static LRESULT CALLBACK AboutProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+static LRESULT CALLBACK AboutProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     DlgBase *b = DlgFromHwnd(h, m, l);
     InfoDlg *d = (InfoDlg *)b;
     LRESULT r;
     if (!b) return DefWindowProcW(h, m, w, l);
-
     switch (m) {
     case WM_CREATE: {
         HWND c;
         d->icon = (HICON)LoadImageW(g_hinst, MAKEINTRESOURCEW(1), IMAGE_ICON, S(32), S(32), LR_DEFAULTCOLOR);
-        c = CreateWindowExW(0, L"STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_ICON, S(20), S(20), S(32), S(32),
-                            h, NULL, g_hinst, NULL);
+        c = CreateWindowExW(0, L"STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_ICON, S(20), S(20), S(32), S(32), h, NULL, g_hinst, NULL);
         if (d->icon) SendMessageW(c, STM_SETICON, (WPARAM)d->icon, 0);
         c = UiLabel(h, L"notepad mint", 68, 18, 290, 20, 0, SS_NOPREFIX);
         SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUIB, FALSE);
         UiLabel(h, L"version " APP_VERSION L"  (32-bit)", 68, 40, 290, 16, IDC_DIM, SS_NOPREFIX);
         DlgFrame(b, 20, 68, 340, 2, BV_ETCHED);
-        UiLabel(h, L"a free replacement for notepad.exe.\n"
-                   L"plain text, dark or light, and nothing else:\n"
-                   L"no ai, no sign-in, no telemetry, no cloud.", 20, 80, 340, 52, 0, SS_NOPREFIX);
-        UiLabel(h, L"written in c and assembly with no runtime libraries. one small 32-bit exe runs on "
-                   L"32-bit, 64-bit and arm windows.", 20, 138, 340, 34, IDC_DIM, SS_NOPREFIX);
+        UiLabel(h, L"a free replacement for notepad.exe.\nplain text, dark or light, and nothing else:\nno ai, no sign-in, no telemetry, no cloud.", 20, 80, 340, 52, 0, SS_NOPREFIX);
+        UiLabel(h, L"written in c and assembly with no runtime libraries. one small 32-bit exe runs on 32-bit, 64-bit and arm windows.", 20, 138, 340, 34, IDC_DIM, SS_NOPREFIX);
         UiLabel(h, L"settings: %appdata%\\notepad-mint\\settings.ini", 20, 176, 340, 16, IDC_DIM, SS_NOPREFIX);
-        c = CreateWindowExW(0, L"mp_link", L"yuru.be", WS_CHILD | WS_VISIBLE | WS_TABSTOP, S(20), S(206), S(76), S(20),
-                            h, (HMENU)(ULONG_PTR)ID_LINK, g_hinst, NULL);
+        c = CreateWindowExW(0, L"mp_link", L"yuru.be", WS_CHILD | WS_VISIBLE | WS_TABSTOP, S(20), S(206), S(76), S(20), h, (HMENU)(ULONG_PTR)ID_LINK, g_hinst, NULL);
         SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
         b->focus = UiButton(h, L"ok", 272, 204, 88, 24, IDOK, BS_DEFPUSHBUTTON);
         return 0; }
     case WM_COMMAND:
         if (LOWORD(w) == IDOK || LOWORD(w) == IDCANCEL) { b->result = 1; b->done = 1; return 0; }
-        if (LOWORD(w) == ID_LINK) { LinkOpen(GetDlgItem(h, ID_LINK)); return 0; }   /* enter on the focused link (the dialog manager sends it as a button click) */
+        if (LOWORD(w) == ID_LINK) { LinkOpen(GetDlgItem(h, ID_LINK)); return 0; }
         break;
     case WM_NCDESTROY:
         if (d->icon) { DestroyIcon(d->icon); d->icon = NULL; }
@@ -149,8 +135,7 @@ static LRESULT CALLBACK AboutProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-void AboutDlg(HWND owner)
-{
+void AboutDlg(HWND owner) {
     static BOOL reg;
     InfoDlg d;
     if (!reg) { RegClass(L"mp_about", AboutProc, 0, NULL); RegClass(L"mp_link", LinkProc, 0, NULL); reg = TRUE; }
@@ -160,10 +145,7 @@ void AboutDlg(HWND owner)
     DlgRunModal(&d.b);
 }
 
-/* ------------------------------------------------------------------- help -- */
-/* keys are a table (monospace: the columns line up), everything else is one paragraph per line: the edit wraps it, so no line is broken by hand */
-static const WCHAR g_help[] =
-    L"notepad mint - keyboard shortcuts and tips\r\n"
+static const WCHAR g_help[] = L"notepad mint - keyboard shortcuts and tips\r\n"
     L"\r\n"
     L"file\r\n"
     L"  ctrl+n            new\r\n"
@@ -242,31 +224,26 @@ static const WCHAR g_help[] =
     L"scroll bar moves to the left. the edit menu's right to left reading order, ctrl+right shift and "
     L"ctrl+left shift set it by hand until the next new or open.\r\n";
 
-/* the text fills the whole window: no frame, no padding around it and no button (esc or enter closes) */
 #define HELP_W 560
 #define HELP_H 420
 
-static LRESULT CALLBACK HelpProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+static LRESULT CALLBACK HelpProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     DlgBase *b = DlgFromHwnd(h, m, l);
     InfoDlg *d = (InfoDlg *)b;
     LRESULT r;
     if (!b) return DefWindowProcW(h, m, w, l);
-
     switch (m) {
     case WM_CREATE: {
         RECT tr;
-        d->edit = CreateWindowExW(0, L"EDIT", g_help,
-                                  WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
-                                  0, 0, S(HELP_W), S(HELP_H), h, (HMENU)(ULONG_PTR)1001, g_hinst, NULL);
-        SendMessageW(d->edit, WM_SETFONT, (WPARAM)g_fontMenu, FALSE);       /* monospace: the columns line up */
+        d->edit = CreateWindowExW(0, L"EDIT", g_help, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 0, 0, S(HELP_W), S(HELP_H), h, (HMENU)(ULONG_PTR)1001, g_hinst, NULL);
+        SendMessageW(d->edit, WM_SETFONT, (WPARAM)g_fontMenu, FALSE);
         GetClientRect(d->edit, &tr);
-        InflateRect(&tr, -S(10), -S(8));                                    /* the text sits inside the window, not against its edges */
+        InflateRect(&tr, -S(10), -S(8));
         SendMessageW(d->edit, EM_SETRECTNP, 0, (LPARAM)&tr);
         DarkScroll(d->edit);
         b->focus = d->edit;
         return 0; }
-    case WM_CTLCOLORSTATIC:                                  /* a read-only edit asks for the "static" colors */
+    case WM_CTLCOLORSTATIC:
         if ((HWND)l == d->edit) {
             SetTextColor((HDC)w, C_TEXT);
             SetBkColor((HDC)w, C_FIELD);
@@ -281,8 +258,7 @@ static LRESULT CALLBACK HelpProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-void HelpDlg(HWND owner)
-{
+void HelpDlg(HWND owner) {
     static BOOL reg;
     InfoDlg d;
     if (!reg) { RegClass(L"mp_help", HelpProc, 0, NULL); reg = TRUE; }

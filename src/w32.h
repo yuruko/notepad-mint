@@ -1,11 +1,3 @@
-/* w32.h - hand-written win32 declarations for notepad mint
- *
- * there is no windows.h, no crt and no third-party code in this project. every
- * type, constant and prototype the program needs is declared right here, and
- * the only things the exe links against are the os's own kernel32/user32/gdi32.
- * this is a 32-bit (x86) program: one exe runs on 32-bit windows, 64-bit windows
- * and windows on arm. struct layouts mirror the 32-bit sdk exactly (tools/layout_check).
- */
 #ifndef W32_H
 #define W32_H
 
@@ -17,7 +9,6 @@
 #define FALSE     0
 #define COUNTOF(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
-/* ---------------------------------------------------------------- types -- */
 typedef unsigned char       BYTE;
 typedef unsigned short      WORD, WCHAR, ATOM;
 typedef unsigned long       DWORD, ULONG;
@@ -27,7 +18,7 @@ typedef int                 BOOL, INT;
 typedef unsigned int        UINT;
 typedef unsigned __int64    ULONGLONG;
 typedef __int64             LONGLONG;
-typedef unsigned int        ULONG_PTR, UINT_PTR, SIZE_T, DWORD_PTR, WPARAM, size_t;      /* 32-bit: pointer sized == 32 bits */
+typedef unsigned int        ULONG_PTR, UINT_PTR, SIZE_T, DWORD_PTR, WPARAM, size_t;
 typedef int                 LONG_PTR, INT_PTR, LPARAM, LRESULT;
 typedef void               *PVOID, *LPVOID, *HANDLE, *HGDIOBJ, *HLOCAL, *HGLOBAL;
 typedef const void         *LPCVOID;
@@ -74,7 +65,6 @@ typedef int     (CALLBACK *FONTENUMPROCW)(const void *, const void *, DWORD, LPA
 #define GetGValue(c) ((BYTE)(((c) >> 8) & 0xff))
 #define GetBValue(c) ((BYTE)(((c) >> 16) & 0xff))
 
-/* -------------------------------------------------------------- structs -- */
 typedef struct { LONG x, y; } POINT;
 typedef struct { LONG cx, cy; } SIZE;
 typedef struct { LONG left, top, right, bottom; } RECT;
@@ -119,8 +109,7 @@ typedef struct {
 } LOGFONTW;
 typedef struct { LOGFONTW elfLogFont; WCHAR elfFullName[64]; WCHAR elfStyle[32]; WCHAR elfScript[32]; } ENUMLOGFONTEXW;
 typedef struct {
-    LONG tmHeight, tmAscent, tmDescent, tmInternalLeading, tmExternalLeading, tmAveCharWidth, tmMaxCharWidth,
-         tmWeight, tmOverhang, tmDigitizedAspectX, tmDigitizedAspectY;
+    LONG tmHeight, tmAscent, tmDescent, tmInternalLeading, tmExternalLeading, tmAveCharWidth, tmMaxCharWidth, tmWeight, tmOverhang, tmDigitizedAspectX, tmDigitizedAspectY;
     WCHAR tmFirstChar, tmLastChar, tmDefaultChar, tmBreakChar;
     BYTE tmItalic, tmUnderlined, tmStruckOut, tmPitchAndFamily, tmCharSet;
 } TEXTMETRICW;
@@ -147,7 +136,6 @@ typedef struct { DWORD biSize; LONG biWidth, biHeight; WORD biPlanes, biBitCount
 typedef struct { BYTE rgbBlue, rgbGreen, rgbRed, rgbReserved; } RGBQUAD;
 typedef struct { BITMAPINFOHEADER bmiHeader; RGBQUAD bmiColors[1]; } BITMAPINFO;
 
-/* printdlg / pagesetupdlg (comdlg32, loaded only when the user prints). the 32-bit sdk packs PRINTDLG to 1 byte */
 #pragma pack(push, 1)
 typedef struct {
     DWORD lStructSize; HWND hwndOwner; HGLOBAL hDevMode, hDevNames; HDC hDC; DWORD Flags;
@@ -162,8 +150,6 @@ typedef struct {
     void *lpfnPageSetupHook, *lpfnPagePaintHook; LPCWSTR lpPageSetupTemplateName; HGLOBAL hPageSetupTemplate;
 } PAGESETUPDLGW;
 
-/* openfilename (comdlg32 GetOpenFileNameW / GetSaveFileNameW, loaded when the user opens / saves). commdlg.h packs the whole struct to 1 byte;
- * this is the windows 2000+ form (the last three fields) and lStructSize must be sizeof */
 #pragma pack(push, 1)
 typedef struct {
     DWORD lStructSize; HWND hwndOwner; HINSTANCE hInstance; LPCWSTR lpstrFilter; LPWSTR lpstrCustomFilter; DWORD nMaxCustFilter, nFilterIndex;
@@ -173,13 +159,11 @@ typedef struct {
 } OPENFILENAMEW;
 #pragma pack(pop)
 
-/* ------------------------------------------------------------ constants -- */
 #define INVALID_HANDLE_VALUE ((HANDLE)(LONG_PTR)-1)
 #define CW_USEDEFAULT        ((int)0x80000000)
 #define HWND_TOP        ((HWND)0)
 #define HWND_BOTTOM     ((HWND)1)
 
-/* window styles */
 #define WS_OVERLAPPED 0x00000000L
 #define WS_POPUP      0x80000000L
 #define WS_CHILD      0x40000000L
@@ -209,7 +193,6 @@ typedef struct {
 #define CS_DBLCLKS 0x0008
 #define CS_DROPSHADOW 0x00020000
 
-/* messages */
 #define WM_NULL 0x0000
 #define WM_CREATE 0x0001
 #define WM_DESTROY 0x0002
@@ -374,7 +357,6 @@ typedef struct {
 #define FCONTROL 8
 #define FALT 0x10
 
-/* virtual keys */
 #define VK_BACK 0x08
 #define VK_RETURN 0x0D
 #define VK_SHIFT 0x10
@@ -401,7 +383,6 @@ typedef struct {
 #define VK_OEM_PLUS 0xBB
 #define VK_OEM_MINUS 0xBD
 
-/* edit control */
 #define ES_MULTILINE 0x0004
 #define ES_AUTOVSCROLL 0x0040
 #define ES_AUTOHSCROLL 0x0080
@@ -437,7 +418,6 @@ typedef struct {
 #define EN_ERRSPACE 0x0500
 #define EN_MAXTEXT 0x0501
 
-/* buttons / statics / list boxes */
 #define BS_PUSHBUTTON 0x00
 #define BS_DEFPUSHBUTTON 0x01
 #define BS_AUTOCHECKBOX 0x03
@@ -480,7 +460,6 @@ typedef struct {
 #define ODS_SELECTED 0x0001
 #define ODS_FOCUS 0x0010
 
-/* drawing */
 #define DT_LEFT 0x0000
 #define DT_CENTER 0x0001
 #define DT_RIGHT 0x0002
@@ -517,7 +496,6 @@ typedef struct {
 #define DC_PEN 19
 #define RASTER_FONTTYPE 0x0001
 
-/* files / strings */
 #define GENERIC_READ  0x80000000L
 #define GENERIC_WRITE 0x40000000L
 #define FILE_SHARE_READ 1
@@ -556,7 +534,6 @@ typedef struct {
 #define ERROR_CANCELLED 1223L
 #define CSTR_EQUAL 2
 
-/* dwm (dwmapi.dll, loaded at run time) */
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 #define DWMWA_WINDOW_CORNER_PREFERENCE 33
 #define DWMWA_BORDER_COLOR 34
@@ -564,7 +541,6 @@ typedef struct {
 #define DWMWA_TEXT_COLOR 36
 #define DWMWCP_DONOTROUND 1
 
-/* comdlg32 printing */
 #define PD_SELECTION 0x00000001
 #define PD_PAGENUMS 0x00000002
 #define PD_DISABLEPRINTTOFILE 0x00080000
@@ -575,13 +551,12 @@ typedef struct {
 #define PD_USEDEVMODECOPIESANDCOLLATE 0x00040000
 #define PSD_MARGINS 0x00000002
 #define PSD_INTHOUSANDTHSOFINCHES 0x00000004
-#define PDERR_NODEVICES 0x1007                          /* cderr.h */
+#define PDERR_NODEVICES 0x1007
 #define PDERR_NODEFAULTPRN 0x1008
 #define PDERR_DNDMMISMATCH 0x1009
 #define PDERR_PRINTERNOTFOUND 0x100B
 #define PDERR_DEFAULTDIFFERENT 0x100C
 
-/* comdlg32 open / save as (OPENFILENAMEW.Flags, and CommDlgExtendedError after a failed call: cderr.h) */
 #define OFN_OVERWRITEPROMPT 0x00000002
 #define OFN_HIDEREADONLY 0x00000004
 #define OFN_NOCHANGEDIR 0x00000008
@@ -590,7 +565,6 @@ typedef struct {
 #define OFN_EXPLORER 0x00080000
 #define FNERR_BUFFERTOOSMALL 0x3003
 
-/* ------------------------------------------------------------- kernel32 -- */
 API void    WINAPI ExitProcess(UINT);
 API HMODULE WINAPI GetModuleHandleW(LPCWSTR);
 API LPWSTR  WINAPI GetCommandLineW(void);
@@ -645,8 +619,7 @@ API DWORD   WINAPI GetCurrentThreadId(void);
 API HGLOBAL WINAPI GlobalFree(HGLOBAL);
 API UINT    WINAPI SetErrorMode(UINT);
 
-/* --------------------------------------------------------------- user32 -- */
-API LONG    WINAPI SetWindowLongW(HWND, int, LONG);              /* 32-bit user32 has no ...LongPtr exports */
+API LONG    WINAPI SetWindowLongW(HWND, int, LONG);
 API LONG    WINAPI GetWindowLongW(HWND, int);
 API ATOM    WINAPI RegisterClassExW(const WNDCLASSEXW *);
 API HWND    WINAPI CreateWindowExW(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, LPVOID);
@@ -666,7 +639,7 @@ API void    WINAPI PostQuitMessage(int);
 #define GetWindowLongPtrW GetWindowLongW
 API BOOL    WINAPI SetWindowPos(HWND, HWND, int, int, int, int, UINT);
 API BOOL    WINAPI MoveWindow(HWND, int, int, int, int, BOOL);
-API HDWP    WINAPI BeginDeferWindowPos(int);                  /* the child windows of a resized window move in one go (Layout) */
+API HDWP    WINAPI BeginDeferWindowPos(int);
 API HDWP    WINAPI DeferWindowPos(HDWP, HWND, HWND, int, int, int, int, UINT);
 API BOOL    WINAPI EndDeferWindowPos(HDWP);
 API BOOL    WINAPI GetClientRect(HWND, RECT *);
@@ -723,8 +696,6 @@ API BOOL    WINAPI GetMonitorInfoW(HMONITOR, MONITORINFO *);
 API BOOL    WINAPI GetWindowPlacement(HWND, WINDOWPLACEMENT *);
 API BOOL    WINAPI SetWindowPlacement(HWND, const WINDOWPLACEMENT *);
 API BOOL    WINAPI AdjustWindowRectEx(RECT *, DWORD, BOOL, DWORD);
-/* GetDpiForWindow / GetDpiForSystem / AdjustWindowRectExForDpi / GetSystemMetricsForDpi are windows 10 only:
- * ui.c looks them up at run time (UiDpiForWindow ...) so the exe still starts on older windows */
 API BOOL    WINAPI SetRect(RECT *, int, int, int, int);
 API BOOL    WINAPI OffsetRect(RECT *, int, int);
 API BOOL    WINAPI InflateRect(RECT *, int, int);
@@ -737,7 +708,7 @@ API int     WINAPI GetClassNameW(HWND, LPWSTR, int);
 API BOOL    WINAPI EnumChildWindows(HWND, BOOL (CALLBACK *)(HWND, LPARAM), LPARAM);
 API BOOL    WINAPI EnumThreadWindows(DWORD, BOOL (CALLBACK *)(HWND, LPARAM), LPARAM);
 API HWND    WINAPI GetActiveWindow(void);
-API DWORD   WINAPI SetClassLongW(HWND, int, LONG);              /* SetClassLongPtrW on 32-bit */
+API DWORD   WINAPI SetClassLongW(HWND, int, LONG);
 API BOOL    WINAPI GetCaretPos(POINT *);
 API BOOL    WINAPI SetCaretPos(int, int);
 API BOOL    WINAPI GetGUIThreadInfo(DWORD, GUITHREADINFO *);
@@ -749,10 +720,9 @@ API BOOL    WINAPI ShowScrollBar(HWND, int, BOOL);
 API BOOL    WINAPI IsClipboardFormatAvailable(UINT);
 API HWND    WINAPI FindWindowExW(HWND, HWND, LPCWSTR, LPCWSTR);
 API BOOL    WINAPI DrawIconEx(HDC, int, int, HICON, int, int, UINT, HBRUSH, UINT);
-API LONG    WINAPI TabbedTextOutW(HDC, int, int, LPCWSTR, int, int, const INT *, int);      /* low word of the result = the width of the text, high word = its height */
-API DWORD   WINAPI GetTabbedTextExtentW(HDC, LPCWSTR, int, int, const INT *);               /* same result, nothing drawn; the text starts at the tab origin */
+API LONG    WINAPI TabbedTextOutW(HDC, int, int, LPCWSTR, int, int, const INT *, int);
+API DWORD   WINAPI GetTabbedTextExtentW(HDC, LPCWSTR, int, int, const INT *);
 
-/* --------------------------------------------------------------- gdi32 ---- */
 API HFONT    WINAPI CreateFontW(int, int, int, int, int, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, LPCWSTR);
 API HFONT    WINAPI CreateFontIndirectW(const LOGFONTW *);
 API HGDIOBJ  WINAPI GetStockObject(int);
@@ -795,7 +765,6 @@ API COLORREF WINAPI GetPixel(HDC, int, int);
 API HBITMAP  WINAPI CreateBitmap(int, int, UINT, UINT, const void *);
 API HBRUSH   WINAPI CreatePatternBrush(HBITMAP);
 
-/* mem* (provided by rt.asm) */
 void *memset(void *, int, size_t);
 void *memcpy(void *, const void *, size_t);
 void *memmove(void *, const void *, size_t);

@@ -1,7 +1,6 @@
-/* search.c - bounded UTF-16 find / replace; no ui or mutable global state. */
 #include "mp.h"
 
-#define RESULT_MAX 0x3FFFFFFF /* result including its terminator must fit in 32-bit byte arithmetic */
+#define RESULT_MAX 0x3FFFFFFF
 #define LOCAL_PATTERN 256
 
 typedef struct {
@@ -17,29 +16,21 @@ typedef struct {
 static int High(WCHAR c) { return c >= 0xD800 && c <= 0xDBFF; }
 static int Low(WCHAR c) { return c >= 0xDC00 && c <= 0xDFFF; }
 
-static int WordChar(WCHAR c)
-{
+static int WordChar(WCHAR c) {
     WORD type = 0;
     if (c < 128) return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
-    /* NLS classifies UTF-16 units, not supplementary code points. Keeping both
-     * surrogate kinds in words avoids inventing a boundary beside an unknown letter. */
     if (High(c) || Low(c)) return 1;
     if (GetStringTypeW(CT_CTYPE1, &c, 1, &type) && (type & (C1_ALPHA | C1_DIGIT))) return 1;
     return GetStringTypeW(CT_CTYPE3, &c, 1, &type) && (type & (C3_NONSPACING | C3_DIACRITIC | C3_VOWELMARK));
 }
 
-/* Always use the complete document: slicing at the selection invents word boundaries. */
-static int Boundary(const WCHAR *t, int n, int at, int m, int wholeWord)
-{
+static int Boundary(const WCHAR *t, int n, int at, int m, int wholeWord) {
     int end = at + m;
     if ((at > 0 && Low(t[at]) && High(t[at - 1])) || (end < n && High(t[end - 1]) && Low(t[end]))) return 0;
     return !wholeWord || ((at == 0 || !WordChar(t[at - 1])) && (end == n || !WordChar(t[end])));
 }
 
-/* Compare against a pre-folded pattern unit. ASCII needles can reject non-ASCII
- * units without a user32 call except for the two lowercase mappings to ASCII. */
-static int Equal(WCHAR c, WCHAR f, int matchCase)
-{
+static int Equal(WCHAR c, WCHAR f, int matchCase) {
     if (c == f) return 1;
     if (matchCase) return 0;
     if (c >= 'A' && c <= 'Z') return c + ('a' - 'A') == f;
@@ -47,17 +38,13 @@ static int Equal(WCHAR c, WCHAR f, int matchCase)
     return wlow(c) == f;
 }
 
-/* KMP failure links make repeated-prefix searches linear. Ordinary dialog
- * patterns fit on the stack; replace-all prepares once for both passes. */
-static void Prepare(SearchPattern *p, const WCHAR *pat, int m, int up, int matchCase)
-{
+static void Prepare(SearchPattern *p, const WCHAR *pat, int m, int up, int matchCase) {
     int i, q;
     p->raw = pat; p->m = m; p->up = up; p->matchCase = matchCase; p->heap = NULL;
     p->folded = p->localText; p->failure = p->localFailure;
     if (m > LOCAL_PATTERN) {
-        if ((size_t)m <= ((size_t)-1) / (sizeof(int) + sizeof(WCHAR)))
-            p->heap = mem_alloc((size_t)m * (sizeof(int) + sizeof(WCHAR)));
-        if (!p->heap) { p->folded = NULL; return; } /* bounded direct scan still works under memory pressure */
+        if ((size_t)m <= ((size_t)-1) / (sizeof(int) + sizeof(WCHAR))) p->heap = mem_alloc((size_t)m * (sizeof(int) + sizeof(WCHAR)));
+        if (!p->heap) { p->folded = NULL; return; }
         p->failure = (int *)p->heap;
         p->folded = (WCHAR *)(p->failure + m);
     }
@@ -70,8 +57,7 @@ static void Prepare(SearchPattern *p, const WCHAR *pat, int m, int up, int match
     }
 }
 
-static int Scan(const SearchPattern *p, const WCHAR *t, int n, int from, int wholeWord)
-{
+static int Scan(const SearchPattern *p, const WCHAR *t, int n, int from, int wholeWord) {
     int i, k, q = 0, at, left, step = p->up ? -1 : 1, skip;
     WCHAR f, fu, sp;
     if (from < 0) from = 0;
@@ -90,8 +76,8 @@ static int Scan(const SearchPattern *p, const WCHAR *t, int n, int from, int who
     left = p->up ? from : n - from;
     f = p->folded[0];
     fu = !p->matchCase && f >= 'a' && f <= 'z' ? (WCHAR)(f - 32) : f;
-    sp = p->matchCase ? f : f == 'k' ? 0x212A : f == 'i' ? 0x0130 : f;   /* the two non-ascii units that fold to an ascii letter (kelvin sign, dotted capital i) */
-    skip = !p->up && (p->matchCase || f < 128);       /* forward, and every possible first character is one of f / fu / sp: sse2 jumps to the next one */
+    sp = p->matchCase ? f : f == 'k' ? 0x212A : f == 'i' ? 0x0130 : f;
+    skip = !p->up && (p->matchCase || f < 128);
     while (left-- > 0) {
         WCHAR c;
         if (!q && skip) {
@@ -114,8 +100,7 @@ next:
     return -1;
 }
 
-int FindInTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int up, int matchCase, int wholeWord)
-{
+int FindInTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int up, int matchCase, int wholeWord) {
     SearchPattern p;
     int at;
     if (m <= 0 || n < m || !t || !pat) return -1;
@@ -125,19 +110,10 @@ int FindInTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int u
     return at;
 }
 
-int FindInText(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int up, int matchCase)
-{
-    return FindInTextEx(t, n, pat, m, from, up, matchCase, 0);
-}
-
-/* Non-overlapping, left to right. Size first without overflowing, allocate once. */
-WCHAR *ReplaceAllTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase,
-                       int wholeWord, int *outLen, int *count)
-{
+WCHAR *ReplaceAllTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase, int wholeWord, int *outLen, int *count) {
     SearchPattern plan;
     WCHAR *r = NULL, *o;
     int len, k = 0, i = 0, p, valid;
-
     if (outLen) *outLen = 0;
     if (count) *count = 0;
     if (!t || n < 0) n = 0;
@@ -170,10 +146,4 @@ WCHAR *ReplaceAllTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, const WC
 done:
     mem_free(plan.heap);
     return r;
-}
-
-WCHAR *ReplaceAllText(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase,
-                      int *outLen, int *count)
-{
-    return ReplaceAllTextEx(t, n, pat, m, with, wn, matchCase, 0, outLen, count);
 }

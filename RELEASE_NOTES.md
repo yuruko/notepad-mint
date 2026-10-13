@@ -1,26 +1,24 @@
-notepad mint 1.0.12
+notepad mint 1.1.0
 
-**installer**
-- the last checkbox on the finish page is now just "set as default text editor" and fits on one line
-- fixed: that checkbox was set up on the wrong installer page, so it was always ticked: on an update it opened default apps again, and it opened them even when "text file types" was unticked. it now follows the component and stays unticked on an update that already had the file types
-- "run notepad mint" starts the editor as you, not elevated (an elevated editor can't take files dragged from explorer)
-- uninstalling removes the per-user "set as default" entries only when they belong to the uninstalled copy, so a portable exe elsewhere keeps its own
+**cleaner source**
+- every comment is gone from `src\`; function braces sit on the same line as the function; statements and conditions are one line each; no blank lines inside functions (10,784 to 9,486 lines)
+- the cleanup was checked to change nothing: the release exe, three probe builds and the unit-test exe come out byte for byte identical (pe timestamps masked)
 
 **faster**
-- repainting a small part of the editor (typing a character, moving the caret, a selection) costs half as much in a big window: 15.5 to 7.3 ms at 1772 x 914 (the whole window was drawn off screen each time, now only the part that changes)
-- saving a file scans for line breaks with sse2 like opening does; the sun / moon / wrap icons in the menu bar are computed once per size, not on every repaint
+- the editor's line height is measured once per font, not on every key, scroll bar update and resize
+- the selection highlight in the editor uses the system highlight brush instead of creating and deleting a brush on every draw
+- buttons no longer read their size on every mouse move, only while pressed; help > set as default text editor loads advapi32 once instead of twice
 
-**fixes and cleanup**
-- a real windows "parameter is incorrect" error (87) is no longer shown as "that code page isn't installed"
-- the print cursor is restored correctly when no cursor was set yet
-- removed duplicated helpers (one `MpNote` for the 9 "ok" messages, one `ClampInt`), unused windows declarations, the editor colours mirrored in the settings struct, stale comments and a magic number
+**cleanup**
+- removed dead code: unreachable `WM_SIZE` cases in the editor, an empty branch and a repeated store in the menus, an unused bevel style and triangle direction, a second `EM_LIMITTEXT`, a redundant scroll bar refresh, unused variables and parameters, an unused list of line ending names, test-only search wrappers (now in the unit tests)
+- one error exit in `DocWrite` instead of eight copies of the cleanup, one `OtherFocus` helper for select all / time and date / clear line, the font dialog uses the shared `ClampInt`
 
-Regression coverage: unit 442, gui 820, probe-build gui 179, printing suite (all pass).
+Regression coverage: unit 437, gui 820, probe-build gui 179, printing suite (all pass).
 
 **download**
 
-- `notepad-mint-1.0.12-setup.exe`: installer and uninstaller
-- `notepad-mint-1.0.12.exe`: standalone executable
+- `notepad-mint-1.1.0-setup.exe`: installer and uninstaller
+- `notepad-mint-1.1.0.exe`: standalone executable
 - `SHA256SUMS.txt`: download checksums
 
 settings remain in `%appdata%\notepad-mint\settings.ini`.

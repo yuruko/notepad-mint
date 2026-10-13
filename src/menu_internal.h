@@ -1,4 +1,3 @@
-/* Private bridge from declarative menu data to the menu windows. */
 #ifndef MENU_INTERNAL_H
 #define MENU_INTERNAL_H
 #include "mp.h"

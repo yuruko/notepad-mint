@@ -1,21 +1,14 @@
-/* menu_defs.c - menu labels, mnemonics, commands and shared recent-file items.
- * Definitions stay independent of popup state and rendering. Toolbar tooltips
- * derive shortcuts here so each command has one displayed key combination. */
 #include "menu_internal.h"
 
-/* ---------------------------------------------------------- definitions -- */
 #define SEP         { NULL, NULL, 0, NULL }
 #define IT(l, a, i) { l, a, i, NULL }
 #define SUB(l, d)   { l, NULL, 0, d }
 
-/* file > recent: the items are rebuilt by MenuSetRecent whenever the list changes. a label is "&1  " + the path (shortened in the middle when long: the
- * drive, "..." and the end), with every & doubled so that a path never makes a mnemonic. a list with files ends with a separator and "clear list" */
 static MenuItem g_recItem[RECENT_MAX + 2] = { { L"(none)", NULL, IDM_RECENT_NONE, NULL } };
 static WCHAR    g_recLbl[RECENT_MAX][64];
 MenuDef g_mdRecent = { g_recItem, 1 };
 
-void MenuSetRecent(const WCHAR (*paths)[PATH_CAP], int n)
-{
+void MenuSetRecent(const WCHAR (*paths)[PATH_CAP], int n) {
     int i;
     if (n > RECENT_MAX) n = RECENT_MAX;
     if (n < 1) {
@@ -29,14 +22,14 @@ void MenuSetRecent(const WCHAR (*paths)[PATH_CAP], int n)
         int len = lstrlenW(p), j = 0, k;
         o[j++] = '&'; o[j++] = (WCHAR)('1' + i); o[j++] = ' '; o[j++] = ' ';
         for (k = 0; k < len && j < 56; k++) {
-            if (len > 50 && k == 3) { o[j++] = '.'; o[j++] = '.'; o[j++] = '.'; k = len - 44; }      /* long: the first three characters, "...", the last 44 */
+            if (len > 50 && k == 3) { o[j++] = '.'; o[j++] = '.'; o[j++] = '.'; k = len - 44; }
             if (p[k] == '&') o[j++] = '&';
             o[j++] = p[k];
         }
         o[j] = 0;
         g_recItem[i].label = o; g_recItem[i].accel = NULL; g_recItem[i].id = IDM_RECENT_BASE + i; g_recItem[i].sub = NULL;
     }
-    g_recItem[n].label = NULL; g_recItem[n].accel = NULL; g_recItem[n].id = 0; g_recItem[n].sub = NULL;                  /* the separator */
+    g_recItem[n].label = NULL; g_recItem[n].accel = NULL; g_recItem[n].id = 0; g_recItem[n].sub = NULL;
     g_recItem[n + 1].label = L"&clear list"; g_recItem[n + 1].accel = NULL; g_recItem[n + 1].id = IDM_RECENT_CLEAR; g_recItem[n + 1].sub = NULL;
     g_mdRecent.n = n + 2;
 }
@@ -87,7 +80,7 @@ static const MenuItem miEnc[] = {
     IT(L"&other code page...",       NULL, IDM_ENC_OTHER),
     IT(L"&reopen with encoding...",  NULL, IDM_ENC_REOPEN),
 };
-static const MenuItem miUcc[] = {                       /* same set the stock edit control offers */
+static const MenuItem miUcc[] = {
     IT(L"lrm   left-to-right mark",                     NULL, IDM_UCC_BASE + 0),
     IT(L"rlm   right-to-left mark",                     NULL, IDM_UCC_BASE + 1),
     IT(L"zwj   zero width joiner",                      NULL, IDM_UCC_BASE + 2),
@@ -157,7 +150,7 @@ static const MenuItem miCtx[] = {
     SUB(L"&insert unicode control character", &g_mdUcc),
 };
 
-static const MenuItem miSys[] = {                       /* the window menu behind the title bar icon / right click */
+static const MenuItem miSys[] = {
     IT(L"&restore",    NULL,      IDM_SYS_RESTORE),
     IT(L"&move",       NULL,      IDM_SYS_MOVE),
     IT(L"&size",       NULL,      IDM_SYS_SIZE),
@@ -188,13 +181,9 @@ const MenuBarEntry g_menuEntries[MENU_BAR_COUNT] = {
     { L"&help",   &mdHelp   },
 };
 
-
-const WCHAR *MenuAccelOf(int id)                            /* the key combo the menus show for a command (NULL: none) */
-{
+const WCHAR *MenuAccelOf(int id) {
     static const struct { const MenuItem *it; int n; } l[] = { { miFormat, COUNTOF(miFormat) }, { miTheme, COUNTOF(miTheme) } };
     int i, j;
-    for (i = 0; i < (int)COUNTOF(l); i++)
-        for (j = 0; j < l[i].n; j++)
-            if (l[i].it[j].id == id) return l[i].it[j].accel;
+    for (i = 0; i < (int)COUNTOF(l); i++) for (j = 0; j < l[i].n; j++) if (l[i].it[j].id == id) return l[i].it[j].accel;
     return NULL;
 }

@@ -1,31 +1,27 @@
-/* app_status.c - caret/selection panels and cached document statistics.
- * Large-document recounts wait for a typing pause; position updates remain live.
- * A wider panel may enlarge the main window, so callers must tolerate layout. */
 #include "app_internal.h"
 
-#define STATS_BIG   1000000                              /* characters: above this the line / byte counts are recounted when typing pauses, not on every key */
+#define STATS_BIG   1000000
 #define STATS_TIMER 7
-static int g_statsNow;                                  /* the timer fired: recount now */
+static int g_statsNow;
 
-void AppUpdateStatus(void)
-{
+void AppUpdateStatus(void) {
     WCHAR b[64];
     int line, col, sel;
     DWORD selBytes;
     if (!g_status || !g_pf.statusbar) return;
     EditCaretPos(&line, &col);
-    if (EditSelStats(g_doc.enc, g_doc.eol, &sel, &selBytes)) wsprintfW(b, L"%d:%d [%d L %u B]", line, col, sel, selBytes);   /* "162:54 [5 L 54 B]": the lines it covers and the bytes a save would write for it */
+    if (EditSelStats(g_doc.enc, g_doc.eol, &sel, &selBytes)) wsprintfW(b, L"%d:%d [%d L %u B]", line, col, sel, selBytes);
     else wsprintfW(b, L"%d:%d", line, col);
     StatusSet(g_status, SB_POS, b);
-    if (g_pf.cur != g_pf.pt) wsprintfW(b, L"%d%%", MulDiv(g_pf.cur, 100, g_pf.pt));   /* ctrl+plus / minus / wheel: the size against the one picked in the font dialog ("120%"); no panel at 100% */
+    if (g_pf.cur != g_pf.pt) wsprintfW(b, L"%d%%", MulDiv(g_pf.cur, 100, g_pf.pt));
     else b[0] = 0;
     StatusSet(g_status, SB_ZOOM, b);
-    {                                                   /* the number of lines ("5 L") and the size a save would write ("124 B"), the lines first: recounted only when the text, the encoding or the line ending changed (a big file is not scanned on every caret move) */
+    {
         static struct { DWORD rev, bytes; int lines, len, enc, eol, ok; } c;
         int len = GetWindowTextLengthW(g_edit);
         int due = !c.ok || c.rev != g_textRev || c.len != len || c.enc != g_doc.enc || c.eol != g_doc.eol;
         if (due && c.ok && len > STATS_BIG && !g_statsNow && c.enc == g_doc.enc && c.eol == g_doc.eol) {
-            SetTimer(g_hwnd, STATS_TIMER, 250, NULL);       /* a big text being typed in: the numbers follow when typing pauses (every recount is a pass over all of it) */
+            SetTimer(g_hwnd, STATS_TIMER, 250, NULL);
             due = 0;
         }
         if (due) {
@@ -34,15 +30,13 @@ void AppUpdateStatus(void)
             const WCHAR *p = EditLockText(&h, &n);
             if (p) {
                 c.bytes = DocEncodedSize(p, n, g_doc.enc, g_doc.eol);
-                c.lines = 1 + (int)mp_count_lf(p, (size_t)n); /* a trailing break adds an empty last line */
+                c.lines = 1 + (int)mp_count_lf(p, (size_t)n);
                 c.rev = g_textRev; c.len = len; c.enc = g_doc.enc; c.eol = g_doc.eol; c.ok = 1;
             } else if (!c.ok) {
                 c.bytes = 0;
                 c.lines = 1;
             }
             EditUnlockText(h);
-            /* A failed buffer lock must not cache blank totals as current. Keep
-             * the last valid numbers until the next update can retry. */
         }
         wsprintfW(b, L"%d L", c.lines);
         StatusSet(g_status, SB_LINES, b);
@@ -52,7 +46,7 @@ void AppUpdateStatus(void)
     StatusSet(g_status, SB_EOL, g_eolShort[g_doc.eol]);
     EncShort(g_doc.enc, b, COUNTOF(b));
     StatusSet(g_status, SB_ENC, b);
-    {                                                   /* nothing is ever cut off: a text wider than the panels were made for (a long code page name) widens a window that is too narrow */
+    {
         RECT cr, wr;
         int need = StatusMinWidth();
         GetClientRect(g_hwnd, &cr);
@@ -63,9 +57,7 @@ void AppUpdateStatus(void)
     }
 }
 
-/* Called by the main window for every timer; unrelated timers are ignored. */
-void AppStatusTimer(HWND h, WPARAM timer)
-{
+void AppStatusTimer(HWND h, WPARAM timer) {
     if (timer != STATS_TIMER) return;
     KillTimer(h, STATS_TIMER);
     g_statsNow = 1;

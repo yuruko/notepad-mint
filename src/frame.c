@@ -1,16 +1,5 @@
-/* frame.c - the main window's title strip, drawn by us in the chrome font (g_fontMenu: the editor font face, CHROME_PX pixels).
- *
- * the window keeps the system's thick frame on the left / right / bottom (resizing, aero snap, shadow and animations
- * stay native); only the caption moves into the client area: WM_NCCALCSIZE hands the client the whole top edge, we
- * paint the icon, the title (white / black while active) and our own minimize / maximize / close buttons there, and
- * WM_NCHITTEST answers HTTOP along the top edge and HTCAPTION over the rest of the strip, so resizing, dragging,
- * aero snap and double-click-to-maximize keep working. the window menu is our popup (menu.c). */
 #include "mp.h"
 
-/* The caption font follows the menu/status chrome. Both WM_NCCALCSIZE forms
- * must remove the native caption, including the first call during creation.
- * main.c also forces SWP_FRAMECHANGED before showing the window.
- * Define FRAME_CUSTOM=0 for a native caption; frame services then fall through. */
 #ifndef FRAME_CUSTOM
 #define FRAME_CUSTOM 1
 #endif
@@ -23,11 +12,10 @@ static int   g_capH, g_hot = -1, g_down = -1, g_active = 1, g_track;
 static HICON g_icon;
 
 static int BtnW(void) { return S(38); }
-static int Edge(void) { return UiMetric(SM_CYFRAME) + UiMetric(SM_CXPADDEDBORDER); }     /* the system's sizing border */
-static int Crop(void) { return S(1); }                  /* padding taken off the BOTTOM of the strip: the icon and the title are laid out as if it were this much higher (they do not move), its last rows are just not there */
+static int Edge(void) { return UiMetric(SM_CYFRAME) + UiMetric(SM_CXPADDEDBORDER); }
+static int Crop(void) { return S(1); }
 
-static void Metrics(void)
-{
+static void Metrics(void) {
     HDC dc = GetDC(NULL);
     HGDIOBJ of = SelectObject(dc, g_fontMenu);
     TEXTMETRICW tm;
@@ -38,26 +26,22 @@ static void Metrics(void)
     if (g_capH < S(24) - Crop()) g_capH = S(24) - Crop();
 }
 
-int FrameHeight(void)
-{
+int FrameHeight(void) {
     if (!FRAME_CUSTOM) return 0;
     if (!g_capH) Metrics();
     return g_capH;
 }
 
-static int ContentH(void) { return FrameHeight() + Crop(); }   /* the height the icon / title are centered in (the strip before Crop) */
+static int ContentH(void) { return FrameHeight() + Crop(); }
 
-/* fonts or dpi changed */
-void FrameRefont(HWND h)
-{
+void FrameRefont(HWND h) {
     if (!FRAME_CUSTOM) return;
     if (g_icon) { DestroyIcon(g_icon); g_icon = NULL; }
     Metrics();
     if (h) InvalidateRect(h, NULL, FALSE);
 }
 
-static void Invalidate(HWND h)
-{
+void FrameInvalidate(HWND h) {
     RECT rc;
     if (!FRAME_CUSTOM || !h) return;
     GetClientRect(h, &rc);
@@ -65,26 +49,20 @@ static void Invalidate(HWND h)
     InvalidateRect(h, &rc, FALSE);
 }
 
-void FrameInvalidate(HWND h) { Invalidate(h); }
-
-void FrameActive(HWND h, int active)
-{
+void FrameActive(HWND h, int active) {
     g_active = active;
     if (!active && g_down < 0) g_hot = -1;
-    Invalidate(h);
+    FrameInvalidate(h);
 }
 
-/* ------------------------------------------------------------ geometry --- */
-static void BtnRect(int b, int cw, RECT *r)                 /* right aligned: close is the last one */
-{
+static void BtnRect(int b, int cw, RECT *r) {
     r->right = cw - (FB_COUNT - 1 - b) * BtnW();
     r->left = r->right - BtnW();
     r->top = 0;
     r->bottom = FrameHeight();
 }
 
-static int HitBtn(int x, int y, int cw)
-{
+static int HitBtn(int x, int y, int cw) {
     POINT p;
     RECT r;
     int b;
@@ -96,34 +74,29 @@ static int HitBtn(int x, int y, int cw)
     return -1;
 }
 
-static int IconLeft(void) { return S(8); }               /* padding left of the icon; the title follows the icon */
+static int IconLeft(void) { return S(8); }
 static int IconRight(void) { return IconLeft() + S(16) + S(6); }
 static int InIcon(int x, int y) { return x >= 0 && x < IconRight() && y >= 0 && y < FrameHeight(); }
 
-/* ------------------------------------------------------------- painting --- */
-static void Line(HDC dc, int x1, int y1, int x2, int y2)
-{
+static void Line(HDC dc, int x1, int y1, int x2, int y2) {
     MoveToEx(dc, x1, y1, NULL);
     LineTo(dc, x2, y2);
 }
 
-static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
-{
+static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed) {
     COLORREF bg = C_FACE, fg = g_active ? C_TEXT : C_DIM;
     HPEN pen;
     HGDIOBJ op;
-    int cx = (r->left + r->right) / 2, cy = (r->top + r->bottom) / 2, g = S(4), d = S(2), pw = S(1);   /* glyph half size */
-
-    if (b == FB_CLOSE && (hot || down)) {                            /* the system's close red, in both themes */
+    int cx = (r->left + r->right) / 2, cy = (r->top + r->bottom) / 2, g = S(4), d = S(2), pw = S(1);
+    if (b == FB_CLOSE && (hot || down)) {
         bg = down ? RGB(0xf1, 0x70, 0x7a) : RGB(0xe8, 0x11, 0x23);
         fg = RGB(0xff, 0xff, 0xff);
     } else if (down) {
-        bg = RGB(0x7c, 0xc4, 0x98); fg = C_ON_ACCENT;                 /* pressed: a deeper mint */
+        bg = RGB(0x7c, 0xc4, 0x98); fg = C_ON_ACCENT;
     } else if (hot) {
         bg = C_ACCENT; fg = C_ON_ACCENT;
     }
-    if (hot || down) FillC(dc, r, bg);                               /* a button at rest is transparent: the strip's fade shows through */
-
+    if (hot || down) FillC(dc, r, bg);
     pen = CreatePen(PS_SOLID, pw < 1 ? 1 : pw, fg);
     op = SelectObject(dc, pen);
     switch (b) {
@@ -136,7 +109,7 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
             Line(dc, cx + g, cy - g, cx + g, cy + g);
             Line(dc, cx + g, cy + g, cx - g, cy + g);
             Line(dc, cx - g, cy + g, cx - g, cy - g);
-        } else {                                                     /* restore: two overlapping squares */
+        } else {
             Line(dc, cx - g, cy - g + d, cx + g - d, cy - g + d);
             Line(dc, cx + g - d, cy - g + d, cx + g - d, cy + g);
             Line(dc, cx + g - d, cy + g, cx - g, cy + g);
@@ -156,22 +129,17 @@ static void DrawBtn(HDC dc, int b, const RECT *r, int hot, int down, int zoomed)
     DeleteObject(pen);
 }
 
-/* the strip's background: the face colour with a FLAT tint of the accent over it, STRIP_TINT % of the accent. the light theme has STRIP_TINT_LIGHT_PLUS points more (the dark accent needs more to show on the
- * light face), and an inactive window has STRIP_TINT_INACTIVE_MINUS points less (clamped at 0). the window buttons are transparent at rest, so
- * the strip reads as one piece */
 #define STRIP_TINT 9
-#define STRIP_TINT_LIGHT_PLUS 12                                     /* light: 21 in all */
+#define STRIP_TINT_LIGHT_PLUS 12
 #define STRIP_TINT_INACTIVE_MINUS 7
-static COLORREF Tint(COLORREF face, COLORREF acc, int a)         /* a = 0..255: how much of the accent */
-{
+static COLORREF Tint(COLORREF face, COLORREF acc, int a) {
     int r = GetRValue(face) + (GetRValue(acc) - GetRValue(face)) * a / 255;
     int g = GetGValue(face) + (GetGValue(acc) - GetGValue(face)) * a / 255;
     int b = GetBValue(face) + (GetBValue(acc) - GetBValue(face)) * a / 255;
     return RGB(r, g, b);
 }
 
-static void FillStrip(HDC dc, int cw, int ch)
-{
+static void FillStrip(HDC dc, int cw, int ch) {
     RECT r;
     int p = STRIP_TINT + (ThemeGet() == THEME_LIGHT ? STRIP_TINT_LIGHT_PLUS : 0) - (g_active ? 0 : STRIP_TINT_INACTIVE_MINUS);
     if (p < 0) p = 0;
@@ -179,9 +147,7 @@ static void FillStrip(HDC dc, int cw, int ch)
     FillC(dc, &r, Tint(C_FACE, C_ACCENT, p * 255 / 100));
 }
 
-/* called from the main window's WM_PAINT: the colours are read here, so a theme switch only needs a repaint */
-void FramePaint(HWND h, HDC dc)
-{
+void FramePaint(HWND h, HDC dc) {
     RECT rc, r, tr;
     HDC mdc;
     HBITMAP bmp;
@@ -189,7 +155,6 @@ void FramePaint(HWND h, HDC dc)
     WCHAR t[PATH_CAP + 64];
     int cw, ch, b, isz = S(16), n, cut, hw;
     COLORREF fg;
-
     if (!FRAME_CUSTOM) return;
     GetClientRect(h, &rc);
     cw = rc.right;
@@ -199,27 +164,24 @@ void FramePaint(HWND h, HDC dc)
     bmp = CreateCompatibleBitmap(dc, cw, ch);
     ob = SelectObject(mdc, bmp);
     of = SelectObject(mdc, g_fontMenu);
-
     FillStrip(mdc, cw, ch);
     if (!g_icon) g_icon = (HICON)LoadImageW(g_hinst, MAKEINTRESOURCEW(1), IMAGE_ICON, isz, isz, LR_DEFAULTCOLOR);
     if (g_icon) DrawIconEx(mdc, IconLeft(), (ContentH() - isz) / 2, g_icon, isz, isz, 0, NULL, DI_NORMAL);
-
     GetWindowTextW(h, t, COUNTOF(t));
     BtnRect(FB_MIN, cw, &r);
     tr.left = IconRight() + S(4); tr.right = r.left - S(8); tr.top = 0; tr.bottom = ContentH();
-    fg = g_active ? (ThemeGet() == THEME_DARK ? RGB(0xff, 0xff, 0xff) : RGB(0, 0, 0)) : C_DIM;     /* plain white / black: readable on the tint */
+    fg = g_active ? (ThemeGet() == THEME_DARK ? RGB(0xff, 0xff, 0xff) : RGB(0, 0, 0)) : C_DIM;
     n = wlen(t);
-    cut = n - wlen(TITLE_TAIL);                                      /* "<name>" + " - notepad mint": the name is bold, the tail is not */
-    if (cut < 0 || wcmp(t + cut, TITLE_TAIL) != 0) cut = n;          /* (no tail: all of it is the name) */
+    cut = n - wlen(TITLE_TAIL);
+    if (cut < 0 || wcmp(t + cut, TITLE_TAIL) != 0) cut = n;
     SelectObject(mdc, g_fontMenuB);
     hw = TextW(mdc, t, cut);
     TextC(mdc, t, cut, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX, fg);
     SelectObject(mdc, g_fontMenu);
-    if (cut < n && hw < tr.right - tr.left) {                        /* the tail follows the name, when there is room for any of it */
+    if (cut < n && hw < tr.right - tr.left) {
         tr.left += hw;
         TextC(mdc, t + cut, n - cut, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX, fg);
     }
-
     for (b = 0; b < FB_COUNT; b++) {
         BtnRect(b, cw, &r);
         DrawBtn(mdc, b, &r, b == g_hot, b == g_down && b == g_hot, IsZoomed(h) ? 1 : 0);
@@ -231,53 +193,45 @@ void FramePaint(HWND h, HDC dc)
     DeleteDC(mdc);
 }
 
-/* ------------------------------------------------------------ messages --- */
-/* the caption becomes client area (our strip); the left / right / bottom frame stays the system's.
- * wParam TRUE: l is an NCCALCSIZE_PARAMS whose rgrc[0] goes from the new window rect to the new client rect.
- * wParam FALSE: l is that one RECT. CreateWindowExW sends only this form, so it needs the same treatment:
- * passing it through was the "two title bars" bug (the native caption stayed until the first resize) */
-LRESULT FrameNcCalc(HWND h, WPARAM w, LPARAM l)
-{
+LRESULT FrameNcCalc(HWND h, WPARAM w, LPARAM l) {
     RECT *r = (RECT *)l;
     RECT win;
     LRESULT ret;
     if (!FRAME_CUSTOM || !r) return DefWindowProcW(h, WM_NCCALCSIZE, w, l);
     win = *r;
-    ret = DefWindowProcW(h, WM_NCCALCSIZE, w, l);           /* the standard frame (and caption) */
+    ret = DefWindowProcW(h, WM_NCCALCSIZE, w, l);
     if (!IsIconic(h)) {
-        r->top = win.top;                                    /* no caption: the strip starts at the top edge */
-        if (IsZoomed(h)) r->top += r->left - win.left;       /* maximized windows hang over the screen by the frame thickness */
+        r->top = win.top;
+        if (IsZoomed(h)) r->top += r->left - win.left;
     }
     DBG(L"nccalc w/top-inset", w, r->top - win.top);
     return ret;
 }
 
-LRESULT FrameHitTest(HWND h, LPARAM l)
-{
+LRESULT FrameHitTest(HWND h, LPARAM l) {
     POINT pt;
     RECT rc;
     int b, e;
-    LRESULT r = DefWindowProcW(h, WM_NCHITTEST, 0, l);      /* the system's frame: left / right / bottom edges */
+    LRESULT r = DefWindowProcW(h, WM_NCHITTEST, 0, l);
     if (!FRAME_CUSTOM || r != HTCLIENT) return r;
     pt.x = GET_X_LPARAM(l); pt.y = GET_Y_LPARAM(l);
     ScreenToClient(h, &pt);
     if (pt.y < 0 || pt.y >= FrameHeight()) return HTCLIENT;
     GetClientRect(h, &rc);
     b = HitBtn(pt.x, pt.y, rc.right);
-    e = b >= 0 ? Edge() / 2 : Edge();                        /* thinner over the buttons */
-    if (!IsZoomed(h) && pt.y < e) {                          /* the top sizing edge lives inside the strip */
+    e = b >= 0 ? Edge() / 2 : Edge();
+    if (!IsZoomed(h) && pt.y < e) {
         if (pt.x < S(16)) return HTTOPLEFT;
         if (pt.x >= rc.right - S(16)) return HTTOPRIGHT;
         return HTTOP;
     }
-    if (b >= 0 || InIcon(pt.x, pt.y)) return HTCLIENT;       /* ours: plain mouse messages (FrameMsg) */
+    if (b >= 0 || InIcon(pt.x, pt.y)) return HTCLIENT;
     return HTCAPTION;
 }
 
-void FrameSysMenu(HWND h, int x, int y)
-{
+void FrameSysMenu(HWND h, int x, int y) {
     POINT pt;
-    if (x == -1 && y == -1) {                                /* keyboard (alt+space) / icon click: under the icon */
+    if (x == -1 && y == -1) {
         pt.x = 0; pt.y = FrameHeight();
         ClientToScreen(h, &pt);
         x = pt.x; y = pt.y;
@@ -285,8 +239,7 @@ void FrameSysMenu(HWND h, int x, int y)
     MenuPopup(h, &g_mdSys, x, y, 0);
 }
 
-unsigned FrameSysState(int id)
-{
+unsigned FrameSysState(int id) {
     HWND h = g_hwnd;
     int max = IsZoomed(h) ? 1 : 0, min = IsIconic(h) ? 1 : 0;
     switch (id) {
@@ -298,8 +251,7 @@ unsigned FrameSysState(int id)
     return 0;
 }
 
-void FrameSysCommand(HWND h, int id)
-{
+void FrameSysCommand(HWND h, int id) {
     UINT sc = 0;
     switch (id) {
     case IDM_SYS_RESTORE: sc = SC_RESTORE; break;
@@ -312,29 +264,26 @@ void FrameSysCommand(HWND h, int id)
     if (sc) PostMessageW(h, WM_SYSCOMMAND, sc, 0);
 }
 
-/* the main window's own mouse messages: button hover / press / click, the icon, right clicks in the strip */
-BOOL FrameMsg(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+BOOL FrameMsg(HWND h, UINT m, WPARAM w, LPARAM l) {
     int x = GET_X_LPARAM(l), y = GET_Y_LPARAM(l), b;
     RECT rc;
     POINT pt;
-
     if (!FRAME_CUSTOM) return FALSE;
     switch (m) {
     case WM_MOUSEMOVE:
         GetClientRect(h, &rc);
         b = (y >= 0 && y < FrameHeight()) ? HitBtn(x, y, rc.right) : -1;
-        if (g_down >= 0 && b != g_down) b = -1;                  /* while one is pressed the others stay quiet */
+        if (g_down >= 0 && b != g_down) b = -1;
         if (b >= 0 && !g_track) {
             TRACKMOUSEEVENT te;
             te.cbSize = sizeof te; te.dwFlags = TME_LEAVE; te.hwndTrack = h; te.dwHoverTime = 0;
             g_track = TrackMouseEvent(&te) ? 1 : 0;
         }
-        if (b != g_hot) { g_hot = b; Invalidate(h); }
+        if (b != g_hot) { g_hot = b; FrameInvalidate(h); }
         return TRUE;
-    case WM_MOUSELEAVE:                                          /* also when the pointer moves on to the caption (non-client) */
+    case WM_MOUSELEAVE:
         g_track = 0;
-        if (g_hot >= 0 && g_down < 0) { g_hot = -1; Invalidate(h); }
+        if (g_hot >= 0 && g_down < 0) { g_hot = -1; FrameInvalidate(h); }
         return TRUE;
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK:
@@ -344,7 +293,7 @@ BOOL FrameMsg(HWND h, UINT m, WPARAM w, LPARAM l)
         if (b >= 0) {
             g_down = b; g_hot = b;
             SetCapture(h);
-            Invalidate(h);
+            FrameInvalidate(h);
             return TRUE;
         }
         if (InIcon(x, y)) { FrameSysMenu(h, -1, -1); return TRUE; }
@@ -357,7 +306,7 @@ BOOL FrameMsg(HWND h, UINT m, WPARAM w, LPARAM l)
             g_down = -1;
             ReleaseCapture();
             g_hot = b;
-            Invalidate(h);
+            FrameInvalidate(h);
             if (b == d) {
                 UINT sc = (d == FB_MIN) ? SC_MINIMIZE : (d == FB_CLOSE ? SC_CLOSE : (IsZoomed(h) ? SC_RESTORE : SC_MAXIMIZE));
                 PostMessageW(h, WM_SYSCOMMAND, sc, 0);
@@ -365,16 +314,16 @@ BOOL FrameMsg(HWND h, UINT m, WPARAM w, LPARAM l)
             return TRUE;
         }
         return FALSE;
-    case WM_RBUTTONUP:                                           /* icon / buttons (client area): the window menu at the pointer */
+    case WM_RBUTTONUP:
         if (y < 0 || y >= FrameHeight()) return FALSE;
         pt.x = x; pt.y = y;
         ClientToScreen(h, &pt);
         FrameSysMenu(h, pt.x, pt.y);
         return TRUE;
-    case WM_NCRBUTTONDOWN:                                       /* caption: DefWindowProc would run its own loop and eat the button up */
+    case WM_NCRBUTTONDOWN:
         return w == HTCAPTION;
     case WM_CAPTURECHANGED:
-        if (g_down >= 0) { g_down = -1; g_hot = -1; Invalidate(h); }
+        if (g_down >= 0) { g_down = -1; g_hot = -1; FrameInvalidate(h); }
         return FALSE;
     }
     return FALSE;

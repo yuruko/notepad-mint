@@ -1,33 +1,27 @@
-/* button.c - themed push buttons, check boxes and radio buttons.
- * Each window owns its state; fonts are borrowed from the UI font cache.
- * Notifications follow native BM_* / WM_COMMAND conventions. */
 #include "ui_internal.h"
 
-/* ------------------------------------------------------- button class -- */
 typedef struct { int check, hot, down, cap, kbd, focus, isdef; HFONT font; } BtnSt;
 
 static int BtnType(HWND h) { return (int)(GetWindowLongPtrW(h, GWL_STYLE) & BS_TYPEMASK); }
 
-static BOOL IsMpRadio(HWND h)
-{
+static BOOL IsMpRadio(HWND h) {
     WCHAR cn[16];
     GetClassNameW(h, cn, 16);
     return wcmp(cn, L"mp_btn") == 0 && BtnType(h) == BS_AUTORADIOBUTTON;
 }
 
-static void BtnClick(HWND h, BtnSt *s)
-{
+static void BtnClick(HWND h, BtnSt *s) {
     int t = BtnType(h);
     if (t == BS_AUTOCHECKBOX) {
         s->check = !s->check;
     } else if (t == BS_AUTORADIOBUTTON) {
         HWND a = h, c;
-        while (!(GetWindowLongPtrW(a, GWL_STYLE) & WS_GROUP)) {      /* walk back to the group head */
+        while (!(GetWindowLongPtrW(a, GWL_STYLE) & WS_GROUP)) {
             c = GetWindow(a, GW_HWNDPREV);
             if (!c) break;
             a = c;
         }
-        for (c = a; c; c = GetWindow(c, GW_HWNDNEXT)) {              /* clear the other radios in it */
+        for (c = a; c; c = GetWindow(c, GW_HWNDNEXT)) {
             if (c != a && (GetWindowLongPtrW(c, GWL_STYLE) & WS_GROUP)) break;
             if (c != h && IsMpRadio(c)) SendMessageW(c, BM_SETCHECK, 0, 0);
         }
@@ -37,19 +31,17 @@ static void BtnClick(HWND h, BtnSt *s)
     SendMessageW(GetParent(h), WM_COMMAND, MAKEWPARAM(GetWindowLongPtrW(h, GWLP_ID), BN_CLICKED), (LPARAM)h);
 }
 
-static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
-{
+static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc) {
     WCHAR text[128];
     int n = GetWindowTextW(h, text, 128), t = BtnType(h);
     BOOL en = IsWindowEnabled(h) ? TRUE : FALSE;
-    BOOL hot = s->hot && en;                         /* hover = the accent as the BACKGROUND with on-accent text (never just a coloured text) */
+    BOOL hot = s->hot && en;
     COLORREF tc = !en ? C_DIM : C_TEXT;
     HGDIOBJ of = SelectObject(dc, s->font ? s->font : g_fontUI);
-
     FillC(dc, &rc, C_FACE);
     if (t == BS_PUSHBUTTON || t == BS_DEFPUSHBUTTON) {
         RECT r = rc, in, tr;
-        if (s->isdef && en) { UiFrame(dc, &r, C_ACCENT_FG, C_ACCENT_FG); InflateRect(&r, -1, -1); }   /* a disabled default (empty find box) shows no outline */
+        if (s->isdef && en) { UiFrame(dc, &r, C_ACCENT_FG, C_ACCENT_FG); InflateRect(&r, -1, -1); }
         Bevel(dc, &r, s->down ? BV_SUNKEN : BV_RAISED);
         in = r;
         InflateRect(&in, -2, -2);
@@ -69,7 +61,7 @@ static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
         if (t == BS_AUTORADIOBUTTON) {
             HGDIOBJ op = SelectObject(dc, GetStockObject(DC_PEN));
             HGDIOBJ ob = SelectObject(dc, GetStockObject(DC_BRUSH));
-            SetDCPenColor(dc, ThemeGet() == THEME_DARK ? C_HI : C_LO2);      /* the ring: the darker edge in the light theme */
+            SetDCPenColor(dc, ThemeGet() == THEME_DARK ? C_HI : C_LO2);
             SetDCBrushColor(dc, C_FIELD);
             Ellipse(dc, box.left, box.top, box.right, box.bottom);
             if (s->check) {
@@ -87,7 +79,7 @@ static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
             if (s->check) CheckGlyph(dc, box.left, box.top, en ? C_ACCENT_FG : C_DIM);
         }
         tr.left = bx + S(7); tr.top = 0; tr.right = rc.right; tr.bottom = rc.bottom;
-        if (hot) {                                   /* the label gets the accent background, like a menu item */
+        if (hot) {
             RECT hl = tr;
             DrawTextW(dc, text, n, &hl, DT_LEFT | DT_SINGLELINE | DT_CALCRECT);
             hl.left = tr.left - S(4); hl.right = hl.right + S(4);
@@ -107,17 +99,13 @@ static void BtnDraw(HWND h, BtnSt *s, HDC dc, RECT rc)
     SelectObject(dc, of);
 }
 
-/* Buffer a complete button when resources allow it. A failed allocation or
- * presentation still draws into the paint DC, so controls remain readable. */
-static void BtnPaint(HWND h, BtnSt *s)
-{
+static void BtnPaint(HWND h, BtnSt *s) {
     PAINTSTRUCT ps;
     RECT rc;
     HDC dc = BeginPaint(h, &ps), memory = NULL;
     HBITMAP bitmap = NULL;
     HGDIOBJ old = NULL;
     BOOL presented = FALSE;
-
     GetClientRect(h, &rc);
     if (dc && rc.right > 0 && rc.bottom > 0) {
         memory = CreateCompatibleDC(dc);
@@ -135,21 +123,18 @@ static void BtnPaint(HWND h, BtnSt *s)
     EndPaint(h, &ps);
 }
 
-static LRESULT CALLBACK BtnProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+static LRESULT CALLBACK BtnProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     BtnSt *s = (BtnSt *)GetWindowLongPtrW(h, GWLP_USERDATA);
     RECT rc;
     POINT pt;
     int t;
-
     if (m == WM_NCCREATE) {
         s = (BtnSt *)mem_zalloc(sizeof *s);
         SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)s);
         if (s) s->isdef = (((CREATESTRUCTW *)l)->style & BS_TYPEMASK) == BS_DEFPUSHBUTTON;
-        return DefWindowProcW(h, m, w, l);                 /* this is what stores the caption text */
+        return DefWindowProcW(h, m, w, l);
     }
     if (!s) return DefWindowProcW(h, m, w, l);
-
     switch (m) {
     case WM_NCDESTROY:
         mem_free(s);
@@ -162,8 +147,7 @@ static LRESULT CALLBACK BtnProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_GETDLGCODE:
         t = BtnType(h);
-        if (t == BS_PUSHBUTTON || t == BS_DEFPUSHBUTTON)
-            return DLGC_BUTTON | (s->isdef ? DLGC_DEFPUSHBUTTON : DLGC_UNDEFPUSHBUTTON);
+        if (t == BS_PUSHBUTTON || t == BS_DEFPUSHBUTTON) return DLGC_BUTTON | (s->isdef ? DLGC_DEFPUSHBUTTON : DLGC_UNDEFPUSHBUTTON);
         if (t == BS_AUTORADIOBUTTON) return DLGC_BUTTON | DLGC_RADIOBUTTON;
         return DLGC_BUTTON;
     case WM_SETFONT:
@@ -215,8 +199,6 @@ static LRESULT CALLBACK BtnProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_MOUSEMOVE:
-        GetClientRect(h, &rc);
-        pt.x = GET_X_LPARAM(l); pt.y = GET_Y_LPARAM(l);
         if (!s->hot) {
             TRACKMOUSEEVENT te;
             te.cbSize = sizeof te; te.dwFlags = TME_LEAVE; te.hwndTrack = h; te.dwHoverTime = 0;
@@ -225,7 +207,10 @@ static LRESULT CALLBACK BtnProc(HWND h, UINT m, WPARAM w, LPARAM l)
             InvalidateRect(h, NULL, FALSE);
         }
         if (s->cap) {
-            int in = PtInRect(&rc, pt) ? 1 : 0;
+            int in;
+            GetClientRect(h, &rc);
+            pt.x = GET_X_LPARAM(l); pt.y = GET_Y_LPARAM(l);
+            in = PtInRect(&rc, pt) ? 1 : 0;
             if (in != s->down) { s->down = in; InvalidateRect(h, NULL, FALSE); }
         }
         return 0;
@@ -260,15 +245,12 @@ static LRESULT CALLBACK BtnProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-HWND UiButton(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWORD style)
-{
-    HWND c = CreateWindowExW(0, L"mp_btn", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | style,
-                             S(x), S(y), S(w), S(h), p, (HMENU)(ULONG_PTR)id, g_hinst, NULL);
+HWND UiButton(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWORD style) {
+    HWND c = CreateWindowExW(0, L"mp_btn", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | style, S(x), S(y), S(w), S(h), p, (HMENU)(ULONG_PTR)id, g_hinst, NULL);
     SendMessageW(c, WM_SETFONT, (WPARAM)g_fontUI, FALSE);
     return c;
 }
 
-void ButtonInit(void)
-{
+void ButtonInit(void) {
     RegClass(L"mp_btn", BtnProc, CS_DBLCLKS, NULL);
 }

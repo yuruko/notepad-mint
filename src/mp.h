@@ -1,28 +1,20 @@
-/* mp.h - shared declarations for notepad mint */
 #ifndef MP_H
 #define MP_H
 
 #include "w32.h"
 
 #define APP_NAME     L"notepad mint"
-#define TITLE_TAIL   L" - " APP_NAME                  /* the window title is "<name>" + this (main.c AppUpdateTitle); the title strip draws the name bold and this part regular */
+#define TITLE_TAIL   L" - " APP_NAME
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.0.12"
+#define APP_VERSION  L"1.1.0"
 #define PATH_CAP     1024
 
-/* ------------------------------------------------------------- palette --
- * classic 2000-era chrome (bevels, flat menu bar, sunken fields) in one of two themes: dark (the default:
- * #161418 chrome, black editor, #9df5bd mint) or light (win2000 gray chrome,
- * white editor, softer #2f7d58 mint).
- * the C_* names are RUNTIME values (ThemeSet in ui.c switches them): never use them in a static initializer,
- * a case label or any constant expression, and never keep a brush made from them across a theme switch
- * (g_brFace / g_brField always hold the current theme's brushes: read them at use time). */
 typedef struct Palette {
-    COLORREF accent, accentFg, onAccent;    /* mint fill / mint as text or a thin line on a surface / text on a mint fill */
-    COLORREF face, face2, field;            /* chrome face, raised surfaces (buttons, popups), sunken fields (lists, small edits) */
-    COLORREF hi, hi2, lo, lo2;              /* bevels: outer light, inner light, outer dark, inner dark */
-    COLORREF text, dim;                     /* chrome text, disabled / secondary text */
-    COLORREF editFg, editBg;                /* the editor area */
+    COLORREF accent, accentFg, onAccent;
+    COLORREF face, face2, field;
+    COLORREF hi, hi2, lo, lo2;
+    COLORREF text, dim;
+    COLORREF editFg, editBg;
 } Palette;
 extern Palette g_pal;
 #define C_ACCENT    (g_pal.accent)
@@ -37,29 +29,27 @@ extern Palette g_pal;
 #define C_LO2       (g_pal.lo2)
 #define C_TEXT      (g_pal.text)
 #define C_DIM       (g_pal.dim)
-#define PROBE_ID    0x4D494E54                      /* "MINT": what a probe build answers to its "are you a probe" messages (tests only) */
-#define DEFAULT_FACE L"Consolas"                    /* the editor font until the user picks another */
+#define PROBE_ID    0x4D494E54
+#define DEFAULT_FACE L"Consolas"
 #define C_EDIT_FG   (g_pal.editFg)
 #define C_EDIT_BG   (g_pal.editBg)
 enum { THEME_DARK, THEME_LIGHT };
 
-/* --------------------------------------------------------- command ids -- */
 enum {
     IDM_FILE_NEW = 101, IDM_FILE_NEWWIN, IDM_FILE_OPEN, IDM_FILE_SAVE, IDM_FILE_SAVEAS, IDM_FILE_PAGESETUP, IDM_FILE_PRINT, IDM_FILE_EXIT,
     IDM_EDIT_UNDO = 201, IDM_EDIT_CUT, IDM_EDIT_COPY, IDM_EDIT_PASTE, IDM_EDIT_DELETE,
     IDM_EDIT_FIND, IDM_EDIT_FINDNEXT, IDM_EDIT_FINDPREV, IDM_EDIT_REPLACE, IDM_EDIT_GOTO,
     IDM_EDIT_SELALL, IDM_EDIT_TIMEDATE, IDM_EDIT_CLEARLINE,
-    IDM_FMT_WRAP = 301, IDM_FMT_FONT, IDM_TAB_2 = 305, IDM_TAB_4, IDM_TAB_8,   /* format > tab size */
+    IDM_FMT_WRAP = 301, IDM_FMT_FONT, IDM_TAB_2 = 305, IDM_TAB_4, IDM_TAB_8,
     IDM_EOL_CRLF = 311, IDM_EOL_LF, IDM_EOL_CR,
     IDM_ENC_UTF8 = 321, IDM_ENC_UTF8BOM, IDM_ENC_UTF16LE, IDM_ENC_UTF16BE, IDM_ENC_ANSI, IDM_ENC_OTHER, IDM_ENC_REOPEN,
-    IDM_RTL = 340, IDM_DIR_LTR = 341, IDM_DIR_RTL = 342, IDM_UCC_BASE = 350,                /* IDM_UCC_BASE + n inserts unicode control char n (0..16) */
+    IDM_RTL = 340, IDM_DIR_LTR = 341, IDM_DIR_RTL = 342, IDM_UCC_BASE = 350,
     IDM_VIEW_STATUS = 401, IDM_ZOOM_IN, IDM_ZOOM_OUT, IDM_ZOOM_RESET, IDM_THEME_DARK, IDM_THEME_LIGHT, IDM_THEME_TOGGLE,
     IDM_HELP_TOPICS = 501, IDM_HELP_ABOUT, IDM_HELP_DEFAULT,
-    IDM_RECENT_BASE = 700, IDM_RECENT_NONE = 710, IDM_RECENT_CLEAR = 711,     /* file > recent: IDM_RECENT_BASE + n opens the n-th remembered file (0..RECENT_MAX - 1); NONE is the grayed placeholder of an empty list; CLEAR (the last item, after a separator) empties the list */
-    IDM_SYS_RESTORE = 601, IDM_SYS_MOVE, IDM_SYS_SIZE, IDM_SYS_MIN, IDM_SYS_MAX, IDM_SYS_CLOSE   /* title bar menu */
+    IDM_RECENT_BASE = 700, IDM_RECENT_NONE = 710, IDM_RECENT_CLEAR = 711,
+    IDM_SYS_RESTORE = 601, IDM_SYS_MOVE, IDM_SYS_SIZE, IDM_SYS_MIN, IDM_SYS_MAX, IDM_SYS_CLOSE
 };
 
-/* ------------------------------------------------------------ util.c ---- */
 void  *mem_alloc(size_t n);
 void  *mem_zalloc(size_t n);
 void  *mem_realloc(void *p, size_t n);
@@ -75,48 +65,35 @@ const WCHAR *PathName(const WCHAR *path);
 void   PathDir(const WCHAR *path, WCHAR *out, int cap);
 void   PathJoin(WCHAR *dir, const WCHAR *name, int cap);
 BOOL   IsDir(const WCHAR *path);
-size_t mp_count_lf(const WCHAR *p, size_t n);        /* rt.asm */
-size_t mp_find3(const WCHAR *p, size_t n, unsigned a, unsigned b, unsigned c);   /* rt.asm: index of the first unit that is a, b or c (n if none) */
-int    WordClass(WCHAR c);                           /* edit_text.c: 0 blank, 1 word char, 2 punctuation (word delete) */
-#define DOCNAME_EPOCH 2026u                          /* default names: mint-0000 = midnight on 1 january of this year (100 year cycle) */
-#define DOCNAME_STEPS 45u                            /* default names: steps a day (one every 32 minutes) */
-#define DOCNAME_AHEAD (DOCNAME_STEPS * 366u)         /* the counter may run ahead of the clock by up to a year */
-#define DOCNAME_NONE  0xFFFFFFFFu                    /* no name handed out yet */
-unsigned DocNameClock(const SYSTEMTIME *st);         /* local date/time -> steps since DOCNAME_EPOCH-01-01 00:00 (100 year cycle) */
-unsigned DocNameNext(unsigned clock, unsigned last); /* last + 1 while that is ahead of the clock (by at most DOCNAME_AHEAD), else the clock */
-void   DefaultDocName(unsigned v, WCHAR *out, int cap);   /* "mint-" + 4 base-36 chars of v (zero padded) */
+size_t mp_count_lf(const WCHAR *p, size_t n);
+size_t mp_find3(const WCHAR *p, size_t n, unsigned a, unsigned b, unsigned c);
+int    WordClass(WCHAR c);
+#define DOCNAME_EPOCH 2026u
+#define DOCNAME_STEPS 45u
+#define DOCNAME_AHEAD (DOCNAME_STEPS * 366u)
+#define DOCNAME_NONE  0xFFFFFFFFu
+unsigned DocNameClock(const SYSTEMTIME *st);
+unsigned DocNameNext(unsigned clock, unsigned last);
+void   DefaultDocName(unsigned v, WCHAR *out, int cap);
 
-/* ------------------------------------------------------------- assoc.c -- */
 #define ASSOC_PROGID    L"notepad-mint.text"
-#define ASSOC_REGAPP    L"notepad-mint"                  /* the RegisteredApplications name: ms-settings:defaultapps?registeredAppUser=notepad-mint */
+#define ASSOC_REGAPP    L"notepad-mint"
 #define ASSOC_CAPS      L"Software\\notepad mint\\Capabilities"
 #define ASSOC_EXT_COUNT 10
-extern const WCHAR *const g_assocExt[ASSOC_EXT_COUNT];   /* .txt .log .ini .cfg .conf .md .csv .nfo .diz .text (the installer has the same list) */
-BOOL   AssocRegisterUser(const WCHAR *exe);          /* this exe as a choice for those extensions, for the current user */
-BOOL   AssocMachineHas(const WCHAR *exe);            /* the installer registered this exe for all users */
+extern const WCHAR *const g_assocExt[ASSOC_EXT_COUNT];
+BOOL   AssocRegisterUser(const WCHAR *exe);
+BOOL   AssocMachineHas(const WCHAR *exe);
 
-/* ------------------------------------------------------------ search.c -- */
-/* pure text search (no ui, unit tested): pattern pat[0..m) in t[0..n) (neither needs a terminator).
- * down (up = 0): the first match starting at or after `from`. up: the last match ending at or before `from`.
- * returns the match start or -1 (also for m <= 0). no wrap-around: the caller retries from the other end. */
-int    FindInText(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int up, int matchCase);
-/* wholeWord checks adjacent units in the complete document; valid surrogate pairs are never split. */
 int    FindInTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int up, int matchCase, int wholeWord);
-/* replace every match of pat with `with` in two passes (size, then fill). returns a mem_alloc'd, nul terminated result
- * (*outLen chars, *count replacements) or NULL when out of memory. zero matches => a copy and *count = 0. */
-WCHAR *ReplaceAllText(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase,
-                      int *outLen, int *count);
-WCHAR *ReplaceAllTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase,
-                        int wholeWord, int *outLen, int *count);
+WCHAR *ReplaceAllTextEx(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase, int wholeWord, int *outLen, int *count);
 #ifdef DBGLOG
-void   Dbg(const WCHAR *tag, INT_PTR a, INT_PTR b);  /* debug builds: append to build\dbg.log */
+void   Dbg(const WCHAR *tag, INT_PTR a, INT_PTR b);
 #define DBG(t, a, b) Dbg(t, (INT_PTR)(a), (INT_PTR)(b))
 #else
 #define DBG(t, a, b) ((void)0)
 #endif
 
-/* -------------------------------------------------------------- ui.c ---- */
-#define IDC_DIM 0xD1                                  /* static label id => dim text */
+#define IDC_DIM 0xD1
 
 typedef struct DlgBase {
     HWND hwnd, owner, focus;
@@ -126,38 +103,38 @@ typedef struct DlgBase {
     BYTE frk[24];
 } DlgBase;
 
-enum { BV_RAISED, BV_SUNKEN, BV_ETCHED, BV_FLAT_UP, BV_FLAT_DN };
+enum { BV_RAISED, BV_SUNKEN, BV_ETCHED, BV_FLAT_DN };
 
 extern HINSTANCE g_hinst;
 extern int       g_dpi;
-extern HFONT     g_fontUI, g_fontUIB;                 /* dialogs: segoe ui 9pt */
-extern HFONT     g_fontMenu, g_fontMenuB;             /* menu bar / popups / status bar / title strip: the editor font face at a static CHROME_PX; g_fontMenuB = the same, bold (the title) */
-#define CHROME_PX 11                                  /* the chrome font height in 96-dpi pixels (em height): static, scaled by the dpi, it does not follow the editor size */
+extern HFONT     g_fontUI, g_fontUIB;
+extern HFONT     g_fontMenu, g_fontMenuB;
+#define CHROME_PX 11
 extern HBRUSH    g_brFace, g_brField;
 
-int   S(int v);                                       /* scale 96-dpi px -> device px */
-int   UnS(int px);                                    /* device px -> 96-dpi px */
+int   S(int v);
+int   UnS(int px);
 void  UiInit(HINSTANCE hi);
 void  UiSetDpi(int dpi);
-void  ThemeSet(int theme);                            /* THEME_*: switches g_pal + g_brFace / g_brField (no repaint) */
+void  ThemeSet(int theme);
 int   ThemeGet(void);
-void  UiSetChromeFont(const WCHAR *face);                /* rebuilds g_fontMenu / g_fontMenuB (the editor font face, CHROME_PX pixels); callers then refont the bar + status bar + title strip */
+void  UiSetChromeFont(const WCHAR *face);
 int   UiSystemDpi(void);
-int   UiDpiForWindow(HWND h);                         /* falls back to g_dpi before windows 10 */
-int   UiMetric(int idx);                              /* GetSystemMetrics at the current dpi */
-BOOL  UiAdjustRect(RECT *r, DWORD style, DWORD ex);   /* client rect -> window rect at the current dpi */
+int   UiDpiForWindow(HWND h);
+int   UiMetric(int idx);
+BOOL  UiAdjustRect(RECT *r, DWORD style, DWORD ex);
 void  FillC(HDC dc, const RECT *r, COLORREF c);
 void  Bevel(HDC dc, const RECT *r, int kind);
 void  TextC(HDC dc, const WCHAR *s, int n, RECT *r, UINT fmt, COLORREF c);
 int   TextW(HDC dc, const WCHAR *s, int n);
-void  Tri(HDC dc, int x, int y, int sz, int dir, COLORREF c);  /* dir: 0 right, 1 down */
+void  Tri(HDC dc, int x, int y, int sz, COLORREF c);
 void  CheckGlyph(HDC dc, int x, int y, COLORREF c);
 void  DarkFrame(HWND h, int active);
-void  DarkScroll(HWND h);                      /* the control's scrollbars: native ones in the classic style, covered by our own (sbar.c) */
-void  SbarAttach(HWND target);                  /* (DarkScroll calls it) overlays for the target's native bars; the target gets WS_CLIPSIBLINGS */
-void  SbarTrim(HWND target, int right, int bottom);   /* the target's window overhangs the visible area by this many px at the right / bottom: its bars are that much thinner */
-void  SbarSync(HWND target);                   /* follow the target's native bars now (they are also polled) */
-void  SbarDetach(HWND target);                  /* the target is being replaced */
+void  DarkScroll(HWND h);
+void  SbarAttach(HWND target);
+void  SbarTrim(HWND target, int right, int bottom);
+void  SbarSync(HWND target);
+void  SbarDetach(HWND target);
 void  RegClass(const WCHAR *name, WNDPROC proc, UINT style, HBRUSH bg);
 
 DlgBase *DlgFromHwnd(HWND h, UINT m, LPARAM l);
@@ -170,10 +147,9 @@ HWND  UiLabel(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWO
 HWND  UiEdit(DlgBase *b, const WCHAR *text, int x, int y, int w, int h, int id, DWORD extra);
 HWND  UiButton(HWND p, const WCHAR *text, int x, int y, int w, int h, int id, DWORD style);
 int   MpAsk(HWND owner, const WCHAR *title, const WCHAR *msg, const WCHAR *b1, const WCHAR *b2, const WCHAR *b3, int escIdx);
-void  MpNote(HWND owner, const WCHAR *title, const WCHAR *msg);   /* a message with just an "ok" button */
+void  MpNote(HWND owner, const WCHAR *title, const WCHAR *msg);
 int   ClampInt(int v, int lo, int hi);
 
-/* ------------------------------------------ menu.c / menu_defs.c ---- */
 #define MS_CHECK 1
 #define MS_RADIO 2
 #define MS_GRAY  4
@@ -181,39 +157,35 @@ typedef struct MenuDef MenuDef;
 typedef struct MenuItem { const WCHAR *label, *accel; int id; const MenuDef *sub; } MenuItem;
 struct MenuDef { const MenuItem *items; int n; };
 typedef unsigned (*MenuStateFn)(int id);
-#define BAR_BTN_W 31                                  /* the buttons at the right end of the menu bar (word wrap, then the theme button flush right; its icon is a sun in the light theme, a moon in the dark one): the width of each, 96-dpi pixels (31, not 30: an odd width has a middle pixel, where the icon's middle goes) */
-#define BAR_BTN_ICON 12                               /* ... the box of the icon inside it, 96-dpi pixels  */
-#define BAR_BTN_OPACITY_ON 60                         /* ... the word wrap button (the left one of the two) is this opaque at rest while word wrap is ON (a toggle has to show its state, and no frame / sunken look is wanted) */
-#define BAR_BTN_OPACITY 20                           /* ... and how opaque the icon is at rest, percent (hovered: 100) */
-#define BAR_WRAP_ICON_DY 1                           /* ... the word wrap button's icon is drawn this many 96-dpi pixels below the middle of its button (the hover fill stays put; the theme button's icon stays centred) */
-#define BAR_TIP_DELAY 500                             /* ... the tooltip of a button (what it does + its key combo) shows once the pointer has been on it this many ms (the system's own initial delay: the double click time) */
-#define BAR_TIP_SHOW 5000                             /* ... and stays up this many ms (the system's own: ten times the delay) */
+#define BAR_BTN_W 31
+#define BAR_BTN_ICON 12
+#define BAR_BTN_OPACITY_ON 60
+#define BAR_BTN_OPACITY 20
+#define BAR_WRAP_ICON_DY 1
+#define BAR_TIP_DELAY 500
+#define BAR_TIP_SHOW 5000
 
 extern const MenuDef g_mdEditCtx, g_mdEol, g_mdEnc, g_mdZoom, g_mdUcc, g_mdSys;
-extern const MenuDef g_mdTab;                        /* format > tab size: 2, 4, 8 */
-extern MenuDef g_mdRecent;                          /* file > recent: its items follow the list (MenuSetRecent) */
-#define RECENT_MAX 9                                 /* remembered files */
-void  MenuSetRecent(const WCHAR (*paths)[PATH_CAP], int n);   /* the n remembered files (newest first) become the items of file > recent (n = 0: a grayed placeholder) */
+extern const MenuDef g_mdTab;
+extern MenuDef g_mdRecent;
+#define RECENT_MAX 9
+void  MenuSetRecent(const WCHAR (*paths)[PATH_CAP], int n);
 HWND  MenuBarCreate(HWND parent, MenuStateFn fn);
 int   MenuBarHeight(void);
-int   MenuBarMinWidth(void);                          /* narrowest client width at which the bar shows its menus and the two buttons at the right end */
+int   MenuBarMinWidth(void);
 void  MenuBarRefont(HWND bar);
-void  MenuBarActivate(HWND bar, int idx, int openPopup);
+void  MenuBarActivate(int idx, int openPopup);
 int   MenuBarMnemonic(WCHAR ch);
 void  MenuPopup(HWND owner, const MenuDef *def, int x, int y, int anchorBottom);
 void  MenuCancel(void);
 
-/* ------------------------------------------------------------ status.c -- */
-enum { SB_POS, SB_ZOOM, SB_LINES, SB_BYTES, SB_EOL, SB_ENC, SB_COUNT };   /* left to right; SB_POS takes the remaining room; all but SB_LINES / SB_BYTES are clickable; SB_ZOOM is empty (no panel at all) unless zoomed */
+enum { SB_POS, SB_ZOOM, SB_LINES, SB_BYTES, SB_EOL, SB_ENC, SB_COUNT };
 HWND  StatusCreate(HWND parent);
 int   StatusHeight(void);
 int   StatusMinWidth(void);
 void  StatusSet(HWND sb, int idx, const WCHAR *text);
 void  StatusRefont(HWND sb);
 
-/* ------------------------------------------------------------- frame.c ---- */
-/* the main window's title strip (drawn by us, in the chrome font; on by default, see FRAME_CUSTOM in frame.c).
- * with FRAME_CUSTOM 0 every function below is a no-op / falls through to the default window behaviour and FrameHeight() is 0 */
 int      FrameEnabled(void);
 int      FrameHeight(void);
 void     FrameRefont(HWND h);
@@ -221,100 +193,92 @@ void     FrameInvalidate(HWND h);
 void     FrameActive(HWND h, int active);
 void     FramePaint(HWND h, HDC dc);
 LRESULT  FrameNcCalc(HWND h, WPARAM w, LPARAM l);
-LRESULT  FrameHitTest(HWND h, LPARAM l);                 /* WM_NCHITTEST; returns the hit code */
-BOOL     FrameMsg(HWND h, UINT m, WPARAM w, LPARAM l);   /* mouse messages in the strip; TRUE = handled */
-void     FrameSysMenu(HWND h, int x, int y);             /* screen coords; (-1,-1) = under the icon */
-unsigned FrameSysState(int id);                          /* IDM_SYS_* menu states */
-void     FrameSysCommand(HWND h, int id);                /* IDM_SYS_*: posts the matching WM_SYSCOMMAND */
+LRESULT  FrameHitTest(HWND h, LPARAM l);
+BOOL     FrameMsg(HWND h, UINT m, WPARAM w, LPARAM l);
+void     FrameSysMenu(HWND h, int x, int y);
+unsigned FrameSysState(int id);
+void     FrameSysCommand(HWND h, int id);
 
-/* -------------------------------------------------------------- doc.c ---- */
-/* an encoding id is either one of the ENC_* values (0..4) or, when >= ENC_CP_MIN, a windows code page number */
 enum { ENC_UTF8, ENC_UTF8BOM, ENC_UTF16LE, ENC_UTF16BE, ENC_ANSI, ENC_COUNT };
 enum { EOL_CRLF, EOL_LF, EOL_CR, EOL_COUNT };
 #define ENC_CP_MIN   100
 #define ERR_NOMEM    8
 #define ERR_TOO_BIG  223
-#define ERR_BADCP    0xE0000001u                    /* ours, not a windows error (87 was ERROR_INVALID_PARAMETER: a real one from CreateFileW looked like a missing code page) */
-#define ERR_LOSSY    1113                           /* ERROR_NO_UNICODE_TRANSLATION */
+#define ERR_BADCP    0xE0000001u
+#define ERR_LOSSY    1113
 extern const WCHAR *const g_encName[ENC_COUNT];
-extern const WCHAR *const g_eolName[EOL_COUNT];
-extern const WCHAR *const g_encShort[ENC_COUNT];            /* status bar texts: "utf-8 bom", "crlf" ... */
+extern const WCHAR *const g_encShort[ENC_COUNT];
 extern const WCHAR *const g_eolShort[EOL_COUNT];
-void  EncLabel(int enc, WCHAR *out, int cap);       /* full name of any encoding id (menus, dialogs) */
-void  EncShort(int enc, WCHAR *out, int cap);       /* status bar text for any encoding id */
-int   EncListCount(void);                           /* every encoding the pickers offer */
-int   EncListGet(int i, WCHAR *label, int cap);     /* returns the encoding id, label = "name  description" */
-DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int forceEnc);   /* forceEnc -1 = detect */
-void  DocAllowLossy(BOOL on);                 /* TRUE: DocRead opens a file that is invalid in its encoding (bad bytes -> U+FFFD) instead of ERR_LOSSY */
+void  EncLabel(int enc, WCHAR *out, int cap);
+void  EncShort(int enc, WCHAR *out, int cap);
+int   EncListCount(void);
+int   EncListGet(int i, WCHAR *label, int cap);
+DWORD DocRead(const WCHAR *path, WCHAR **text, int *len, int *enc, int *eol, int forceEnc);
+void  DocAllowLossy(BOOL on);
 DWORD DocWrite(const WCHAR *path, const WCHAR *text, int len, int enc, int eol, BOOL *lossy);
-DWORD DocEncodedSize(const WCHAR *text, int len, int enc, int eol);   /* the bytes DocWrite would write for this text (the control's: CR LF breaks); nothing is written or allocated */
-DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol);      /* the same without the byte order mark: what a piece of the text (the selection) takes in the file */
-extern DWORD g_textRev;                             /* bumped whenever the document text changes (EN_CHANGE, WM_SETTEXT): what caches of text-derived values are keyed on */
+DWORD DocEncodedSize(const WCHAR *text, int len, int enc, int eol);
+DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol);
+extern DWORD g_textRev;
 
-/* ---------------------------------------------------------- app state ---- */
 #define FONT_MIN 70
 #define FONT_MAX 1000
 typedef struct Prefs {
     WCHAR    font[32];
-    int      pt, bold, italic;                  /* the size picked in the font dialog (saved, tenths of a point: 85 = 8.5 pt); ctrl+0 returns to it */
-    int      cur;                               /* working size: ctrl+plus / ctrl+minus / ctrl+wheel move it (not saved) */
-    int      theme;                             /* THEME_DARK / THEME_LIGHT (saved) */
+    int      pt, bold, italic;
+    int      cur;
+    int      theme;
     int      wrap, statusbar;
-    int      tab;                               /* tab size in columns: 2, 4 or 8 (saved) */
+    int      tab;
     int      winx, winy, winw, winh, maximized;
     int      matchCase, wrapAround, wholeWord;
-    int      marginL, marginT, marginR, marginB;      /* page setup, 1/1000 inch */
+    int      marginL, marginT, marginR, marginB;
 } Prefs;
 extern Prefs g_pf;
 extern HWND  g_hwnd, g_edit, g_status;
 
 typedef struct DocState {
-    WCHAR path[PATH_CAP];                       /* "" = not saved yet: the document is called `name` */
-    WCHAR name[12];                             /* the default name of an unsaved document, "mint-XXXX" (DefaultDocName) */
-    int   enc, eol;                             /* what DocWrite will use on the next save */
+    WCHAR path[PATH_CAP];
+    WCHAR name[12];
+    int   enc, eol;
 } DocState;
 extern DocState g_doc;
-const WCHAR *AppDocName(void);                  /* main.c: the file name, or the default name while unsaved (title, prompts, print job) */
+const WCHAR *AppDocName(void);
 
-/* Application services used by dialogs and the editor. */
-void  AppApplyPrefs(void);                      /* main.c: rebuild editor/chrome fonts and repaint */
-void  AppSavePrefs(void);                       /* prefs.c: capture placement and persist preferences */
-void  AppOpenPath(const WCHAR *path);
+void  AppApplyPrefs(void);
+void  AppSavePrefs(void);
 BOOL  AppIsDirty(void);
 void  AppUpdateTitle(void);
 void  AppUpdateStatus(void);
 
-/* --------------------------- edit.c / edit_caret.c / edit_text.c --- */
-#define EDIT_PAD 8                                    /* margin left and below the text (and right of it while word wrap is on), 96-dpi pixels (no frame around the editor): a margin, not a padding: text that is scrolled out of the control's rectangle still runs to the edge of the editor (the strips are painted by BandDraw in edit.c) */
-#define SBAR_TRIM 5                                  /* the editor's scrollbars are this many 96-dpi pixels thinner than the system's: its window overhangs the visible area at the right and at the bottom by this much (the native strip's outer part is clipped away by the parent), sbar.c covers the rest */
-#define EDIT_PAD_TOP 4                               /* padding above the first row */
-#define EDIT_BAND_INSET 0                           /* the row that is only partly in view at the bottom runs down to this many 96-dpi pixels above the editor's bottom edge: 0 = to the edge, EDIT_PAD = the bottom padding stays blank */
-HWND   EditCreate(HWND parent);                 /* (re)creates g_edit for g_pf.wrap, carrying text/selection/rtl over */
-void   EditApplyFont(void);                     /* font from g_pf (face, g_pf.cur size, dpi) */
-void   EditApplyColors(void);                   /* bg brush from C_EDIT_BG, repaint */
+#define EDIT_PAD 8
+#define SBAR_TRIM 5
+#define EDIT_PAD_TOP 4
+#define EDIT_BAND_INSET 0
+HWND   EditCreate(HWND parent);
+void   EditApplyFont(void);
+void   EditApplyColors(void);
 HBRUSH EditBrush(void);
-void   FontResolve(WCHAR *face);                /* swaps a missing face for consolas / lucida console / courier new */
-BOOL   EditSetDocText(const WCHAR *t);          /* load a document: resets undo + modified flag on success */
-WCHAR *EditGetDocText(int *len);                /* heap copy (CRLF text), caller mem_free()s */
+void   FontResolve(WCHAR *face);
+BOOL   EditSetDocText(const WCHAR *t);
+WCHAR *EditGetDocText(int *len);
 BOOL   EditHasSel(void);
-void   EditApplyTabs(void);                     /* tab stops every g_pf.tab columns, in the control and in what edit.c draws itself */
-void   EditScrollSoon(void);                   /* re-check which scrollbars are needed (they only show when the text needs them) */
-const WCHAR *EditLockText(void **h, int *n);    /* zero-copy view of the text (CRLF), not nul terminated; pair with EditUnlockText */
+void   EditApplyTabs(void);
+void   EditScrollSoon(void);
+const WCHAR *EditLockText(void **h, int *n);
 void   EditUnlockText(void *h);
-void   EditCaretPos(int *line, int *col);       /* 1-based, logical lines (also with word wrap on) */
-BOOL   EditSelStats(int enc, int eol, int *lines, DWORD *bytes);   /* the selection: TRUE when there is one, then the lines it covers and the bytes a save would write for it in this encoding / line ending (no bom) */
+void   EditCaretPos(int *line, int *col);
+BOOL   EditSelStats(int enc, int eol, int *lines, DWORD *bytes);
 BOOL   EditGotoLine(int line);
-void   EditClearLine(void);                     /* ctrl+k: empties the caret's logical line (the text only, its line break stays); one undo step */
-void   EditZoomStep(int dir);                   /* +1 / -1: next bigger / smaller size (7..100pt; ctrl+plus steps 8..48) */
-void   EditZoomReset(void);                     /* back to g_pf.pt, the size picked in the font dialog */
-BOOL   EditZoomCan(int dir);                    /* false at the ends of the range */
+void   EditClearLine(void);
+void   EditZoomStep(int dir);
+void   EditZoomReset(void);
+BOOL   EditZoomCan(int dir);
 void   EditInsert(const WCHAR *s);
-BOOL   EditSetRtl(BOOL rtl);                    /* right to left reading order on / off: FALSE when unchanged (the caller re-runs Layout) */
-void   EditDirKeyCancel(void);                   /* forget a ctrl + shift key press (an accelerator took the next key) */
-int    EditStrongDir(int limit);                   /* first strong letter in the first `limit` chars: 2 right to left, 1 left to right, 0 none */
+BOOL   EditSetRtl(BOOL rtl);
+void   EditDirKeyCancel(void);
+int    EditStrongDir(int limit);
 BOOL   EditIsRtl(void);
 
-/* ------------------------------------------------------------- dialogs -- */
 void  FindDlgShow(int replaceMode);
 void  FindNext(int dirUp);
 HWND  FindDlgHwnd(void);
@@ -322,11 +286,11 @@ BOOL  FindHasText(void);
 void  GotoDlg(HWND owner);
 void  AboutDlg(HWND owner);
 void  HelpDlg(HWND owner);
-BOOL  FontDlg(HWND owner);                      /* edits g_pf on ok; main applies it */
+BOOL  FontDlg(HWND owner);
 BOOL  EncDlg(HWND owner, int *enc, int reopen);
-BOOL  FileDlgOpen(HWND owner, WCHAR *path, int cap);   /* native open dialog; path in: the current file (its folder is the start folder), out: the pick (only on ok) */
-BOOL  FileDlgSave(HWND owner, WCHAR *path, int cap);   /* native save as dialog; path in: the file or the default name to propose, out: the pick (only on ok). no encoding / line ending pickers: the document keeps its own */
-void  PrintDoc(HWND owner, int quiet);   /* quiet: default printer, no dialog (notepad /p) */
+BOOL  FileDlgOpen(HWND owner, WCHAR *path, int cap);
+BOOL  FileDlgSave(HWND owner, WCHAR *path, int cap);
+void  PrintDoc(HWND owner, int quiet);
 void  PageSetup(HWND owner);
 
 #endif

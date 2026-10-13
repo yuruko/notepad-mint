@@ -1,21 +1,7 @@
-/* sbar.c - classic style scrollbars in the app's palette, laid over the native ones.
- *
- * windows draws a control's own scrollbars with fixed system colours (nothing per process can change that), and the themed
- * ones are thin and hide their arrows. so the native bars stay (they keep ALL the logic: range, page, position, keyboard, wheel,
- * edit.c UpdateBars showing / hiding them) but a window of ours covers each native strip and paints a classic bar there: square
- * arrow buttons with a raised bevel, a dithered track, a raised thumb, all in the palette (dark and light). the target control
- * has WS_CLIPSIBLINGS, so whatever windows draws into the native strip is clipped away by the overlay on top of it.
- * the overlay reads the live state with GetScrollInfo and drives the target with the messages its own bar would send.
- *
- *   SbarAttach(target)   called by DarkScroll(): creates the vertical and the horizontal overlay (children of the target's parent)
- *   SbarSync(target)     reposition / show / hide / repaint from the target's current native bars (cheap: compares, then touches)
- *   SbarDetach(target)   the target is being replaced (edit.c re-creates the editor when word wrap toggles)
- * every overlay also polls its target (SBT_POLL) so the dialog controls need no hooks; the editor calls SbarSync from its
- * subclass for an immediate answer. everything is driven by lParam coordinates (no GetCursorPos): the gui tests post messages. */
 #include "mp.h"
 
-#define SBT_REPEAT   1                  /* timer: auto repeat of an arrow / the track */
-#define SBT_POLL     2                  /* timer: follow the target */
+#define SBT_REPEAT   1
+#define SBT_POLL     2
 #define POLL_MS      40
 #define REPEAT_FIRST 400
 #define REPEAT_NEXT  50
@@ -28,35 +14,30 @@ typedef struct Sb {
     HWND self, target;
     int horz;
     int shown;
-    RECT rc;                            /* where it sits, in the parent's client coordinates */
-    int corner;                         /* vertical bar: height of the corner square at its end (the horizontal strip) */
-    SCROLLINFO si;                      /* what is painted */
-    int part, over;                     /* the pressed part and whether the pointer is still on it */
-    int grab, dragA;                    /* thumb drag: pointer offset inside the thumb, the thumb's position */
-    int px, py;                         /* the last pointer position (client) */
+    RECT rc;
+    int corner;
+    SCROLLINFO si;
+    int part, over;
+    int grab, dragA;
+    int px, py;
 } Sb;
 
-typedef struct { int len, btn, t0, t1, a0, a1, on; } Geo;     /* along the bar: length, button size, track start / end, thumb start / end, enabled */
+typedef struct { int len, btn, t0, t1, a0, a1, on; } Geo;
 
 static struct { HWND target; Sb *v, *h; int trimR, trimB; } g_tab[8];
 static HBRUSH g_dither;
 
-/* ------------------------------------------------------------ geometry --- */
-
-static int ReadSi(const Sb *s, SCROLLINFO *si)               /* the target's native bar; FALSE when it has none */
-{
+static int ReadSi(const Sb *s, SCROLLINFO *si) {
     memset(si, 0, sizeof *si);
     si->cbSize = sizeof *si;
     si->fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     return GetScrollInfo(s->target, s->horz ? SB_HORZ : SB_VERT, si);
 }
 
-static void Measure(const Sb *s, int w, int h, Geo *g)
-{
-    int th = s->horz ? h : w;                                /* across the bar */
+static void Measure(const Sb *s, int w, int h, Geo *g) {
+    int th = s->horz ? h : w;
     int range = s->si.nMax - s->si.nMin + 1, page = (int)s->si.nPage;
     int tl, tlen, maxp, pos;
-
     g->len = s->horz ? w : h - s->corner;
     g->btn = th;
     if (g->len < 2 * g->btn) g->btn = g->len / 2;
@@ -69,14 +50,13 @@ static void Measure(const Sb *s, int w, int h, Geo *g)
     tlen = page > 0 ? MulDiv(tl, page, range) : th;
     if (tlen < th) tlen = th;
     if (tlen > tl) tlen = tl;
-    maxp = range - (page > 0 ? page : 0);                    /* the offsets the thumb can stand for: 0 .. maxp */
+    maxp = range - (page > 0 ? page : 0);
     pos = ClampInt(s->si.nPos - s->si.nMin, 0, maxp);
     g->a0 = g->t0 + (maxp > 0 ? MulDiv(tl - tlen, pos, maxp) : 0);
     g->a1 = g->a0 + tlen;
 }
 
-static int Hit(const Sb *s, int x, int y, const Geo *g)
-{
+static int Hit(const Sb *s, int x, int y, const Geo *g) {
     int a = s->horz ? x : y;
     if (!s->horz && y >= g->len) return P_CORNER;
     if (!g->on) return P_NONE;
@@ -87,21 +67,18 @@ static int Hit(const Sb *s, int x, int y, const Geo *g)
     return P_THUMB;
 }
 
-static void Seg(const Sb *s, int a0, int a1, int w, int h, RECT *r)       /* [a0, a1) along the bar, the whole thickness */
-{
+static void Seg(const Sb *s, int a0, int a1, int w, int h, RECT *r) {
     if (s->horz) { r->left = a0; r->right = a1; r->top = 0; r->bottom = h; }
     else         { r->left = 0; r->right = w; r->top = a0; r->bottom = a1; }
 }
 
-/* ------------------------------------------------------------- painting --- */
-static void Glyph(HDC dc, const RECT *r, int dir, COLORREF c, int off)    /* dir 0 up, 1 down, 2 left, 3 right */
-{
+static void Glyph(HDC dc, const RECT *r, int dir, COLORREF c, int off) {
     POINT p[3];
     int t = r->right - r->left < r->bottom - r->top ? r->right - r->left : r->bottom - r->top;
     int hh = (t * 3 + 8) / 17, hw, cx, cy, x0, y0;
     HGDIOBJ op, ob;
     if (hh < 2) hh = 2;
-    hw = hh;                                                 /* 7 x 4 at 17 px, like the classic bar */
+    hw = hh;
     cx = (r->left + r->right) / 2 + off;
     cy = (r->top + r->bottom) / 2 + off;
     x0 = cx - (hh + 1) / 2;
@@ -121,13 +98,12 @@ static void Glyph(HDC dc, const RECT *r, int dir, COLORREF c, int off)    /* dir
     SelectObject(dc, ob);
 }
 
-static void Dither(HDC dc, const RECT *r)                    /* a 1px checkerboard of two palette colours (the classic track) */
-{
+static void Dither(HDC dc, const RECT *r) {
     static const WORD bits[8] = { 0x00AA, 0x0055, 0x00AA, 0x0055, 0x00AA, 0x0055, 0x00AA, 0x0055 };
     if (!g_dither) {
         HBITMAP bm = CreateBitmap(8, 8, 1, 1, bits);
         g_dither = bm ? CreatePatternBrush(bm) : NULL;
-        if (bm) DeleteObject(bm);                           /* the brush owns a copy of the bitmap's pixels */
+        if (bm) DeleteObject(bm);
     }
     if (!g_dither) { FillC(dc, r, C_FACE); return; }
     SetTextColor(dc, C_FACE);
@@ -135,28 +111,23 @@ static void Dither(HDC dc, const RECT *r)                    /* a 1px checkerboa
     FillRect(dc, r, g_dither);
 }
 
-static void Button(HDC dc, const RECT *r, int pressed)
-{
+static void Button(HDC dc, const RECT *r, int pressed) {
     FillC(dc, r, C_FACE);
     Bevel(dc, r, pressed ? BV_FLAT_DN : BV_RAISED);
 }
 
-static void Paint(Sb *s, HDC dc, int w, int h)
-{
+static void Paint(Sb *s, HDC dc, int w, int h) {
     Geo g;
     RECT r, all;
     int dirA = s->horz ? 2 : 0, dirB = s->horz ? 3 : 1, off;
     COLORREF gc;
-
     all.left = 0; all.top = 0; all.right = w; all.bottom = h;
-    FillC(dc, &all, C_FACE);                                 /* the corner square too */
+    FillC(dc, &all, C_FACE);
     Measure(s, w, h, &g);
     gc = g.on ? C_TEXT : C_DIM;
-
-    Seg(s, g.t0, g.t1, w, h, &r);                            /* track */
+    Seg(s, g.t0, g.t1, w, h, &r);
     if (r.right > r.left && r.bottom > r.top) Dither(dc, &r);
-
-    Seg(s, 0, g.btn, w, h, &r);                              /* the arrow buttons */
+    Seg(s, 0, g.btn, w, h, &r);
     off = (g.on && s->part == P_ARROW1 && s->over) ? 1 : 0;
     Button(dc, &r, off);
     Glyph(dc, &r, dirA, gc, off);
@@ -164,8 +135,7 @@ static void Paint(Sb *s, HDC dc, int w, int h)
     off = (g.on && s->part == P_ARROW2 && s->over) ? 1 : 0;
     Button(dc, &r, off);
     Glyph(dc, &r, dirB, gc, off);
-
-    if (g.on) {                                              /* the thumb (while it is dragged: where the pointer holds it) */
+    if (g.on) {
         int a0 = g.a0, a1 = g.a1;
         if (s->part == P_THUMB) { a1 = s->dragA + (g.a1 - g.a0); a0 = s->dragA; }
         Seg(s, a0, a1, w, h, &r);
@@ -173,8 +143,7 @@ static void Paint(Sb *s, HDC dc, int w, int h)
     }
 }
 
-static void PaintTo(Sb *s, HDC dc)                           /* double buffered */
-{
+static void PaintTo(Sb *s, HDC dc) {
     RECT rc;
     HDC mdc;
     HBITMAP bmp;
@@ -191,23 +160,17 @@ static void PaintTo(Sb *s, HDC dc)                           /* double buffered 
     DeleteDC(mdc);
 }
 
-/* ---------------------------------------------------------- scrolling --- */
-static int IsClass(HWND h, const WCHAR *name)
-{
+static int IsClass(HWND h, const WCHAR *name) {
     WCHAR c[24];
     return GetClassNameW(h, c, COUNTOF(c)) && wcmpi(c, name) == 0;
 }
 
-static void Step(Sb *s, int part)
-{
+static void Step(Sb *s, int part) {
     UINT code = part == P_ARROW1 ? SB_LINEUP : part == P_ARROW2 ? SB_LINEDOWN : part == P_PAGE1 ? SB_PAGEUP : SB_PAGEDOWN;
     SendMessageW(s->target, s->horz ? WM_HSCROLL : WM_VSCROLL, MAKEWPARAM(code, 0), 0);
 }
 
-/* the thumb was dragged to `pos` (the bar's own units). exact for any size: the 16 bit position of WM_VSCROLL can't carry a
- * 700000 line document, so an edit is scrolled by a line delta and a list box by its top index */
-static void ScrollTo(Sb *s, int pos)
-{
+static void ScrollTo(Sb *s, int pos) {
     SCROLLINFO si;
     int maxp, cur;
     if (!ReadSi(s, &si)) return;
@@ -223,14 +186,12 @@ static void ScrollTo(Sb *s, int pos)
     }
 }
 
-static void Pointer(Sb *s, LPARAM l)
-{
+static void Pointer(Sb *s, LPARAM l) {
     s->px = (short)LOWORD(l);
     s->py = (short)HIWORD(l);
 }
 
-static void Drag(Sb *s)                                      /* the pointer moved while the thumb is held */
-{
+static void Drag(Sb *s) {
     RECT rc;
     Geo g;
     int a, tlen, tl, na, range, page, maxp;
@@ -249,8 +210,7 @@ static void Drag(Sb *s)                                      /* the pointer move
     InvalidateRect(s->self, NULL, FALSE);
 }
 
-static void Release(Sb *s)
-{
+static void Release(Sb *s) {
     KillTimer(s->self, SBT_REPEAT);
     s->part = P_NONE;
     s->over = 0;
@@ -259,10 +219,8 @@ static void Release(Sb *s)
 
 static void Sync(Sb *s);
 
-static LRESULT CALLBACK SbProc(HWND h, UINT m, WPARAM w, LPARAM l)
-{
+static LRESULT CALLBACK SbProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     Sb *s = (Sb *)GetWindowLongPtrW(h, GWLP_USERDATA);
-
     if (m == WM_NCCREATE) {
         const SbInit *in = (const SbInit *)((CREATESTRUCTW *)l)->lpCreateParams;
         s = (Sb *)mem_zalloc(sizeof *s);
@@ -274,7 +232,6 @@ static LRESULT CALLBACK SbProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return DefWindowProcW(h, m, w, l);
     }
     if (!s) return DefWindowProcW(h, m, w, l);
-
     switch (m) {
     case WM_NCDESTROY: {
         int i;
@@ -291,7 +248,7 @@ static LRESULT CALLBACK SbProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_ERASEBKGND:
         return 1;
     case WM_MOUSEACTIVATE:
-        return MA_NOACTIVATE;                                /* the editor keeps the focus and its caret */
+        return MA_NOACTIVATE;
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC dc = BeginPaint(h, &ps);
@@ -352,12 +309,12 @@ static LRESULT CALLBACK SbProc(HWND h, UINT m, WPARAM w, LPARAM l)
         } else if (w == SBT_REPEAT) {
             RECT rc;
             Geo g;
-            SetTimer(h, SBT_REPEAT, REPEAT_NEXT, NULL);      /* the first delay is over: the quicker repeat */
+            SetTimer(h, SBT_REPEAT, REPEAT_NEXT, NULL);
             if (s->part && s->part != P_THUMB) {
                 Sync(s);
                 GetClientRect(h, &rc);
                 Measure(s, rc.right, rc.bottom, &g);
-                s->over = Hit(s, s->px, s->py, &g) == s->part;   /* a page scroll ends where the thumb reaches the pointer */
+                s->over = Hit(s, s->px, s->py, &g) == s->part;
                 if (s->over) Step(s, s->part);
                 InvalidateRect(h, NULL, FALSE);
             }
@@ -367,10 +324,7 @@ static LRESULT CALLBACK SbProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-/* ------------------------------------------------------------ placement --- */
-/* the native strips of `t`, in screen coordinates: thickness on the left / right (the left one is the rtl layout) and at the bottom */
-static void Strips(HWND t, RECT *wr, int *l, int *r, int *b, int trimR, int trimB)
-{
+static void Strips(HWND t, RECT *wr, int *l, int *r, int *b, int trimR, int trimB) {
     RECT cr;
     POINT o;
     GetWindowRect(t, wr);
@@ -380,21 +334,19 @@ static void Strips(HWND t, RECT *wr, int *l, int *r, int *b, int trimR, int trim
     *l = o.x - wr->left;
     *r = wr->right - (o.x + cr.right);
     *b = wr->bottom - (o.y + cr.bottom);
-    if (GetWindowLongPtrW(t, GWL_EXSTYLE) & WS_EX_LEFTSCROLLBAR) { wr->left += trimR; *l -= trimR; }   /* the window overhangs the visible area on the side of its vertical bar */
-    else { wr->right -= trimR; *r -= trimR; }                /* (the right, the left in a right to left layout) and at the bottom on purpose (SbarTrim): that part is not ours to cover */
+    if (GetWindowLongPtrW(t, GWL_EXSTYLE) & WS_EX_LEFTSCROLLBAR) { wr->left += trimR; *l -= trimR; }
+    else { wr->right -= trimR; *r -= trimR; }
     wr->bottom -= trimB; *b -= trimB;
     if (*l < 0) *l = 0;
     if (*r < 0) *r = 0;
     if (*b < 0) *b = 0;
 }
 
-static void Place(Sb *s, int visible, const RECT *scr)       /* scr: the wanted rectangle in screen coordinates */
-{
+static void Place(Sb *s, int visible, const RECT *scr) {
     SCROLLINFO si;
     RECT rc;
     POINT a, c;
     int changed = 0;
-
     if (!visible) {
         if (s->shown) { ShowWindow(s->self, SW_HIDE); s->shown = 0; }
         return;
@@ -416,18 +368,16 @@ static void Place(Sb *s, int visible, const RECT *scr)       /* scr: the wanted 
     if (changed) InvalidateRect(s->self, NULL, FALSE);
 }
 
-static void SyncEntry(int i)
-{
+static void SyncEntry(int i) {
     HWND t = g_tab[i].target;
     Sb *v = g_tab[i].v, *hz = g_tab[i].h;
     RECT wr, r;
     int l, rt, b, vt, left, vis;
-
     if (!t || !IsWindow(t)) return;
     Strips(t, &wr, &l, &rt, &b, g_tab[i].trimR, g_tab[i].trimB);
     vis = (GetWindowLongPtrW(t, GWL_STYLE) & WS_VISIBLE) != 0;
     vt = l > rt ? l : rt;
-    left = l > rt;                                           /* the vertical strip is on the left (rtl) */
+    left = l > rt;
     if (v) {
         r.left = left ? wr.left : wr.right - vt; r.right = r.left + vt;
         r.top = wr.top; r.bottom = wr.bottom;
@@ -441,24 +391,18 @@ static void SyncEntry(int i)
     }
 }
 
-static void Sync(Sb *s)
-{
+static void Sync(Sb *s) {
     int i;
-    for (i = 0; i < COUNTOF(g_tab); i++)
-        if (g_tab[i].target == s->target) { SyncEntry(i); return; }
+    for (i = 0; i < COUNTOF(g_tab); i++) if (g_tab[i].target == s->target) { SyncEntry(i); return; }
 }
 
-/* ----------------------------------------------------------------- api --- */
-static int Find(HWND t)
-{
+static int Find(HWND t) {
     int i;
-    for (i = 0; i < COUNTOF(g_tab); i++)
-        if (g_tab[i].target == t) return i;
+    for (i = 0; i < COUNTOF(g_tab); i++) if (g_tab[i].target == t) return i;
     return -1;
 }
 
-static Sb *Make(HWND t, int horz)
-{
+static Sb *Make(HWND t, int horz) {
     SbInit in;
     HWND w;
     in.target = t;
@@ -467,15 +411,14 @@ static Sb *Make(HWND t, int horz)
     return w ? (Sb *)GetWindowLongPtrW(w, GWLP_USERDATA) : NULL;
 }
 
-void SbarAttach(HWND t)
-{
+void SbarAttach(HWND t) {
     static int reg;
     int i;
     LONG_PTR st;
     if (!t || Find(t) >= 0) return;
     if (!reg) { RegClass(L"mp_sbar", SbProc, 0, NULL); reg = 1; }
     st = GetWindowLongPtrW(t, GWL_STYLE);
-    if (!(st & WS_CLIPSIBLINGS)) {                           /* without it the control would draw its native bars over the overlay */
+    if (!(st & WS_CLIPSIBLINGS)) {
         SetWindowLongPtrW(t, GWL_STYLE, st | WS_CLIPSIBLINGS);
         SetWindowPos(t, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
@@ -489,8 +432,7 @@ void SbarAttach(HWND t)
     SyncEntry(i);
 }
 
-void SbarTrim(HWND t, int right, int bottom)
-{
+void SbarTrim(HWND t, int right, int bottom) {
     int i = Find(t);
     if (i < 0) return;
     g_tab[i].trimR = right;
@@ -498,20 +440,18 @@ void SbarTrim(HWND t, int right, int bottom)
     SyncEntry(i);
 }
 
-void SbarSync(HWND t)
-{
+void SbarSync(HWND t) {
     int i = Find(t);
     if (i >= 0) SyncEntry(i);
 }
 
-void SbarDetach(HWND t)
-{
+void SbarDetach(HWND t) {
     int i = Find(t);
     Sb *v, *h;
     if (i < 0) return;
     v = g_tab[i].v;
     h = g_tab[i].h;
-    g_tab[i].target = NULL;                                  /* (WM_NCDESTROY then finds nothing to clear) */
+    g_tab[i].target = NULL;
     g_tab[i].v = g_tab[i].h = NULL;
     if (v) DestroyWindow(v->self);
     if (h) DestroyWindow(h->self);

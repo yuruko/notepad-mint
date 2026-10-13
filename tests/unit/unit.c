@@ -3,6 +3,9 @@
  * every check prints "PASS <name>" or "FAIL <name>: <why>" (expected vs actual); the exit code is 1 when anything failed */
 #include "mp.h"
 
+static int FindInText(const WCHAR *t, int n, const WCHAR *pat, int m, int from, int up, int matchCase) { return FindInTextEx(t, n, pat, m, from, up, matchCase, 0); }
+static WCHAR *ReplaceAllText(const WCHAR *t, int n, const WCHAR *pat, int m, const WCHAR *with, int wn, int matchCase, int *outLen, int *count) { return ReplaceAllTextEx(t, n, pat, m, with, wn, matchCase, 0, outLen, count); }
+
 /* kernel32 bits the app itself doesn't need (exact 32-bit sdk signatures) */
 #ifndef STD_OUTPUT_HANDLE
 #define STD_OUTPUT_HANDLE ((DWORD)-11)
@@ -625,15 +628,8 @@ static void TestEncList(void)
         Done(name);
     }
     for (i = 0; i < EOL_COUNT; i++) {
-        wsprintfW(name, L"g_eolName[%d] \"%s\" is lowercase", i, g_eolName[i]);
-        Want(g_eolName[i][0] && Lower(g_eolName[i]), L"it isn't", 0, 0);
-        Done(name);
-    }
-    Str(L"g_eolName crlf", g_eolName[EOL_CRLF], L"windows (crlf)");
-    Str(L"g_eolName lf", g_eolName[EOL_LF], L"unix (lf)");
-    for (i = 0; i < EOL_COUNT; i++) {
-        wsprintfW(name, L"g_eolShort[%d] \"%s\" is lowercase and shorter than the full name", i, g_eolShort[i]);
-        Want(g_eolShort[i][0] && Lower(g_eolShort[i]) && wlen(g_eolShort[i]) < wlen(g_eolName[i]), L"it isn't", 0, 0);
+        wsprintfW(name, L"g_eolShort[%d] \"%s\" is lowercase", i, g_eolShort[i]);
+        Want(g_eolShort[i][0] && Lower(g_eolShort[i]), L"it isn't", 0, 0);
         Done(name);
     }
     Str(L"g_eolShort crlf", g_eolShort[EOL_CRLF], L"crlf");

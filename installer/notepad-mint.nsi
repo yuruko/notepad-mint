@@ -10,7 +10,7 @@ Unicode true
 SetCompressor /SOLID lzma
 
 !ifndef VERSION
-  !define VERSION "1.0.12"
+  !define VERSION "1.1.0"
 !endif
 !ifndef EXE_PATH
   !error "EXE_PATH is not set (the built notepad-mint.exe)"
