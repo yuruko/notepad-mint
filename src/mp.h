@@ -6,7 +6,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.2.0"
+#define APP_VERSION  L"1.2.1"
 #define PATH_CAP     1024
 
 typedef struct Palette {

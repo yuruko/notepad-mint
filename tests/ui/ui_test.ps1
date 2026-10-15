@@ -1205,10 +1205,10 @@ function Test-T9 {                                                              
 
     $dlg = Open-Font $app
     Press $dlg $IDT.ID_RESET
-    Ck 'T9.20 "reset": the size box shows 10' ([bool](WaitFor { (Get-Field $dlg $IDT.ID_SIZE) -eq '10' } 1500)) ('size box [' + (Get-Field $dlg $IDT.ID_SIZE) + ']')
+    Ck 'T9.20 "reset": the size box shows the default size' ([bool](WaitFor { (Get-Field $dlg $IDT.ID_SIZE) -eq (PtText ([int]$defPt)) } 1500)) ('size box [' + (Get-Field $dlg $IDT.ID_SIZE) + ']')
     CkChk 'T9.21 ... bold is off again' $dlg $IDT.ID_BOLD 0
     Press $dlg $IDOK
-    CkEq 'T9.22 ok after reset: size10=100' '100' (Ini-Val $app 'editor' 'size10' '100')
+    CkEq 'T9.22 ok after reset: the default size is saved' $defPt (Ini-Val $app 'editor' 'size10' $defPt)
     CkEq 'T9.23 ... font=Consolas' 'Consolas' (Ini-Val $app 'editor' 'font' 'Consolas')
     CkEq 'T9.24 ... bold=0' '0' (Ini-Val $app 'editor' 'bold' '0')
     CkEq 'T9.25 ... italic=0' '0' (Ini-Val $app 'editor' 'italic' '0')

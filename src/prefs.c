@@ -7,7 +7,7 @@ static WCHAR g_iniDir[PATH_CAP], g_ini[PATH_CAP];
 static void PrefsDefaults(void) {
     memset(&g_pf, 0, sizeof g_pf);
     wcopy(g_pf.font, DEFAULT_FACE, 32);
-    g_pf.pt = 100;
+    g_pf.pt = 110;
     g_pf.cur = g_pf.pt;
     g_pf.statusbar = 1;
     g_pf.tab = 4;
@@ -151,7 +151,7 @@ static void PrefsLoad(void) {
     GetPrivateProfileStringW(L"editor", L"font", L"", value, 32, g_ini);
     if (value[0]) wcopy(g_pf.font, value, 32);
     g_pf.pt      = IniGet(L"editor", L"size10", 0);
-    if (!g_pf.pt) g_pf.pt = 10 * IniGet(L"editor", L"size", 10);
+    if (!g_pf.pt) g_pf.pt = 10 * IniGet(L"editor", L"size", 11);
     g_pf.pt      = ClampInt(g_pf.pt, FONT_MIN, FONT_MAX);
     g_pf.cur     = g_pf.pt;
     g_pf.bold    = IniGet(L"editor", L"bold", 0) != 0;

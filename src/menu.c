@@ -207,6 +207,10 @@ static void BarPaint(HWND hwnd) {
     HGDIOBJ oldBitmap, oldFont;
     RECT client, rect;
     int i, iconSize = S(BAR_BTN_ICON);
+    COLORREF idleText = RGB(
+        GetRValue(C_FACE) + (GetRValue(C_TEXT) - GetRValue(C_FACE)) * 80 / 100,
+        GetGValue(C_FACE) + (GetGValue(C_TEXT) - GetGValue(C_FACE)) * 80 / 100,
+        GetBValue(C_FACE) + (GetBValue(C_TEXT) - GetBValue(C_FACE)) * 80 / 100);
     GetClientRect(hwnd, &client);
     memDc = CreateCompatibleDC(hdc);
     bitmap = CreateCompatibleBitmap(hdc, client.right, client.bottom);
@@ -218,7 +222,7 @@ static void BarPaint(HWND hwnd) {
         rect.left = g_itemL[i]; rect.right = g_itemL[i + 1];
         rect.top = 0; rect.bottom = client.bottom - S(1);
         if (on) FillC(memDc, &rect, C_ACCENT);
-        TextC(memDc, g_menuEntries[i].title, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | CueFormat(), on ? C_ON_ACCENT : C_TEXT);
+        TextC(memDc, g_menuEntries[i].title, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | CueFormat(), on ? C_ON_ACCENT : idleText);
     }
     for (i = 0; i < BT_COUNT; i++) {
         BOOL hot = (i == g_hotBtn);
