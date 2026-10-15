@@ -426,8 +426,13 @@ static void Cmd(int id) {
     case IDM_FILE_PAGESETUP: PageSetup(g_hwnd); break;
     case IDM_FILE_PRINT:    PrintDoc(g_hwnd, 0, NULL); break;
     case IDM_FILE_EXIT:     SendMessageW(g_hwnd, WM_CLOSE, 0, 0); return;
-    case IDM_EDIT_UNDO:     SendMessageW(g_edit, EM_UNDO, 0, 0); break;
-    case IDM_EDIT_CUT:      SendMessageW(g_edit, WM_CUT, 0, 0); break;
+    case IDM_EDIT_UNDO: {
+        HWND focus = OtherFocus();
+        SendMessageW(focus ? focus : g_edit, EM_UNDO, 0, 0);
+        if (focus) return;
+        break; }
+    case IDM_EDIT_REDO:     if (OtherFocus()) return; SendMessageW(g_edit, EM_REDO, 0, 0); break;
+    case IDM_EDIT_CUT:     SendMessageW(g_edit, WM_CUT, 0, 0); break;
     case IDM_EDIT_COPY:     SendMessageW(g_edit, WM_COPY, 0, 0); break;
     case IDM_EDIT_PASTE:    SendMessageW(g_edit, WM_PASTE, 0, 0); break;
     case IDM_EDIT_DELETE:   SendMessageW(g_edit, WM_CLEAR, 0, 0); break;
@@ -524,7 +529,8 @@ void AppApplyPrefs(void) {
 static unsigned MenuState(int id) {
     unsigned radio = MS_CHECK | MS_RADIO;
     switch (id) {
-    case IDM_EDIT_UNDO:     return SendMessageW(g_edit, EM_CANUNDO, 0, 0) ? 0 : MS_GRAY;
+    case IDM_EDIT_UNDO:     return HistCanUndo() ? 0 : MS_GRAY;
+    case IDM_EDIT_REDO:     return HistCanRedo() ? 0 : MS_GRAY;
     case IDM_EDIT_CUT:
     case IDM_EDIT_COPY:
     case IDM_EDIT_DELETE:   return EditHasSel() ? 0 : MS_GRAY;
@@ -789,6 +795,9 @@ static ACCEL g_acc[] = {
     { FVIRTKEY | FALT,               'X',            IDM_THEME_TOGGLE },
     { FVIRTKEY | FCONTROL,           'U',            IDM_VIEW_STATUS },
     { FVIRTKEY | FALT,               'Z',            IDM_FMT_WRAP },
+    { FVIRTKEY | FCONTROL,           'Z',            IDM_EDIT_UNDO },
+    { FVIRTKEY | FCONTROL,           'Y',            IDM_EDIT_REDO },
+    { FVIRTKEY | FCONTROL | FSHIFT,  'Z',            IDM_EDIT_REDO },
     { FVIRTKEY | FCONTROL,           'A',            IDM_EDIT_SELALL },
     { FVIRTKEY | FCONTROL,           'F',            IDM_EDIT_FIND },
     { FVIRTKEY | FCONTROL,           'H',            IDM_EDIT_REPLACE },

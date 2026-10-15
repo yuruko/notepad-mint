@@ -2770,8 +2770,8 @@ function Test-T33 {
     Cmd $app 'IDM_EDIT_UNDO'
     CkEdText 'T33.5 one undo restores the exact original text' $app $normalized
     Ck 'T33.6 undo restores the clean title' (Wait-Title $app 'journal.txt - notepad mint') (Title $app)
-    Cmd $app 'IDM_EDIT_UNDO'
-    CkEdText 'T33.7 native redo restores the complete timestamp' $app $stamped
+    Cmd $app 'IDM_EDIT_REDO'
+    CkEdText 'T33.7 redo restores the complete timestamp' $app $stamped
     Cmd $app 'IDM_FILE_SAVE'
     Ck 'T33.8 save records the timestamp and clears modified state' (Wait-Title $app 'journal.txt - notepad mint') (Title $app)
     CkText 'T33.9 save preserves the original LF line endings' ($stamped.Replace("`r`n", "`n")) ([IO.File]::ReadAllText($path))
@@ -3071,11 +3071,12 @@ function Test-T38 {
 . (Join-Path $PSScriptRoot 'rtl_test.ps1')
 . (Join-Path $PSScriptRoot 'dragdrop_test.ps1')
 . (Join-Path $PSScriptRoot 'parity_test.ps1')
+. (Join-Path $PSScriptRoot 'undo_test.ps1')
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43', 'T44', 'T45', 'T46', 'T47')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43', 'T44', 'T45', 'T46', 'T47', 'T48', 'T49')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine

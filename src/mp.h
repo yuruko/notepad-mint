@@ -6,7 +6,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.2.1"
+#define APP_VERSION  L"1.3.0"
 #define PATH_CAP     1024
 
 typedef struct Palette {
@@ -39,7 +39,7 @@ enum {
     IDM_FILE_NEW = 101, IDM_FILE_NEWWIN, IDM_FILE_OPEN, IDM_FILE_SAVE, IDM_FILE_SAVEAS, IDM_FILE_PAGESETUP, IDM_FILE_PRINT, IDM_FILE_EXIT,
     IDM_EDIT_UNDO = 201, IDM_EDIT_CUT, IDM_EDIT_COPY, IDM_EDIT_PASTE, IDM_EDIT_DELETE,
     IDM_EDIT_FIND, IDM_EDIT_FINDNEXT, IDM_EDIT_FINDPREV, IDM_EDIT_REPLACE, IDM_EDIT_GOTO,
-    IDM_EDIT_SELALL, IDM_EDIT_TIMEDATE, IDM_EDIT_CLEARLINE,
+    IDM_EDIT_SELALL, IDM_EDIT_TIMEDATE, IDM_EDIT_CLEARLINE, IDM_EDIT_REDO,
     IDM_FMT_WRAP = 301, IDM_FMT_FONT, IDM_TAB_2 = 305, IDM_TAB_4, IDM_TAB_8,
     IDM_EOL_CRLF = 311, IDM_EOL_LF, IDM_EOL_CR,
     IDM_ENC_UTF8 = 321, IDM_ENC_UTF8BOM, IDM_ENC_UTF16LE, IDM_ENC_UTF16BE, IDM_ENC_ANSI, IDM_ENC_OTHER, IDM_ENC_REOPEN,
@@ -66,6 +66,7 @@ void   PathDir(const WCHAR *path, WCHAR *out, int cap);
 void   PathJoin(WCHAR *dir, const WCHAR *name, int cap);
 BOOL   IsDir(const WCHAR *path);
 WCHAR *TextToCrlf(const WCHAR *src, int maxLen, int *outLen);
+void   TextTrim(const WCHAR *oldText, int oldLen, const WCHAR *newText, int newLen, int limit, int *head, int *tail);
 size_t mp_count_lf(const WCHAR *p, size_t n);
 size_t mp_find3(const WCHAR *p, size_t n, unsigned a, unsigned b, unsigned c);
 int    WordClass(WCHAR ch);
@@ -291,6 +292,19 @@ int    EditLineHeight(void);
 int    EditIndexFromPoint(POINT pt);
 BOOL   EditCaretRect(int index, RECT *rect);
 BOOL   EditHitSelection(POINT pt);
+void   EditNativeUndoClear(void);
+
+#define HIST_MAX 128
+#define EM_REDO 0x0454
+#define EM_CANREDO 0x0455
+void   HistClear(void);
+void   HistBreak(void);
+BOOL   HistCanUndo(void);
+BOOL   HistCanRedo(void);
+BOOL   HistUndo(void);
+BOOL   HistRedo(void);
+int    HistEnter(UINT msg, WPARAM wParam);
+void   HistLeave(void);
 
 void   DndInit(HWND hwnd);
 void   DndShutdown(void);

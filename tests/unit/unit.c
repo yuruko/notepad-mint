@@ -266,6 +266,33 @@ static void TestCrlf(void)
     CrlfCase(L"empty", L"", 10, L"");
 }
 
+static void TrimCase(const WCHAR *name, const WCHAR *oldText, const WCHAR *newText, int limit, int wantHead, int wantTail)
+{
+    int head = -1, tail = -1;
+    TextTrim(oldText, wlen(oldText), newText, wlen(newText), limit, &head, &tail);
+    Int(name, head * 1000 + tail, wantHead * 1000 + wantTail);
+}
+
+static void TestTrim(void)
+{
+    Group(L"util.c TextTrim (the undo history: what part of the text a message changed)");
+    TrimCase(L"a typed character in the middle", L"ab", L"axb", -1, 1, 1);
+    TrimCase(L"an insert at the end", L"ab", L"abc", -1, 2, 0);
+    TrimCase(L"a delete at the start", L"abc", L"bc", -1, 0, 2);
+    TrimCase(L"identical text: nothing changed", L"abc", L"abc", -1, 3, 0);
+    TrimCase(L"everything replaced", L"abc", L"xyz", -1, 0, 0);
+    TrimCase(L"empty to text", L"", L"abc", -1, 0, 0);
+    TrimCase(L"text to empty", L"abc", L"", -1, 0, 0);
+    TrimCase(L"a repeated character typed before the caret (the limit keeps the position)", L"aab", L"aaab", 1, 1, 2);
+    TrimCase(L"the same without a limit takes the later position", L"aab", L"aaab", -1, 2, 1);
+    TrimCase(L"a repeated character deleted left of the caret (the limit keeps the position)", L"aaaa", L"aaa", 1, 1, 2);
+    TrimCase(L"a high surrogate in the common head is not split off", L"a\xD83D\xDE00", L"a\xD83D\xDE01", -1, 1, 0);
+    TrimCase(L"a low surrogate in the common tail is not split off", L"\xD83D\xDE00", L"\xD83E\xDE00", -1, 0, 0);
+    TrimCase(L"an inserted crlf after a crlf: the boundary stays between the pairs", L"a\r\nb", L"a\r\n\r\nb", -1, 3, 1);
+    TrimCase(L"the same with a head limit of 1", L"a\r\nb", L"a\r\n\r\nb", 1, 1, 3);
+    TrimCase(L"a lone lf becoming crlf: the new pair is not split", L"a\nb", L"a\r\nb", -1, 1, 1);
+}
+
 /* ------------------------------------------------- default document name -- */
 static void NameAt(const WCHAR *label, int y, int mo, int d, int h, int mi, int s, const WCHAR *want)
 {
@@ -1479,6 +1506,7 @@ void start(void)
     Out(b);
     TestStrings();
     TestCrlf();
+    TestTrim();
     TestDocName();
     TestPaths();
     TestRt();

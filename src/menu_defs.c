@@ -49,6 +49,7 @@ static const MenuItem miFile[] = {
 };
 static const MenuItem miEdit[] = {
     IT(L"&undo",          L"ctrl+z",   IDM_EDIT_UNDO),
+    IT(L"red&o",          L"ctrl+y",   IDM_EDIT_REDO),
     SEP,
     IT(L"cu&t",           L"ctrl+x",   IDM_EDIT_CUT),
     IT(L"&copy",          L"ctrl+c",   IDM_EDIT_COPY),
@@ -138,6 +139,7 @@ static const MenuItem miHelp[] = {
 };
 static const MenuItem miCtx[] = {
     IT(L"&undo",       NULL, IDM_EDIT_UNDO),
+    IT(L"red&o",       NULL, IDM_EDIT_REDO),
     SEP,
     IT(L"cu&t",        NULL, IDM_EDIT_CUT),
     IT(L"&copy",       NULL, IDM_EDIT_COPY),

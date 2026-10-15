@@ -26,6 +26,7 @@ public static class CV {
     [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr h);
     [DllImport("user32.dll")] static extern bool GetKeyboardState(byte[] keys);
     [DllImport("user32.dll")] static extern bool SetKeyboardState(byte[] keys);
+    [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
     static AutoResetEvent request = new AutoResetEvent(false), finished = new AutoResetEvent(false);
     static Thread worker;
@@ -119,6 +120,26 @@ public static class CV {
                 IntPtr result;
                 if (SendMessageTimeoutW(new IntPtr(edit), msg, new IntPtr(key), new IntPtr(lparam), 2, 8000, out result) == IntPtr.Zero)
                     throw new Exception("isolated key message timed out");
+            } finally {
+                if (saved) SetKeyboardState(previous);
+                AttachThreadInput(own, tid, false);
+            }
+        });
+    }
+    public static void KeyPost(uint tid, long edit, uint msg, int key, int lparam, bool shift, bool control, int holdMs) {   // the same modifier state, but the key message is POSTED so the app's own message loop translates it (accelerators); the state is held for holdMs
+        OnWorker(delegate() {
+            uint own = GetCurrentThreadId();
+            if (!AttachThreadInput(own, tid, true)) throw new Exception("cannot attach to the isolated app's input queue");
+            byte[] previous = new byte[256], keys = new byte[256];
+            bool saved = false;
+            try {
+                if (!GetKeyboardState(previous)) throw new Exception("cannot read isolated keyboard state");
+                saved = true;
+                keys[0x10] = shift ? (byte)0x80 : (byte)0;
+                keys[0x11] = control ? (byte)0x80 : (byte)0;
+                if (!SetKeyboardState(keys)) throw new Exception("cannot set isolated keyboard state");
+                if (!PostMessageW(new IntPtr(edit), msg, new IntPtr(key), new IntPtr(lparam))) throw new Exception("isolated key post failed");
+                System.Threading.Thread.Sleep(holdMs);
             } finally {
                 if (saved) SetKeyboardState(previous);
                 AttachThreadInput(own, tid, false);

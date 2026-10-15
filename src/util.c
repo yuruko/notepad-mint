@@ -168,6 +168,16 @@ WCHAR *TextToCrlf(const WCHAR *src, int maxLen, int *outLen) {
     return out;
 }
 
+void TextTrim(const WCHAR *oldText, int oldLen, const WCHAR *newText, int newLen, int limit, int *head, int *tail) {
+    int small = oldLen < newLen ? oldLen : newLen, maxHead = limit >= 0 && limit < small ? limit : small, front = 0, back = 0;
+    while (front < maxHead && oldText[front] == newText[front]) front++;
+    if (front > 0 && ((oldText[front - 1] >= 0xD800 && oldText[front - 1] <= 0xDBFF) || (oldText[front - 1] == '\r' && ((front < oldLen && oldText[front] == '\n') || (front < newLen && newText[front] == '\n'))))) front--;
+    while (back < small - front && oldText[oldLen - 1 - back] == newText[newLen - 1 - back]) back++;
+    if (back > 0 && ((oldText[oldLen - back] >= 0xDC00 && oldText[oldLen - back] <= 0xDFFF) || (oldText[oldLen - back] == '\n' && ((oldLen - back >= 1 && oldText[oldLen - back - 1] == '\r') || (newLen - back >= 1 && newText[newLen - back - 1] == '\r'))))) back--;
+    *head = front;
+    *tail = back;
+}
+
 BOOL IsDir(const WCHAR *path) {
     DWORD attrs = GetFileAttributesW(path);
     return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);

@@ -26,6 +26,7 @@ void AppMarkClean(void) {
     int length = 0;
     const WCHAR *text = EditLockText(&lock, &length);
     g_dirtyCache.valid = 0;
+    HistBreak();
     if (!text) { EditUnlockText(lock); g_clean.length = -1; return; }
     HashText(text, length, &g_clean.hashA, &g_clean.hashB);
     EditUnlockText(lock);

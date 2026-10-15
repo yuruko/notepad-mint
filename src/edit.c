@@ -918,7 +918,7 @@ static int CaretMoveMessage(UINT msg, WPARAM wParam) {
     return 0;
 }
 
-static LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+static LRESULT CALLBACK EditProcMain(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     LRESULT result;
     int anchor = -1;
     int wasRevealing;
@@ -1253,6 +1253,43 @@ static LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     return result;
 }
 
+void EditNativeUndoClear(void) {
+    if (g_edit && g_orig) CallWindowProcW(g_orig, g_edit, EM_EMPTYUNDOBUFFER, 0, 0);
+}
+
+static LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    LRESULT result;
+    int captured;
+    switch (msg) {
+    case WM_UNDO: case EM_UNDO: return HistUndo();
+    case EM_REDO: return HistRedo();
+    case EM_CANUNDO: return HistCanUndo();
+    case EM_CANREDO: return HistCanRedo();
+    case EM_EMPTYUNDOBUFFER: HistClear(); return 0;
+    case WM_CHAR:
+        if (wParam == 0x1A || wParam == 0x19) {
+            if (wParam == 0x19 || (GetKeyState(VK_SHIFT) & 0x8000)) HistRedo(); else HistUndo();
+            return 0;
+        }
+        break;
+    case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: case WM_KILLFOCUS:
+        HistBreak();
+        break;
+    case WM_KEYDOWN:
+        if (wParam >= VK_PRIOR && wParam <= VK_DOWN) HistBreak();
+        break;
+    }
+    captured = HistEnter(msg, wParam);
+    result = EditProcMain(hwnd, msg, wParam, lParam);
+    if (captured) {
+        HistLeave();
+        EditNativeUndoClear();
+    } else if (msg == WM_SETTEXT) {
+        HistClear();
+    }
+    return result;
+}
+
 HWND EditCreate(HWND parent) {
     HWND oldEdit = g_edit, edit;
     WCHAR *text = NULL;
@@ -1298,7 +1335,6 @@ HWND EditCreate(HWND parent) {
         SendMessageW(edit, WM_SETREDRAW, FALSE, 0);
         SendMessageW(edit, EM_SETSEL, backward ? selEnd : selStart, backward ? selStart : selEnd);
         SendMessageW(edit, EM_SCROLLCARET, 0, 0);
-        SendMessageW(edit, EM_EMPTYUNDOBUFFER, 0, 0);
         SendMessageW(edit, EM_SETMODIFY, (WPARAM)modified, 0);
         SendMessageW(edit, WM_SETREDRAW, TRUE, 0);
         mem_free(text);
