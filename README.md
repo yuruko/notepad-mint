@@ -23,18 +23,20 @@ one 32-bit exe (under 170 kb) runs on 32-bit windows, 64-bit windows and windows
   - **themes**: a dark theme (the default, mint accent `#9df5bd`) and a light one (a softer green accent `#2f7d58`); alt+x or the sun / moon button at the very right of the menu bar switches them; hover uses the accent, the caret is plain white / black;
     title bar (white / black over a soft accent tint), menu bar and status bar in the editor's font face at a fixed 11 px; classic style scrollbars in both themes' colours, 13 px thin;
   - **word wrap**: alt+z, or the button left of the theme button; hover either button for a moment and a tooltip says what it does and its key combo;
+  - **always on top**: view > always on top, or alt+a, keeps this window above other windows; each window starts with it off and can be toggled independently;
+  - **show invisibles**: view > show invisibles, or alt+s, draws simple markers for spaces, tabs, newlines and other invisible unicode / control characters at 25% foreground opacity; the markers are a display overlay, so copying, saving and printing keep the original text;
   - **tab size**: format > tab size: 2, 4 or 8 columns (4 by default), remembered, also used when printing;
   - **recent files**: file > recent keeps the last 9 files you opened or saved (newest first, press 1-9), shared by all open windows; "clear list" at the bottom empties it;
   - **whole-word search**: find, previous / next, replace and replace all share the same word boundaries; remembers the option alongside match case and wrap around;
   - **log files**: opening text beginning with `.LOG` appends the local time and date at the end, ready to type the next entry; one undo removes the entry;
-  - **safer saves**: writes and flushes a temporary file before replacing the original, detects lossy legacy encoding conversions, and asks before overwriting a file whose size or modification time changed outside the app;
+  - **safer saves**: writes and flushes a temporary file before replacing the original, detects lossy legacy encoding conversions, and asks before overwriting a file whose size or modification time changed outside the app; hard links and folders that deny temporary-file creation use an in-place write instead, which cannot preserve the original after a partial write failure;
   - **selection printing**: select text before opening print to enable printing just that selection;
   - **header and footer** (file > page setup, like windows xp's notepad): `&f` file name, `&p` page number, `&d` date, `&t` time, `&l` / `&c` / `&r` align what follows left / centre / right, `&&` an ampersand (defaults `&f` and `page &p`, remembered); a small window with a cancel button stays up while it prints;
   - **text runs to the edge**: an 8 px margin around the text (4 px on top), but text that is scrolled out of it runs to the very edge of the editor, no blank frame; the row that is only partly in view at the bottom is drawn, cut off at the edge;
   - **status bar**: compact (`12:5`, `5 L`, `124 B`, `crlf`, `utf8 bom`), the lines, bytes and line ending panels grow and shrink with their text, never cut off; with a selection it shows the lines and bytes selected (`162:54 [5 L 54 B]`); while zoomed it shows the zoom (`120%`, click: back to 100%); click the position to go to a line, the line ending / encoding panels to change them;
   - **zoom**: ctrl+plus / ctrl+minus / ctrl+0, ctrl + mouse wheel (8-48 pt); resizing or changing zoom scrolls the caret into view while keeping the selection and undo history;
   - **scrolling**: mouse-wheel and scrollbar scrolling keep the cursor in place; keyboard navigation returns to that position before moving it, including wrapped text and shift selections;
-  - **font preview**: one line at the selected size, from 7 to 100 pt: "sphinx of black quartz, judge my vow. 0123456789"; face, bold and italic update live; the default editor size is 11 pt;
+  - **font preview**: one line at the selected size, from 7 to 200 pt: "sphinx of black quartz, judge my vow. 0123456789"; type sizes above 48 pt in the size box (preset buttons stay at 8-48 pt); face, bold and italic update live; the default editor size is 11 pt;
   - **encodings and line endings**: utf-8 (with or without bom), utf-16 le / be, legacy code pages, reopen with another encoding; windows / unix / classic mac line endings; right to left reading order, picked automatically from the first letter (hebrew, arabic ...) or by hand (edit menu, ctrl+right shift / ctrl+left shift); unicode control characters; per-monitor dpi;
   - **drag and drop like notepad**: drop a file on the window and it opens (the first one in this window, after the save prompt; the others in new windows; folders are skipped; more than 10 files asks first); hold shift while dropping to insert the paths at the drop point instead, one per line;
     drag selected text to move it (hold ctrl to copy), and drag text in from or out to other programs: a thin mark shows where it will land and the editor scrolls when you hold it near an edge;
@@ -62,11 +64,11 @@ one 32-bit exe (under 170 kb) runs on 32-bit windows, 64-bit windows and windows
 ## status
 
 every menu item works: file (new, new window, open, recent, save, save as, page setup, print, exit), edit (undo ... select all, time / date, find, find next / previous,
-replace, go to, clear line), format (word wrap, font, tab size, line ending, encoding), view (zoom, status bar, theme), help (the about box links to yuru.be). find / replace, go to, font, encodings, about and help
+replace, go to, clear line), format (word wrap, font, tab size, line ending, encoding), view (zoom, status bar, always on top, show invisibles, theme), help (the about box links to yuru.be). find / replace, go to, font, encodings, about and help
 are our own dark / light dialogs; open, save as, print and page setup are the native windows dialogs (they follow windows' own dark / light mode, not the app theme). the encoding and line ending of a file are set from the
 format menu or the status bar, not in the save as dialog.
 
-how each part was verified, and what is still open, is in `NOTES.md` (status) and `TODO.md`. the native editor has one undo level and loads large files synchronously. tabs and session recovery are not implemented. whole-word boundaries conservatively treat supplementary unicode characters (including emoji) as word characters; embedded nul characters are converted to spaces on load, and mixed line endings are normalized to the majority style.
+how each part was verified, and what is still open, is in `NOTES.md` (status) and `TODO.md`. the app keeps up to 128 undo steps and loads large files synchronously. tabs and session recovery are not implemented. whole-word boundaries conservatively treat supplementary unicode characters (including emoji) as word characters; embedded nul characters are converted to spaces on load, and mixed line endings are normalized to the majority style.
 
 ## build
 

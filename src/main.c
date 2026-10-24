@@ -476,6 +476,11 @@ static void Cmd(int id) {
         Layout();
         AppUpdateStatus();
         break;
+    case IDM_VIEW_ONTOP:
+        SetWindowPos(g_hwnd, (GetWindowLongPtrW(g_hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) ? HWND_NOTOPMOST : HWND_TOPMOST,
+                     0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        break;
+    case IDM_VIEW_INVISIBLES: EditShowInvisibles(!EditInvisiblesShown()); break;
     case IDM_ZOOM_IN:       EditZoomStep(1); break;
     case IDM_ZOOM_OUT:      EditZoomStep(-1); break;
     case IDM_ZOOM_RESET:    EditZoomReset(); break;
@@ -539,6 +544,8 @@ static unsigned MenuState(int id) {
     case IDM_EDIT_FINDPREV: return FindHasText() ? 0 : MS_GRAY;
     case IDM_FMT_WRAP:      return g_pf.wrap ? MS_CHECK : 0;
     case IDM_VIEW_STATUS:   return g_pf.statusbar ? MS_CHECK : 0;
+    case IDM_VIEW_ONTOP:    return (GetWindowLongPtrW(g_hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) ? MS_CHECK : 0;
+    case IDM_VIEW_INVISIBLES: return EditInvisiblesShown() ? MS_CHECK : 0;
     case IDM_RTL:           return EditIsRtl() ? MS_CHECK : 0;
     case IDM_RECENT_NONE:   return MS_GRAY;
     case IDM_TAB_2:         return g_pf.tab == 2 ? radio : 0;
@@ -795,6 +802,8 @@ static ACCEL g_acc[] = {
     { FVIRTKEY | FALT,               'X',            IDM_THEME_TOGGLE },
     { FVIRTKEY | FCONTROL,           'U',            IDM_VIEW_STATUS },
     { FVIRTKEY | FALT,               'Z',            IDM_FMT_WRAP },
+    { FVIRTKEY | FALT,               'A',            IDM_VIEW_ONTOP },
+    { FVIRTKEY | FALT,               'S',            IDM_VIEW_INVISIBLES },
     { FVIRTKEY | FCONTROL,           'Z',            IDM_EDIT_UNDO },
     { FVIRTKEY | FCONTROL,           'Y',            IDM_EDIT_REDO },
     { FVIRTKEY | FCONTROL | FSHIFT,  'Z',            IDM_EDIT_REDO },

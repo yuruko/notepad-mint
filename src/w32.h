@@ -175,6 +175,8 @@ typedef struct { ULONG_PTR dwData; DWORD cbData; PVOID lpData; } COPYDATASTRUCT;
 #define INVALID_HANDLE_VALUE ((HANDLE)(LONG_PTR)-1)
 #define CW_USEDEFAULT        ((int)0x80000000)
 #define HWND_TOP        ((HWND)0)
+#define HWND_TOPMOST    ((HWND)-1)
+#define HWND_NOTOPMOST  ((HWND)-2)
 #define HWND_BOTTOM     ((HWND)1)
 
 #define WS_OVERLAPPED 0x00000000L
@@ -453,6 +455,7 @@ typedef struct { ULONG_PTR dwData; DWORD cbData; PVOID lpData; } COPYDATASTRUCT;
 #define EM_GETFIRSTVISIBLELINE 0x00CE
 #define EM_SETMARGINS 0x00D3
 #define EM_POSFROMCHAR 0x00D6
+#define EM_GETLIMITTEXT 0x00D5
 #define EC_LEFTMARGIN 1
 #define EC_RIGHTMARGIN 2
 #define EN_KILLFOCUS 0x0200

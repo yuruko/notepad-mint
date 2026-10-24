@@ -144,7 +144,10 @@ static int SizeText(HWND edit, int fallback) {
     GetWindowTextW(edit, text, 16);
     while (*cursor == ' ' || *cursor == '\t') cursor++;
     if (*cursor < '0' || *cursor > '9') return fallback;
-    while (*cursor >= '0' && *cursor <= '9') whole = whole * 10 + (*cursor++ - '0');
+    while (*cursor >= '0' && *cursor <= '9') {
+        whole = whole * 10 + (*cursor++ - '0');
+        if (whole > FONT_MAX / 10) return FONT_MAX;
+    }
     if ((*cursor == '.' || *cursor == ',') && cursor[1] >= '0' && cursor[1] <= '9') frac = cursor[1] - '0';
     return ClampInt(whole * 10 + frac, FONT_MIN, FONT_MAX);
 }
@@ -279,7 +282,7 @@ static void FontLayout(FontSt *state) {
     WCHAR text[8];
     int i;
     UiLabel(hwnd, L"&font:", 12, 10, 236, 16, 0, 0);
-    UiLabel(hwnd, L"7 to 100 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
+    UiLabel(hwnd, L"7 to 200 pt", 328, 32, 180, 16, IDC_DIM, SS_NOPREFIX);
     UiLabel(hwnd, L"preview:", 12, 228, 200, 16, 0, SS_NOPREFIX);
     DlgFrame(base, 12, 246, 504, 146, BV_SUNKEN);
     state->preview = CreateWindowExW(0, L"mp_fontpv", g_sample, WS_CHILD | WS_VISIBLE, S(12) + 2, S(246) + 2, S(504) - 4, S(146) - 4, hwnd, (HMENU)(ULONG_PTR)ID_PREVIEW, g_hinst, state);

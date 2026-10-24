@@ -130,6 +130,9 @@ static const MenuItem miView[] = {
     SUB(L"&zoom",              &g_mdZoom),
     IT(L"&status bar",         L"ctrl+u", IDM_VIEW_STATUS),
     SUB(L"&theme",             &mdTheme),
+    SEP,
+    IT(L"&always on top",      L"alt+a", IDM_VIEW_ONTOP),
+    IT(L"show &invisibles",    L"alt+s", IDM_VIEW_INVISIBLES),
 };
 static const MenuItem miHelp[] = {
     IT(L"&help topics",        L"f1", IDM_HELP_TOPICS),

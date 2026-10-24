@@ -224,4 +224,50 @@ function Test-T46 {
     [void](Dnd-Probe $app 5 0 0 @(0, 0))
     CkEq 'T46.37 ... with shift its path can be inserted' 1 (Dnd-Probe $app 9 5 7 (Char-Pt $app 0) ($env:windir + "`0"))
     [void](Dnd-Probe $app 5 0 0 @(0, 0))
+
+    $limit = Snd $ed 0xD5 0 0
+    try {
+        Reset-Doc $app 'hello world'
+        [void](Snd $ed $EM_SETSEL 2 5)
+        [void](Snd $ed 0xC5 13 0)
+        CkEq 'T46.38 an external move that exceeds the editor limit reports no accepted drop' 0 (Dnd-Probe $app 1 1 3 (Char-Pt $app 6) 'big ')
+        CkEdText 'T46.39 ... every original character stays, with no partial insertion' $app 'hello world'
+        CkSel 'T46.40 ... the original selection stays' $app 2 5
+        Ck 'T46.41 ... no undo or redo step was created' ((Snd $ed $EM_CANUNDO 0 0) -eq 0 -and (Snd $ed 0x455 0 0) -eq 0) 'failed drop changed history'
+        [void](Snd $ed 0xC5 15 0)
+        CkEq 'T46.42 the same external move fits exactly at the limit and is accepted' 2 (Dnd-Probe $app 1 1 3 (Char-Pt $app 6) 'big ')
+        CkEdText 'T46.43 ... the complete dropped text was accepted' $app 'hello big world'
+        [void](Snd $ed $EM_UNDO 0 0)
+        CkEdText 'T46.44 ... one undo restores the document' $app 'hello world'
+
+        Reset-Doc $app 'one two three'
+        [void](Snd $ed 0xC5 13 0)
+        [void](Snd $ed $EM_SETSEL 0 4)
+        CkEq 'T46.45 an internal copy at the editor limit is refused' 0 (Dnd-Probe $app 3 9 3 (Char-Pt $app 8))
+        CkEdText 'T46.46 ... the dragged original was not deleted' $app 'one two three'
+        CkSel 'T46.47 ... its selection stays in place' $app 0 4
+        CkEq 'T46.48 an internal move at the limit succeeds without adding characters' 2 (Dnd-Probe $app 3 1 3 (Char-Pt $app 8))
+        CkEdText 'T46.49 ... the single replacement moves the complete text' $app 'two one three'
+        [void](Snd $ed $EM_UNDO 0 0)
+        CkEdText 'T46.50 ... one undo restores the original move' $app 'one two three'
+
+        Reset-Doc $app 'one two three'
+        [void](Snd $ed 0xC5 12 0)
+        [void](Snd $ed $EM_SETSEL 0 4)
+        CkEq 'T46.51 an internal move rejected by a lower limit reports no accepted drop' 0 (Dnd-Probe $app 3 1 3 (Char-Pt $app 8))
+        CkEdText 'T46.52 ... it preserves the whole original document' $app 'one two three'
+        CkSel 'T46.53 ... and preserves the original selection' $app 0 4
+        Ck 'T46.54 ... it leaves undo history empty' ((Snd $ed $EM_CANUNDO 0 0) -eq 0) 'failed internal move added history'
+
+        Reset-Doc $app 'ab'
+        [void](Snd $ed 0xC5 3 0)
+        CkEq 'T46.55 a shift file drop that cannot insert the path reports no accepted drop' 0 (Dnd-Probe $app 2 5 7 (Char-Pt $app 1) ("C:\x\one.txt`0"))
+        CkEdText 'T46.56 ... the original text stays unchanged' $app 'ab'
+        [void](Snd $ed $EM_SETSEL 0 1)
+        [void](Snd $ed 0xCF 1 0)
+        CkEq 'T46.57 a read-only editor refuses an external move' 0 (Dnd-Probe $app 1 1 3 (Char-Pt $app 1) 'x')
+        CkEdText 'T46.58 ... the read-only text stays intact' $app 'ab'
+        CkSel 'T46.59 ... its original selection is preserved' $app 0 1
+        Ck 'T46.60 ... undo history stays empty' ((Snd $ed $EM_CANUNDO 0 0) -eq 0) 'read-only drop changed history'
+    } finally { [void](Snd $ed 0xCF 0 0); [void](Snd $ed 0xC5 $limit 0) }
 }

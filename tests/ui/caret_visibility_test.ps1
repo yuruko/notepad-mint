@@ -126,7 +126,7 @@ public static class CV {
             }
         });
     }
-    public static void KeyPost(uint tid, long edit, uint msg, int key, int lparam, bool shift, bool control, int holdMs) {   // the same modifier state, but the key message is POSTED so the app's own message loop translates it (accelerators); the state is held for holdMs
+    public static void KeyPost(uint tid, long edit, uint msg, int key, int lparam, bool shift, bool control, int holdMs, bool alt = false) {
         OnWorker(delegate() {
             uint own = GetCurrentThreadId();
             if (!AttachThreadInput(own, tid, true)) throw new Exception("cannot attach to the isolated app's input queue");
@@ -137,6 +137,7 @@ public static class CV {
                 saved = true;
                 keys[0x10] = shift ? (byte)0x80 : (byte)0;
                 keys[0x11] = control ? (byte)0x80 : (byte)0;
+                keys[0x12] = alt ? (byte)0x80 : (byte)0;
                 if (!SetKeyboardState(keys)) throw new Exception("cannot set isolated keyboard state");
                 if (!PostMessageW(new IntPtr(edit), msg, new IntPtr(key), new IntPtr(lparam))) throw new Exception("isolated key post failed");
                 System.Threading.Thread.Sleep(holdMs);

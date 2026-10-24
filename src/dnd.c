@@ -354,23 +354,61 @@ static void DropReset(void) {
     g_drop.index = -1;
 }
 
-static void InsertAt(int index, const WCHAR *text, BOOL select) {
-    int length = wlen(text);
-    SendMessageW(g_edit, EM_SETSEL, (WPARAM)index, (LPARAM)index);
-    EditInsert(text);
-    if (select) SendMessageW(g_edit, EM_SETSEL, (WPARAM)index, (LPARAM)(index + length));
+static BOOL CanReplace(int from, int to, int length) {
+    int textLen = GetWindowTextLengthW(g_edit), remaining;
+    DWORD limit = (DWORD)SendMessageW(g_edit, EM_GETLIMITTEXT, 0, 0);
+    if (from < 0 || to < from || to > textLen || length < 0 || (GetWindowLongPtrW(g_edit, GWL_STYLE) & ES_READONLY)) return FALSE;
+    remaining = textLen - (to - from);
+    return length <= 0x7FFFFFFF - remaining && (DWORD)remaining <= limit && (DWORD)length <= limit - (DWORD)remaining;
 }
 
-static void MoveSelection(int index, BOOL copy) {
-    int from = g_dragFrom, to = g_dragTo, length = to - from, spanFrom, spanTo, textLen = 0;
+static BOOL Replaced(int textLen, int from, int removed, const WCHAR *insert, int length) {
+    void *hText = NULL;
+    int actual = 0;
+    const WCHAR *text = EditLockText(&hText, &actual);
+    BOOL ok = text && actual == textLen - removed + length && !memcmp(text + from, insert, (size_t)length * sizeof(WCHAR));
+    EditUnlockText(hText);
+    return ok;
+}
+
+static BOOL InsertAt(int index, const WCHAR *text, BOOL select) {
+    int length = wlen(text), textLen = GetWindowTextLengthW(g_edit), added;
+    DWORD selStart = 0, selEnd = 0;
+    if (!length || !CanReplace(index, index, length)) return FALSE;
+    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    SendMessageW(g_edit, EM_SETSEL, (WPARAM)index, (LPARAM)index);
+    EditInsert(text);
+    if (!Replaced(textLen, index, 0, text, length)) {
+        added = GetWindowTextLengthW(g_edit) - textLen;
+        if (added > 0 && !HistUndo()) {
+            SendMessageW(g_edit, EM_SETSEL, (WPARAM)index, (LPARAM)(index + added));
+            EditInsert(L"");
+        }
+        SendMessageW(g_edit, EM_SETSEL, (WPARAM)selStart, (LPARAM)selEnd);
+        return FALSE;
+    }
+    if (select) SendMessageW(g_edit, EM_SETSEL, (WPARAM)index, (LPARAM)(index + length));
+    return TRUE;
+}
+
+static BOOL MoveSelection(int index, BOOL copy) {
+    int from = g_dragFrom, to = g_dragTo, length = to - from, spanFrom, spanTo, spanLen, textLen = 0;
     void *hText = NULL;
     const WCHAR *text;
-    WCHAR *span = NULL;
-    if (copy) { InsertAt(index, g_dragData.text, TRUE); return; }
+    WCHAR *span = NULL, *original;
+    BOOL ok;
+    if (copy) return InsertAt(index, g_dragData.text, TRUE);
     spanFrom = index < from ? index : from;
     spanTo = index < from ? to : index;
+    spanLen = spanTo - spanFrom;
+    if (spanLen > 0x3FFFFFFE || !CanReplace(spanFrom, spanTo, spanLen)) return FALSE;
     text = EditLockText(&hText, &textLen);
-    if (text && spanTo <= textLen) span = (WCHAR *)mem_alloc(((size_t)(spanTo - spanFrom) + 1) * sizeof(WCHAR));
+    if (text && spanTo <= textLen) span = (WCHAR *)mem_alloc(((size_t)spanLen + 1) * 2 * sizeof(WCHAR));
+    if (span) {
+        original = span + spanLen + 1;
+        memcpy(original, text + spanFrom, (size_t)spanLen * sizeof(WCHAR));
+        original[spanLen] = 0;
+    }
     if (span && index < from) {
         memcpy(span, g_dragData.text, (size_t)length * sizeof(WCHAR));
         memcpy(span + length, text + index, (size_t)(from - index) * sizeof(WCHAR));
@@ -379,13 +417,25 @@ static void MoveSelection(int index, BOOL copy) {
         memcpy(span + (index - to), g_dragData.text, (size_t)length * sizeof(WCHAR));
     }
     EditUnlockText(hText);
-    if (!span) return;
-    span[spanTo - spanFrom] = 0;
+    if (!span) return FALSE;
+    span[spanLen] = 0;
     SendMessageW(g_edit, EM_SETSEL, (WPARAM)spanFrom, (LPARAM)spanTo);
     EditInsert(span);
+    ok = Replaced(textLen, spanFrom, spanLen, span, spanLen);
+    if (!ok) {
+        if (!Replaced(textLen, spanFrom, spanLen, original, spanLen) && !HistUndo()) {
+            int currentLen = GetWindowTextLengthW(g_edit) - textLen + spanLen;
+            SendMessageW(g_edit, EM_SETSEL, (WPARAM)spanFrom, (LPARAM)(spanFrom + currentLen));
+            EditInsert(original);
+        }
+        SendMessageW(g_edit, EM_SETSEL, (WPARAM)from, (LPARAM)to);
+        mem_free(span);
+        return FALSE;
+    }
     mem_free(span);
     if (index < from) SendMessageW(g_edit, EM_SETSEL, (WPARAM)index, (LPARAM)(index + length));
     else SendMessageW(g_edit, EM_SETSEL, (WPARAM)(index - length), (LPARAM)index);
+    return TRUE;
 }
 
 static DWORD DropApply(DataObject *data, DWORD keys, int index, DWORD effect) {
@@ -395,18 +445,23 @@ static DWORD DropApply(DataObject *data, DWORD keys, int index, DWORD effect) {
         if (!paths) return DROPEFFECT_NONE;
         if (keys & MK_SHIFT) {
             text = PathsText(paths);
-            if (text && text[0]) InsertAt(index, text, FALSE);
+            if (!text || !InsertAt(index, text, FALSE)) effect = DROPEFFECT_NONE;
             mem_free(text);
             mem_free(paths);
         } else if (!PostMessageW(g_hwnd, WM_APP_OPENFILES, 0, (LPARAM)paths)) {
             mem_free(paths);
+            effect = DROPEFFECT_NONE;
         }
         return effect;
     }
-    if (g_drop.internal) { MoveSelection(index, effect == DROPEFFECT_COPY); g_dragDropped = 1; return effect; }
+    if (g_drop.internal) {
+        if (!MoveSelection(index, effect == DROPEFFECT_COPY)) return DROPEFFECT_NONE;
+        g_dragDropped = 1;
+        return effect;
+    }
     text = DataText(data);
     if (!text) return DROPEFFECT_NONE;
-    if (text[0]) InsertAt(index, text, TRUE);
+    if (!InsertAt(index, text, TRUE)) effect = DROPEFFECT_NONE;
     mem_free(text);
     return effect;
 }

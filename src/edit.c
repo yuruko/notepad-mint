@@ -20,6 +20,21 @@ static int     g_stubW, g_stubMax;
 static int g_barsPending, g_inBars;
 static int g_revealPending, g_sizeDeferred;
 static int g_allowTallReveal, g_revealing, g_tallCaret;
+static int g_invisibles, g_invisSync;
+
+static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip);
+static void InvisiblesSync(HWND hwnd);
+
+BOOL EditInvisiblesShown(void) { return g_invisibles != 0; }
+
+void EditShowInvisibles(BOOL show) {
+    if (g_invisibles == (show != 0)) return;
+    g_invisibles = show != 0;
+    if (g_edit) {
+        InvalidateRect(g_edit, NULL, FALSE);
+        UpdateWindow(g_edit);
+    }
+}
 
 void EditScrollSoon(void) {
     if (g_edit && !g_barsPending && !g_inBars) { g_barsPending = 1; PostMessageW(g_edit, WM_BARS, 0, 0); }
@@ -295,6 +310,7 @@ BOOL EditSetRtl(BOOL rtl) {
     EditScrollSoon();
     StubSync(g_edit);
     BandSync(g_edit);
+    InvisiblesSync(g_edit);
     return TRUE;
 }
 
@@ -740,6 +756,7 @@ static int EditPaintBuffered(HWND hwnd, const RECT *dirty) {
     if (RestoreDC(memDc, saved)) {
         StubPaint(hwnd, memDc, NULL);
         BandPaint(hwnd, memDc, NULL);
+        InvisiblesPaint(hwnd, memDc, NULL);
         copied = BitBlt(hdc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top, memDc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
     }
     saved = 0;
@@ -752,6 +769,7 @@ static int EditPaintBuffered(HWND hwnd, const RECT *dirty) {
         if (state) RestoreDC(hdc, state);
         StubPaint(hwnd, hdc, &ps.rcPaint);
         BandPaint(hwnd, hdc, &ps.rcPaint);
+        InvisiblesPaint(hwnd, hdc, &ps.rcPaint);
     }
     EndPaint(hwnd, &ps);
     done = 1;
@@ -827,6 +845,219 @@ static BOOL IndexPos(int index, POINT *pos) {
     pos->x = EditCaretEndX(g_edit, g_font, length, &formatRect);
     pos->y = formatRect.top + ((int)Ctl(g_edit, EM_LINEFROMCHAR, (WPARAM)length, 0) - (int)Ctl(g_edit, EM_GETFIRSTVISIBLELINE, 0, 0)) * LineHeight();
     return TRUE;
+}
+
+enum { INV_SPACE = 1, INV_TAB, INV_BREAK, INV_WIDE, INV_CONTROL };
+
+static int InvisibleKind(const WCHAR *text, int index, int length) {
+    WCHAR ch = text[index];
+    if (ch == ' ') return INV_SPACE;
+    if (ch == '\t') return INV_TAB;
+    if (ch == '\r' || (ch == '\n' && (!index || text[index - 1] != '\r')) || ch == 0x2028 || ch == 0x2029) return INV_BREAK;
+    if (ch == '\n') return 0;
+    if (ch == 0x00A0 || ch == 0x1680 || (ch >= 0x2000 && ch <= 0x200A) || ch == 0x202F || ch == 0x205F || ch == 0x3000) return INV_WIDE;
+    if (ch < 0x20 || (ch >= 0x7F && ch <= 0x9F) || ch == 0x00AD || ch == 0x034F || ch == 0x061C ||
+        (ch >= 0x115F && ch <= 0x1160) || (ch >= 0x17B4 && ch <= 0x17B5) || (ch >= 0x180B && ch <= 0x180F) ||
+        (ch >= 0x200B && ch <= 0x200F) || (ch >= 0x202A && ch <= 0x202E) || (ch >= 0x2060 && ch <= 0x206F) ||
+        ch == 0x2800 || ch == 0x3164 || (ch >= 0xFE00 && ch <= 0xFE0F) || ch == 0xFEFF || ch == 0xFFA0 ||
+        (ch >= 0xFFF0 && ch <= 0xFFFB)) return INV_CONTROL;
+    if (index + 1 < length && ((ch == 0xDB40 && ((text[index + 1] >= 0xDC00 && text[index + 1] <= 0xDC7F) ||
+        (text[index + 1] >= 0xDD00 && text[index + 1] <= 0xDDEF))) ||
+        (ch == 0xD834 && text[index + 1] >= 0xDD73 && text[index + 1] <= 0xDD7A) ||
+        (ch == 0xD82F && text[index + 1] >= 0xDCA0 && text[index + 1] <= 0xDCA3))) return INV_CONTROL;
+    return 0;
+}
+
+static COLORREF InvisibleColor(COLORREF bg, COLORREF fg) {
+    return RGB((3 * GetRValue(bg) + GetRValue(fg)) / 4,
+               (3 * GetGValue(bg) + GetGValue(fg)) / 4,
+               (3 * GetBValue(bg) + GetBValue(fg)) / 4);
+}
+
+static void InvisibleLine(HDC hdc, int x, int y, int endX, int endY) {
+    MoveToEx(hdc, x, y, NULL);
+    LineTo(hdc, endX, endY);
+}
+
+static int InvisibleCenter(HWND hwnd, int row, int index, const POINT *next, int dir, int pitch, int advance, int *center) {
+    int offset, first = 0, last = 0, limit = advance < S(256) ? advance : S(256);
+    for (offset = 1; offset <= limit; offset++) {
+        int x = next->x - dir * offset;
+        LRESULT hit = Ctl(hwnd, EM_CHARFROMPOS, 0, MAKELPARAM(x, next->y + pitch / 2));
+        if (HIWORD(hit) == (WORD)row && LOWORD(hit) == (WORD)index) {
+            if (!first) first = offset;
+            last = offset;
+        } else if (first) break;
+    }
+    if (!first) return 0;
+    *center = next->x - dir * ((first + last) / 2);
+    return 1;
+}
+
+static void InvisibleDraw(HWND hwnd, HDC hdc, int row, int index, int kind, const POINT *pos, const POINT *next, int pitch, int cell, int rtl, COLORREF color) {
+    int left = pos->x, width = cell, midY = pos->y + pitch / 2;
+    int size, x, arm, dir = rtl ? -1 : 1;
+    RECT dot;
+    if (next && next->y == pos->y && next->x != pos->x) {
+        width = next->x - pos->x;
+        if (width < 0) { left = next->x; width = -width; dir = -1; }
+        else dir = 1;
+    } else if (rtl) left -= width;
+    if (width < 1) width = 1;
+    x = left + width / 2;
+    if ((kind == INV_SPACE || kind == INV_WIDE) && width > cell && next && next->y == pos->y &&
+        !InvisibleCenter(hwnd, row, index, next, dir, pitch, cell, &x)) return;
+    size = ClampInt(pitch / 3, S(4), S(10));
+    if (kind == INV_SPACE) {
+        int diameter = ClampInt(pitch / 10, 1, S(2));
+        dot.left = x - diameter / 2; dot.right = dot.left + diameter;
+        dot.top = midY - diameter / 2; dot.bottom = dot.top + diameter;
+        FillC(hdc, &dot, color);
+        return;
+    }
+    SetDCPenColor(hdc, color);
+    if (kind == INV_TAB) {
+        int span = width - S(4), tip;
+        if (span > S(20)) span = S(20);
+        if (span < S(3)) span = S(3);
+        x = left + (width - span) / 2;
+        arm = ClampInt(size / 3, 1, S(3));
+        tip = dir > 0 ? x + span : x;
+        InvisibleLine(hdc, x, midY, x + span + 1, midY);
+        InvisibleLine(hdc, tip - dir * arm, midY - arm, tip, midY);
+        InvisibleLine(hdc, tip, midY, tip - dir * arm, midY + arm);
+    } else if (kind == INV_BREAK) {
+        int start = pos->x + dir * S(2), tip = start + dir * size;
+        arm = ClampInt(size / 3, 1, S(3));
+        InvisibleLine(hdc, tip, midY - size / 2, tip, midY + 1);
+        InvisibleLine(hdc, tip, midY, start, midY);
+        InvisibleLine(hdc, start + dir * arm, midY - arm, start, midY);
+        InvisibleLine(hdc, start, midY, start + dir * arm, midY + arm);
+    } else if (kind == INV_WIDE) {
+        int half = ClampInt(size / 3, 1, S(3));
+        InvisibleLine(hdc, x - half, midY, x, midY - half);
+        InvisibleLine(hdc, x, midY - half, x + half, midY);
+        InvisibleLine(hdc, x + half, midY, x, midY + half);
+        InvisibleLine(hdc, x, midY + half, x - half, midY);
+    } else {
+        int top = pos->y + S(2), height = ClampInt(pitch / 4, S(3), S(7));
+        x = pos->x;
+        InvisibleLine(hdc, x - S(2), top, x + S(2) + 1, top);
+        InvisibleLine(hdc, x, top, x, top + height);
+    }
+}
+
+static int InvisibleRange(HWND hwnd, int row, int rowStart, int rowEnd, int y, const RECT *view, int *start, int *end) {
+    int x, lo = rowEnd, hi = rowStart, step = (view->right - view->left) / 8;
+    *start = rowStart; *end = rowEnd;
+    if (rowEnd - rowStart <= 4096 && rowEnd - rowStart <= 30000 / g_stubMax) return 0;
+    if (step < 1) step = 1;
+    for (x = view->left; x <= view->right; x += step) {
+        LRESULT hit = Ctl(hwnd, EM_CHARFROMPOS, 0, MAKELPARAM(x, y));
+        int index;
+        if (HIWORD(hit) != (WORD)row) continue;
+        index = rowStart + (int)(WORD)(LOWORD(hit) - (WORD)rowStart);
+        if (index > rowEnd) continue;
+        if (index < lo) lo = index;
+        if (index > hi) hi = index;
+    }
+    if (lo > hi) { lo = rowStart; hi = rowStart; }
+    *start = lo - rowStart > 2 ? lo - 2 : rowStart;
+    *end = rowEnd - hi > 3 ? hi + 3 : rowEnd;
+    if (*end - *start > 8192) *end = *start + 8192;
+    return 1;
+}
+
+static int InvisibleHit(HWND hwnd, int row, int index, const POINT *pos, const POINT *next, int pitch) {
+    int x = pos->x, delta;
+    LRESULT hit;
+    if (next && next->y == pos->y && next->x != pos->x && next->x - pos->x < 30000 && pos->x - next->x < 30000) x += (next->x - pos->x) / 2;
+    hit = Ctl(hwnd, EM_CHARFROMPOS, 0, MAKELPARAM(x, pos->y + pitch / 2));
+    if (HIWORD(hit) != (WORD)row) return 0;
+    delta = (short)(LOWORD(hit) - (WORD)index);
+    return delta >= -2 && delta <= 2;
+}
+
+static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip) {
+    RECT view, formatRect;
+    HDC ownDc = NULL;
+    HLOCAL hText;
+    const WCHAR *text;
+    DWORD selStart = 0, selEnd = 0;
+    COLORREF normal, selected;
+    int saved, length, pitch, first, last, lineCount, row, cell, caretHidden = 0;
+    if (!g_invisibles || hwnd != g_edit) return;
+    EditViewRect(hwnd, &view);
+    if (clip && !IntersectRect(&view, &view, clip)) return;
+    if (view.right <= view.left || view.bottom <= view.top) return;
+    hText = (HLOCAL)Ctl(hwnd, EM_GETHANDLE, 0, 0);
+    text = hText ? (const WCHAR *)LocalLock(hText) : NULL;
+    if (!text) return;
+    if (!hdc) {
+        ownDc = hdc = GetDC(hwnd);
+        if (!hdc) { LocalUnlock(hText); return; }
+        caretHidden = GetFocus() == hwnd && HideCaret(hwnd);
+    }
+    saved = SaveDC(hdc);
+    if (!saved) goto done;
+    IntersectClipRect(hdc, view.left, view.top, view.right, view.bottom);
+    SelectObject(hdc, GetStockObject(DC_PEN));
+    SelectObject(hdc, g_font);
+    Ctl(hwnd, EM_GETRECT, 0, (LPARAM)&formatRect);
+    Ctl(hwnd, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    length = (int)Ctl(hwnd, WM_GETTEXTLENGTH, 0, 0);
+    lineCount = (int)Ctl(hwnd, EM_GETLINECOUNT, 0, 0);
+    first = (int)Ctl(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0);
+    pitch = LineHeight();
+    last = first + (view.bottom - formatRect.top + pitch - 1) / pitch + 1;
+    if (last > lineCount) last = lineCount;
+    if (first > 0) first--;
+    if (!g_stubW) StubMetrics(hwnd);
+    cell = g_stubW;
+    normal = InvisibleColor(C_EDIT_BG, C_EDIT_FG);
+    selected = InvisibleColor(GetSysColor(COLOR_HIGHLIGHT), GetSysColor(COLOR_HIGHLIGHTTEXT));
+    for (row = first; row < last; row++) {
+        int rowStart = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)row, 0);
+        int rowEnd = row + 1 < lineCount ? (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)(row + 1), 0) : length;
+        int i, start, end, y, checkHit, previousKind = 0, previousX = 0, previousY = 0;
+        COLORREF previousColor = 0;
+        POINT origin;
+        if (rowStart < 0 || rowEnd < rowStart || rowEnd > length || !IndexPos(rowStart, &origin)) continue;
+        y = origin.y;
+        if (y >= view.bottom || y + pitch <= view.top) continue;
+        checkHit = InvisibleRange(hwnd, row, rowStart, rowEnd, y + pitch / 2, &view, &start, &end);
+        for (i = start; i < end; i++) {
+            int kind = InvisibleKind(text, i, length), rtl = EditIsRtl(), advance = cell;
+            COLORREF color;
+            POINT pos, next;
+            BOOL hasNext;
+            if (!kind || !IndexPos(i, &pos) || pos.y + pitch <= view.top || pos.y >= view.bottom) continue;
+            hasNext = i + 1 <= length && IndexPos(i + 1, &next);
+            if (checkHit && !InvisibleHit(hwnd, row, i, &pos, hasNext ? &next : NULL, pitch)) continue;
+            if (kind == INV_BREAK && rtl && pos.x > origin.x) rtl = 0;
+            color = (DWORD)i >= selStart && (DWORD)i < selEnd ? selected : normal;
+            if (kind == previousKind && pos.x == previousX && pos.y == previousY && color == previousColor) continue;
+            if (kind == INV_WIDE) {
+                SIZE size = { 0, 0 };
+                if (GetTextExtentPoint32W(hdc, text + i, 1, &size) && size.cx > 0) advance = size.cx;
+            }
+            InvisibleDraw(hwnd, hdc, row, i, kind, &pos, hasNext ? &next : NULL, pitch, advance, rtl, color);
+            previousKind = kind; previousX = pos.x; previousY = pos.y; previousColor = color;
+        }
+    }
+    RestoreDC(hdc, saved);
+done:
+    if (caretHidden) ShowCaret(hwnd);
+    if (ownDc) ReleaseDC(hwnd, ownDc);
+    LocalUnlock(hText);
+}
+
+static void InvisiblesSync(HWND hwnd) {
+    if (!g_invisibles || g_invisSync || g_paintDepth || g_inBars || hwnd != g_edit || !IsWindowVisible(hwnd)) return;
+    g_invisSync = 1;
+    InvalidateRect(hwnd, NULL, FALSE);
+    UpdateWindow(hwnd);
+    g_invisSync = 0;
 }
 
 int EditIndexFromPoint(POINT pt) {
@@ -1046,6 +1277,7 @@ static LRESULT CALLBACK EditProcMain(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         SbarSync(hwnd);
         StubSync(hwnd);
         BandSync(hwnd);
+        InvisiblesSync(hwnd);
         return 0; }
     case WM_TIMER:
         if (wParam == SIZE_TIMER) {
@@ -1057,6 +1289,7 @@ static LRESULT CALLBACK EditProcMain(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             SbarSync(hwnd);
             StubSync(hwnd);
             BandSync(hwnd);
+            InvisiblesSync(hwnd);
             return 0;
         }
         break;
@@ -1067,8 +1300,8 @@ static LRESULT CALLBACK EditProcMain(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         g_paintDepth++;
         result = CallWindowProcW(g_orig, hwnd, msg, wParam, lParam);
         g_paintDepth--;
-        if (wParam) { StubPaint(hwnd, (HDC)wParam, NULL); BandPaint(hwnd, (HDC)wParam, NULL); }
-        else if (hasUpdate) { StubPaint(hwnd, NULL, &updateRect); BandPaint(hwnd, NULL, &updateRect); }
+        if (wParam) { StubPaint(hwnd, (HDC)wParam, NULL); BandPaint(hwnd, (HDC)wParam, NULL); InvisiblesPaint(hwnd, (HDC)wParam, NULL); }
+        else if (hasUpdate) { StubPaint(hwnd, NULL, &updateRect); BandPaint(hwnd, NULL, &updateRect); InvisiblesPaint(hwnd, NULL, &updateRect); }
         FitTallCaret(hwnd);
         return result; }
     case WM_PRINTCLIENT:
@@ -1077,6 +1310,7 @@ static LRESULT CALLBACK EditProcMain(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         g_paintDepth--;
         StubPaint(hwnd, (HDC)wParam, NULL);
         BandPaint(hwnd, (HDC)wParam, NULL);
+        InvisiblesPaint(hwnd, (HDC)wParam, NULL);
         return result;
     case WM_PRINT:
         g_paintDepth++;
@@ -1086,6 +1320,7 @@ static LRESULT CALLBACK EditProcMain(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     case WM_BARS:
         g_barsPending = 0;
         UpdateBars();
+        InvisiblesSync(hwnd);
         if (g_tallCaret) FitTallCaret(hwnd);
         return 0;
     case WM_MOUSEWHEEL:
@@ -1248,6 +1483,7 @@ static LRESULT CALLBACK EditProcMain(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     if (StubWatch(msg, wParam)) {
         StubSync(hwnd);
         BandSync(hwnd);
+        InvisiblesSync(hwnd);
     }
     if (g_tallCaret) FitTallCaret(hwnd);
     return result;

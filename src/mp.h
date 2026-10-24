@@ -6,7 +6,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.3.0"
+#define APP_VERSION  L"1.4.0"
 #define PATH_CAP     1024
 
 typedef struct Palette {
@@ -45,6 +45,7 @@ enum {
     IDM_ENC_UTF8 = 321, IDM_ENC_UTF8BOM, IDM_ENC_UTF16LE, IDM_ENC_UTF16BE, IDM_ENC_ANSI, IDM_ENC_OTHER, IDM_ENC_REOPEN,
     IDM_RTL = 340, IDM_DIR_LTR = 341, IDM_DIR_RTL = 342, IDM_UCC_BASE = 350,
     IDM_VIEW_STATUS = 401, IDM_ZOOM_IN, IDM_ZOOM_OUT, IDM_ZOOM_RESET, IDM_THEME_DARK, IDM_THEME_LIGHT, IDM_THEME_TOGGLE,
+    IDM_VIEW_ONTOP, IDM_VIEW_INVISIBLES,
     IDM_HELP_TOPICS = 501, IDM_HELP_ABOUT, IDM_HELP_DEFAULT,
     IDM_RECENT_BASE = 700, IDM_RECENT_NONE = 710, IDM_RECENT_CLEAR = 711,
     IDM_SYS_RESTORE = 601, IDM_SYS_MOVE, IDM_SYS_SIZE, IDM_SYS_MIN, IDM_SYS_MAX, IDM_SYS_CLOSE
@@ -227,7 +228,7 @@ extern DWORD g_textRev;
 #define FONT_MIN 70
 #define FIND_CAP 256
 #define PAGE_TEXT_CAP 128
-#define FONT_MAX 1000
+#define FONT_MAX 2000
 typedef struct Prefs {
     WCHAR    font[32];
     int      pt, bold, italic;
@@ -267,6 +268,8 @@ void  AppUpdateStatus(void);
 HWND   EditCreate(HWND parent);
 void   EditApplyFont(void);
 void   EditApplyColors(void);
+void   EditShowInvisibles(BOOL show);
+BOOL   EditInvisiblesShown(void);
 HBRUSH EditBrush(void);
 void   FontResolve(WCHAR *face);
 BOOL   EditSetDocText(const WCHAR *text);

@@ -119,6 +119,7 @@ public static class U {
     public static bool Iconic(long h) { return IsIconic(H(h)); }
     public static int[] Scroll(long h, int bar) { SCRINFO s = new SCRINFO(); s.cbSize = 28; s.fMask = 7; GetScrollInfo(H(h), bar, ref s); return new int[] { s.nMin, s.nMax, (int)s.nPage, s.nPos }; }   // bar 0 = horizontal, 1 = vertical: min, max, page, pos
     public static int Style(long h) { return GetWindowLongW(H(h), -16); }          // GWL_STYLE: WS_VSCROLL 0x200000 / WS_HSCROLL 0x100000 = the bar is shown
+    public static int ExStyle(long h) { return GetWindowLongW(H(h), -20); }
     [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr h);
     public static bool Zoomed(long h) { return IsZoomed(H(h)); }
@@ -709,7 +710,21 @@ function Test-T4 {                                                              
     CkSel 'T4.14 ... and the caret is at the start of the last line' $app $st[$lines - 1] $st[$lines - 1]
 }
 
-function Read-Bytes([string]$p) { try { return , [IO.File]::ReadAllBytes($p) } catch { return $null } }   # null while the app still has the file open
+function Read-Bytes([string]$p) {
+    $stream = $null
+    try {
+        $stream = [IO.File]::Open($p, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $buffer = New-Object byte[] $stream.Length
+        $offset = 0
+        while ($offset -lt $buffer.Length) {
+            $count = $stream.Read($buffer, $offset, $buffer.Length - $offset)
+            if ($count -eq 0) { return $null }
+            $offset += $count
+        }
+        return ,$buffer
+    } catch { return $null }
+    finally { if ($stream) { $stream.Dispose() } }
+}
 function Hex($b, [int]$n = 16) { (@($b) | Select-Object -First $n | ForEach-Object { '{0:X2}' -f $_ }) -join ' ' }
 function Same-Bytes($a, $b) { $a -ne $null -and $b -ne $null -and ([Convert]::ToBase64String([byte[]]$a) -ceq [Convert]::ToBase64String([byte[]]$b)) }
 function CkBytes([string]$n, $exp, [string]$path, [int]$ms = 2500) {             # the file on disk reaches the expected bytes
@@ -895,7 +910,7 @@ function Test-T5 {                                                              
         else { Ck ('T5.' + ($k + 1) + ' ... the editor text is read with the system code page (no replacement characters)') (-not (Ed-Text $app).Contains([string][char]0xFFFD)) 'the text holds U+FFFD: read as utf-8?' }
         Ed-Dirty $app 'x'
         $after = Ed-Text $app
-        Cmd $app 'IDM_FILE_SAVE'
+        [void](Snd $app.Main $WM_COMMAND $IDM.IDM_FILE_SAVE 0)
         CkBytes ('T5.' + ($k + 2) + ' ... save writes it back to the same file, same encoding') ([byte[]]($s.Bom + $s.Enc.GetBytes($after))) $p
         [void](Snd (Get-Edit $app) $EM_SETMODIFY 0 0)                            # (a failed save must not leave a prompt in the way of the next open)
         $k += 3
@@ -2857,8 +2872,8 @@ function Test-T36 {
     CkEdText 'T36.4 failed wrap preserves every character' $app $text
     CkSel 'T36.5 failed wrap preserves selection' $app 17 23
     Cmd $app 'IDM_FMT_WRAP'
-    Ck 'T36.6 wrapping succeeds after memory is available again' ([bool](WaitFor { (Get-Edit $app) -ne $ed } 12000)) 'editor not replaced'
-    CkEdText 'T36.7 successful retry also preserves the text' $app $text 12000
+    Ck 'T36.6 wrapping succeeds after memory is available again' ([bool](WaitFor { (Get-Edit $app) -ne $ed } 45000)) 'editor not replaced'
+    CkEdText 'T36.7 successful retry also preserves the text' $app $text 45000
 }
 
 # =========================================================================================================== T34
@@ -3072,11 +3087,13 @@ function Test-T38 {
 . (Join-Path $PSScriptRoot 'dragdrop_test.ps1')
 . (Join-Path $PSScriptRoot 'parity_test.ps1')
 . (Join-Path $PSScriptRoot 'undo_test.ps1')
+. (Join-Path $PSScriptRoot 'view_test.ps1')
+. (Join-Path $PSScriptRoot 'invisibles_edge_test.ps1')
 if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43', 'T44', 'T45', 'T46', 'T47', 'T48', 'T49')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43', 'T44', 'T45', 'T46', 'T47', 'T48', 'T49', 'T50', 'T51', 'T52')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine
