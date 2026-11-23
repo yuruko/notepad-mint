@@ -6,7 +6,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.5.1"
+#define APP_VERSION  L"1.5.2"
 #define PATH_CAP     1024
 
 typedef struct Palette {
@@ -163,7 +163,6 @@ struct MenuDef { const MenuItem *items; int n; };
 typedef unsigned (*MenuStateFn)(int id);
 #define BAR_BTN_W 23
 #define BAR_THEME_W 31
-#define EOF_GAP 1
 #define BAR_BTN_ICON 12
 #define BAR_BTN_OPACITY_ON 60
 #define BAR_BTN_OPACITY 20

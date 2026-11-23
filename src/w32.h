@@ -67,9 +67,7 @@ typedef BOOL    (CALLBACK *ABORTPROC)(HDC, int);
 #define GetBValue(c) ((BYTE)(((c) >> 16) & 0xff))
 
 typedef struct { LONG x, y; } POINT;
-typedef struct { LONG cx, cy; } SIZE;
-typedef struct { int abcA; UINT abcB; int abcC; } ABC;
-typedef struct { LONG left, top, right, bottom; } RECT;
+typedef struct { LONG cx, cy; } SIZE;typedef struct { LONG left, top, right, bottom; } RECT;
 typedef struct {
     DWORD cbSize, flags;
     HWND hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
@@ -829,7 +827,7 @@ API int      WINAPI SetBkMode(HDC, int);
 API BOOL     WINAPI TextOutW(HDC, int, int, LPCWSTR, int);
 API BOOL     WINAPI ExtTextOutW(HDC, int, int, UINT, const RECT *, LPCWSTR, UINT, const INT *);
 API BOOL     WINAPI GetTextExtentPoint32W(HDC, LPCWSTR, int, SIZE *);
-API BOOL     WINAPI GetCharABCWidthsW(HDC, UINT, UINT, ABC *);API BOOL     WINAPI GetTextExtentExPointW(HDC, LPCWSTR, int, int, INT *, INT *, SIZE *);
+API DWORD    WINAPI GetGlyphIndicesW(HDC, LPCWSTR, int, WORD *, DWORD);API BOOL     WINAPI GetTextExtentExPointW(HDC, LPCWSTR, int, int, INT *, INT *, SIZE *);
 API BOOL     WINAPI GetTextMetricsW(HDC, TEXTMETRICW *);
 API int      WINAPI GetDeviceCaps(HDC, int);
 API int      WINAPI EnumFontFamiliesExW(HDC, LOGFONTW *, FONTENUMPROCW, LPARAM, DWORD);

@@ -978,52 +978,27 @@ static int InvisibleHit(HWND hwnd, int row, int index, const POINT *pos, const P
     return delta >= -2 && delta <= 2;
 }
 
-static int EofEm(int pitch) {
-    return ClampInt((pitch - 2 * S(EOF_GAP)) * 4 / 7, 5, 64);
-}
-
-static HFONT EofFont(int pitch) {
-    static HFONT font, madeFor;
-    static int madePitch;
-    LOGFONTW lf;
-    if (font && madeFor == g_font && madePitch == pitch) return font;
-    if (font) DeleteObject(font);
-    memset(&lf, 0, sizeof lf);
-    lf.lfHeight = -EofEm(pitch);
-    lf.lfWeight = FW_NORMAL;
-    lf.lfCharSet = DEFAULT_CHARSET;
-    lf.lfQuality = ANTIALIASED_QUALITY;
-    wcopy(lf.lfFaceName, g_pf.font, 32);
-    font = CreateFontIndirectW(&lf);
-    madeFor = g_font; madePitch = pitch;
-    return font;
-}
-
 static void InvisibleEof(HDC hdc, int length, int cell, int pitch, const RECT *view, COLORREF color) {
-    static const WCHAR letters[] = L"eof";
+    static const WCHAR mark[] = { 0x25AA, 0 };
+    WORD glyph = 0xFFFF;
     SIZE size = { 0, 0 };
-    TEXTMETRICW tm;
     POINT pos;
-    HFONT font;
-    HGDIOBJ oldFont;
-    int i, x, center, em = EofEm(pitch), xHeight = em / 2, ascent = em * 3 / 4, baseline;
+    RECT box;
+    int x, side;
     if (!IndexPos(length, &pos) || pos.y + pitch <= view->top || pos.y >= view->bottom) return;
-    font = EofFont(pitch);
-    if (!font) return;
-    oldFont = SelectObject(hdc, font);
-    GetTextMetricsW(hdc, &tm);
-    center = EditIsRtl() ? pos.x - cell / 2 : pos.x + cell / 2;
-    baseline = pos.y + (pitch - 2 * xHeight - ascent - 2 * S(EOF_GAP)) / 2 + xHeight;
-    SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, color);
-    for (i = 0; i < 3; i++) {
-        ABC abc;
-        if (GetCharABCWidthsW(hdc, letters[i], letters[i], &abc) && abc.abcB) x = center - abc.abcA - (int)abc.abcB / 2;
-        else { GetTextExtentPoint32W(hdc, letters + i, 1, &size); x = center - size.cx / 2; }
-        TextOutW(hdc, x, baseline - tm.tmAscent, letters + i, 1);
-        baseline += S(EOF_GAP) + (i == 0 ? xHeight : ascent);
+    if (GetGlyphIndicesW(hdc, mark, 1, &glyph, 1) == 1 && glyph != 0xFFFF && GetTextExtentPoint32W(hdc, mark, 1, &size)) {
+        x = EditIsRtl() ? pos.x - size.cx : pos.x;
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, color);
+        TextOutW(hdc, x, pos.y, mark, 1);
+        return;
     }
-    SelectObject(hdc, oldFont);
+    side = ClampInt(cell / 2, 2, S(8));
+    box.left = (EditIsRtl() ? pos.x - cell : pos.x) + (cell - side) / 2;
+    box.top = pos.y + (pitch - side) / 2;
+    box.right = box.left + side;
+    box.bottom = box.top + side;
+    FillC(hdc, &box, color);
 }
 
 static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip) {
