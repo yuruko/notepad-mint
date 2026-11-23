@@ -21,7 +21,7 @@ try {
     $title = if ($alive) { Title $app } else { '' }
     Write-Output ('alive: {0}  title: [{1}]' -f $alive, $title)
     if (-not $alive) { throw 'the exe exited' }
-    if ($title -cne ((Split-Path $Sample -Leaf) + ' - notepad mint')) { throw 'unexpected window title' }
+    if ($title -cne (Split-Path $Sample -Leaf)) { throw 'unexpected window title' }
     try {
         $bmp = [U]::Grab([long]$app.Main)
         try { $bmp.Save($Shot, [System.Drawing.Imaging.ImageFormat]::Png) }

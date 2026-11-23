@@ -81,6 +81,20 @@ static const MenuItem miEnc[] = {
     IT(L"&other code page...",       NULL, IDM_ENC_OTHER),
     IT(L"&reopen with encoding...",  NULL, IDM_ENC_REOPEN),
 };
+static const MenuItem miEncEol[] = {
+    IT(L"&utf8",           NULL, IDM_ENC_UTF8),
+    IT(L"utf8 &bom",       NULL, IDM_ENC_UTF8BOM),
+    IT(L"utf16 &le",       NULL, IDM_ENC_UTF16LE),
+    IT(L"utf16 b&e",       NULL, IDM_ENC_UTF16BE),
+    IT(L"&ansi",           NULL, IDM_ENC_ANSI),
+    SEP,
+    IT(L"&windows (crlf)",    NULL, IDM_EOL_CRLF),
+    IT(L"u&nix (lf)",         NULL, IDM_EOL_LF),
+    IT(L"classic &mac (cr)",  NULL, IDM_EOL_CR),
+    SEP,
+    IT(L"&other code page...",       NULL, IDM_ENC_OTHER),
+    IT(L"&reopen with encoding...",  NULL, IDM_ENC_REOPEN),
+};
 static const MenuItem miUcc[] = {
     IT(L"lrm   left-to-right mark",                     NULL, IDM_UCC_BASE + 0),
     IT(L"rlm   right-to-left mark",                     NULL, IDM_UCC_BASE + 1),
@@ -170,6 +184,7 @@ const MenuDef g_mdSys     = { miSys,  COUNTOF(miSys)  };
 const MenuDef g_mdUcc     = { miUcc,  COUNTOF(miUcc)  };
 const MenuDef g_mdEol     = { miEol,  COUNTOF(miEol)  };
 const MenuDef g_mdEnc     = { miEnc,  COUNTOF(miEnc)  };
+const MenuDef g_mdEncEol  = { miEncEol, COUNTOF(miEncEol) };
 const MenuDef g_mdZoom    = { miZoom, COUNTOF(miZoom) };
 const MenuDef g_mdEditCtx = { miCtx,  COUNTOF(miCtx)  };
 static const MenuDef mdFile   = { miFile,   COUNTOF(miFile)   };
@@ -183,11 +198,11 @@ const MenuBarEntry g_menuEntries[MENU_BAR_COUNT] = {
     { L"&edit",   &mdEdit   },
     { L"f&ormat", &mdFormat },
     { L"&view",   &mdView   },
-    { L"&help",   &mdHelp   },
+    { L"&?",      &mdHelp   },
 };
 
 const WCHAR *MenuAccelOf(int id) {
-    static const struct { const MenuItem *items; int count; } l[] = { { miFormat, COUNTOF(miFormat) }, { miTheme, COUNTOF(miTheme) } };
+    static const struct { const MenuItem *items; int count; } l[] = { { miFormat, COUNTOF(miFormat) }, { miTheme, COUNTOF(miTheme) }, { miView, COUNTOF(miView) } };
     int i, j;
     for (i = 0; i < (int)COUNTOF(l); i++) for (j = 0; j < l[i].count; j++) if (l[i].items[j].id == id) return l[i].items[j].accel;
     return NULL;

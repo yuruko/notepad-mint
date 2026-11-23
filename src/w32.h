@@ -338,6 +338,7 @@ typedef struct { ULONG_PTR dwData; DWORD cbData; PVOID lpData; } COPYDATASTRUCT;
 #define SW_SHOWMAXIMIZED 3
 #define SW_SHOWNOACTIVATE 4
 #define SW_SHOW 5
+#define SW_SHOWNA 8
 #define SW_SHOWDEFAULT 10
 
 #define SWP_NOSIZE 0x0001
@@ -525,6 +526,7 @@ typedef struct { ULONG_PTR dwData; DWORD cbData; PVOID lpData; } COPYDATASTRUCT;
 #define OUT_DEFAULT_PRECIS 0
 #define CLIP_DEFAULT_PRECIS 0
 #define DEFAULT_QUALITY 0
+#define ANTIALIASED_QUALITY 4
 #define CLEARTYPE_QUALITY 5
 #define DEFAULT_PITCH 0
 #define FF_DONTCARE 0
@@ -825,8 +827,7 @@ API COLORREF WINAPI SetBkColor(HDC, COLORREF);
 API int      WINAPI SetBkMode(HDC, int);
 API BOOL     WINAPI TextOutW(HDC, int, int, LPCWSTR, int);
 API BOOL     WINAPI ExtTextOutW(HDC, int, int, UINT, const RECT *, LPCWSTR, UINT, const INT *);
-API BOOL     WINAPI GetTextExtentPoint32W(HDC, LPCWSTR, int, SIZE *);
-API BOOL     WINAPI GetTextExtentExPointW(HDC, LPCWSTR, int, int, INT *, INT *, SIZE *);
+API BOOL     WINAPI GetTextExtentPoint32W(HDC, LPCWSTR, int, SIZE *);API BOOL     WINAPI GetTextExtentExPointW(HDC, LPCWSTR, int, int, INT *, INT *, SIZE *);
 API BOOL     WINAPI GetTextMetricsW(HDC, TEXTMETRICW *);
 API int      WINAPI GetDeviceCaps(HDC, int);
 API int      WINAPI EnumFontFamiliesExW(HDC, LOGFONTW *, FONTENUMPROCW, LPARAM, DWORD);

@@ -158,6 +158,8 @@ static void PrefsLoad(void) {
     g_pf.italic  = IniGet(L"editor", L"italic", 0) != 0;
     g_pf.wrap    = IniGet(L"editor", L"wrap", 0) != 0;
     g_pf.statusbar = IniGet(L"view", L"statusbar", 1) != 0;
+    g_pf.invisibles = IniGet(L"view", L"invisibles", 0) != 0;
+    EditShowInvisibles(g_pf.invisibles);
     g_pf.tab     = IniGet(L"editor", L"tab", 4);
     if (g_pf.tab != 2 && g_pf.tab != 8) g_pf.tab = 4;
     GetPrivateProfileStringW(L"view", L"theme", L"dark", value, 32, g_ini);
@@ -205,6 +207,7 @@ void AppSavePrefs(void) {
     IniPutInt(L"editor", L"wrap", g_pf.wrap, MINE(wrap));
     IniPutInt(L"editor", L"tab", g_pf.tab, MINE(tab));
     IniPutInt(L"view", L"statusbar", g_pf.statusbar, MINE(statusbar));
+    IniPutInt(L"view", L"invisibles", g_pf.invisibles, MINE(invisibles));
     IniPutStr(L"view", L"theme", g_pf.theme == THEME_LIGHT ? L"light" : L"dark", MINE(theme));
     IniPutInt(L"window", L"x", g_pf.winx, MINE(winx));
     IniPutInt(L"window", L"y", g_pf.winy, MINE(winy));

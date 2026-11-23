@@ -20,11 +20,11 @@ one 32-bit exe (under 170 kb) runs on 32-bit windows, 64-bit windows and windows
 - written in raw c and **32-bit x86 assembly**. no crt, no libraries, no `windows.h`: every win32 declaration is hand-written in `src/w32.h`
   (checked against the real sdk by `tools/layout_check`). the exe imports only kernel32 / user32 / gdi32 (everything else is loaded at run time).
 - behaves like notepad (same menus, status bar and wording) plus:
-  - **themes**: a dark theme (the default, mint accent `#9df5bd`) and a light one (a softer green accent `#2f7d58`); alt+x or the sun / moon button at the very right of the menu bar switches them; hover uses the accent, the caret is plain white / black;
-    title bar (white / black over a soft accent tint), menu bar and status bar in the editor's font face at a fixed 11 px; classic style scrollbars in both themes' colours, 13 px thin;
-  - **word wrap**: alt+z, or the button left of the theme button; hover either button for a moment and a tooltip says what it does and its key combo;
+  - **themes**: a dark theme (the default, mint accent `#9df5bd`) and a light one (a softer green accent `#2f7d58`); alt+x or the sun / moon button at the right end of the menu bar switches them; hover uses the accent, the caret is plain white / black;
+    title bar (white / black over a soft accent tint), status bar in the editor's font face at a fixed 11 px, menu bar and menus at 10 px; classic style scrollbars in both themes' colours, 13 px thin;
+  - **quick toggles**: three small buttons near the right end of the status bar switch always on top, show invisibles and word wrap, and the sun / moon at the right of the menu bar switches the theme; hover one for a moment and a tooltip says what it does and its key combo;
   - **always on top**: view > always on top, or alt+a, keeps this window above other windows; each window starts with it off and can be toggled independently;
-  - **show invisibles**: view > show invisibles, or alt+s, draws simple markers for spaces, tabs, newlines and other invisible unicode / control characters at 25% foreground opacity; the markers are a display overlay, so copying, saving and printing keep the original text;
+  - **show invisibles**: view > show invisibles, or alt+s, draws simple markers for spaces, tabs, newlines and other invisible unicode / control characters at 25% foreground opacity, plus a small `e o f` stepped down a diagonal after the last character to mark the end of the file; the markers are a display overlay, so copying, saving and printing keep the original text;
   - **tab size**: format > tab size: 2, 4 or 8 columns (4 by default), remembered, also used when printing;
   - **recent files**: file > recent keeps the last 9 files you opened or saved (newest first, press 1-9), shared by all open windows; "clear list" at the bottom empties it;
   - **whole-word search**: find, previous / next, replace and replace all share the same word boundaries; remembers the option alongside match case and wrap around;
@@ -33,7 +33,7 @@ one 32-bit exe (under 170 kb) runs on 32-bit windows, 64-bit windows and windows
   - **selection printing**: select text before opening print to enable printing just that selection;
   - **header and footer** (file > page setup, like windows xp's notepad): `&f` file name, `&p` page number, `&d` date, `&t` time, `&l` / `&c` / `&r` align what follows left / centre / right, `&&` an ampersand (defaults `&f` and `page &p`, remembered); a small window with a cancel button stays up while it prints;
   - **text runs to the edge**: an 8 px margin around the text (4 px on top), but text that is scrolled out of it runs to the very edge of the editor, no blank frame; the row that is only partly in view at the bottom is drawn, cut off at the edge;
-  - **status bar**: compact (`12:5`, `5 L`, `124 B`, `crlf`, `utf8 bom`), the lines, bytes and line ending panels grow and shrink with their text, never cut off; with a selection it shows the lines and bytes selected (`162:54 [5 L 54 B]`); while zoomed it shows the zoom (`120%`, click: back to 100%); click the position to go to a line, the line ending / encoding panels to change them;
+  - **status bar**: compact (`12:5`, `124`, `utf8 bom`): position, the size a save would write in bytes (just before the toggle buttons), encoding (with the line ending in its menu); panels grow and shrink with their text, never cut off; a ` *` after the position (`162:54 *`) means text is selected; while zoomed it shows the zoom (`120%`, click: back to 100%); click the position to go to a line, the encoding panel to change the encoding or line ending;
   - **zoom**: ctrl+plus / ctrl+minus / ctrl+0, ctrl + mouse wheel (8-48 pt); resizing or changing zoom scrolls the caret into view while keeping the selection and undo history;
   - **scrolling**: mouse-wheel and scrollbar scrolling keep the cursor in place; keyboard navigation returns to that position before moving it, including wrapped text and shift selections;
   - **font preview**: one line at the selected size, from 7 to 200 pt: "sphinx of black quartz, judge my vow. 0123456789"; type sizes above 48 pt in the size box (preset buttons stay at 8-48 pt); face, bold and italic update live; the default editor size is 11 pt;
@@ -64,7 +64,7 @@ one 32-bit exe (under 170 kb) runs on 32-bit windows, 64-bit windows and windows
 ## status
 
 every menu item works: file (new, new window, open, recent, save, save as, page setup, print, exit), edit (undo ... select all, time / date, find, find next / previous,
-replace, go to, clear line), format (word wrap, font, tab size, line ending, encoding), view (zoom, status bar, always on top, show invisibles, theme), help (the about box links to yuru.be). find / replace, go to, font, encodings, about and help
+replace, go to, clear line), format (word wrap, font, tab size, line ending, encoding), view (zoom, status bar, theme, always on top, show invisibles), help (the about box links to yuru.be). find / replace, go to, font, encodings, about and help
 are our own dark / light dialogs; open, save as, print and page setup are the native windows dialogs (they follow windows' own dark / light mode, not the app theme). the encoding and line ending of a file are set from the
 format menu or the status bar, not in the save as dialog.
 

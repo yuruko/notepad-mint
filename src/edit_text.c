@@ -72,29 +72,6 @@ void EditCaretPos(int *line, int *col) {
     c.textRev = g_textRev; c.length = length; c.index = index; c.line = *line; c.col = *col; c.valid = 1;
 }
 
-BOOL EditSelStats(int enc, int eol, int *lines, DWORD *bytes) {
-    static struct { DWORD selStart, selEnd, textRev; int length, enc, eol, lines, valid; DWORD bytes; } c;
-    DWORD selStart = 0, selEnd = 0;
-    HLOCAL hText;
-    int length;
-    const WCHAR *text;
-    SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
-    if (selEnd <= selStart) return FALSE;
-    if (!c.valid || c.selStart != selStart || c.selEnd != selEnd || c.textRev != g_textRev || c.length != GetWindowTextLengthW(g_edit) || c.enc != enc || c.eol != eol) {
-        text = TextLock(&hText, &length);
-        if (!text) return FALSE;
-        if (selEnd > (DWORD)length) selEnd = (DWORD)length;
-        if (selStart >= selEnd) { LocalUnlock(hText); return FALSE; }
-        c.lines = (int)mp_count_lf(text + selStart, (size_t)(selEnd - selStart)) + (text[selEnd - 1] == '\n' ? 0 : 1);
-        c.bytes = DocBodySize(text + selStart, (int)(selEnd - selStart), enc, eol);
-        LocalUnlock(hText);
-        c.selStart = selStart; c.selEnd = selEnd; c.textRev = g_textRev; c.length = length; c.enc = enc; c.eol = eol; c.valid = 1;
-    }
-    *lines = c.lines;
-    *bytes = c.bytes;
-    return TRUE;
-}
-
 BOOL EditGotoLine(int line) {
     HLOCAL hText;
     int length, currentLine = 1, i = 0;

@@ -1732,16 +1732,17 @@ function Test-T19 {
 
     # three things whose values cannot be read from outside the process (a caret's colour, a font's size) or are plain palette numbers: checked in the sources.
     # the caret is the edit control's own, an inverting rectangle (pure white on the dark editor's black, pure black on the light editor's white);
-    # the menu bar, popups, status bar and title strip all use the one chrome font, CHROME_PX = 11 (a 10 px menu / status font was tried and went back)
+    # the status bar and title strip use the chrome font, CHROME_PX = 11; the menu bar and its popups are 1 pt smaller, MENU_PX = 10 (2026-11-22)
     $mpH = [IO.File]::ReadAllText((Join-Path $Src 'mp.h')); $uiSrc = [IO.File]::ReadAllText((Join-Path $Src 'ui.c')); $frSrc = [IO.File]::ReadAllText((Join-Path $Src 'frame.c'))
     $allSrc = ((Get-ChildItem -LiteralPath $Src -Filter *.c | ForEach-Object { [IO.File]::ReadAllText($_.FullName) }) -join "`n")
     Ck 'T19.14 the caret is the edit control''s own inverting one (pure white on the dark theme, pure black on the light one): no source creates a caret' ($allSrc -notmatch '\bCreateCaret\s*\(') 'CreateCaret( found in src\*.c'
-    Ck 'T19.15 menu bar, popups, status bar and title strip all use the one chrome font, CHROME_PX = 11 (g_fontMenu, bold twin g_fontMenuB for the title)' (($mpH -match '#define\s+CHROME_PX\s+11\b') -and ($mpH -notmatch 'MENU_PX') -and ($uiSrc -match '(?:g_fontMenu|\w+\.font)\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*CHROME_PX\s*,\s*FW_NORMAL\s*\)') -and ($uiSrc -match '(?:g_fontMenuB|\w+\.bold)\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*CHROME_PX\s*,\s*FW_BOLD\s*\)') -and ($frSrc -match 'SelectObject\(\w+,\s*g_fontMenuB\)')) 'the font sizes are not wired as expected (src\mp.h, src\ui.c, src\frame.c)'
+    $mnSrc = [IO.File]::ReadAllText((Join-Path $Src 'menu.c'))
+    Ck 'T19.15 status bar and title strip use the chrome font, CHROME_PX = 11 (g_fontMenu, bold twin g_fontMenuB for the title); menu bar and popups use g_fontBar, MENU_PX = 10' (($mpH -match '#define\s+CHROME_PX\s+11\b') -and ($mpH -match '#define\s+MENU_PX\s+10\b') -and ($uiSrc -match 'g_fontBar\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*MENU_PX\s*,\s*FW_NORMAL\s*\)') -and ($mnSrc -notmatch '\bg_fontMenu\b') -and ($uiSrc -match '(?:g_fontMenu|\w+\.font)\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*CHROME_PX\s*,\s*FW_NORMAL\s*\)') -and ($uiSrc -match '(?:g_fontMenuB|\w+\.bold)\s*=\s*FacePx\(\s*g_chromeFace\s*,\s*CHROME_PX\s*,\s*FW_BOLD\s*\)') -and ($frSrc -match 'SelectObject\(\w+,\s*g_fontMenuB\)')) 'the font sizes are not wired as expected (src\mp.h, src\ui.c, src\frame.c)'
     if ($pal) { Ck 'T19.16 the light face is #dfdee1 = rgb(223,222,225) (it was #e4e1da: 5 less red, 3 less green, 7 more blue)' (($pal['light'].face -join ',') -eq '223,222,225') ('light face is ' + ($pal['light'].face -join ',')) }
 }
 
 # =========================================================================================================== T20
-# the minimum size is a size of the ENTIRE window (frame included): 320 px wide (the status panels may ask for more) and 140 px high, dpi scaled
+# the minimum size is a size of the ENTIRE window (frame included): 320 px wide (the status bar may ask for more: its text panels plus its three icon buttons) and 140 px high, dpi scaled
 function Test-T20 {
     $app = Start-App
     $dpi = [U]::Dpi([long]$app.Main)
@@ -1750,10 +1751,17 @@ function Test-T20 {
     [void][Nd]::Size([long]$app.Main, 100, 50)                                   # far too small: the window stops at its minimum
     $w = WaitFor { $r = [U]::WRect([long]$app.Main); if (($r[2] - $r[0]) -le 2000) { $r } } 3000
     $gw = $w[2] - $w[0]; $gh = $w[3] - $w[1]
-    Ck ('T20.1 shrunk as far as it goes the whole window is ' + $wantW + ' px wide (320 px at 96 dpi; the status panels need less)') ($gw -eq $wantW) ('width ' + $gw + ', wanted ' + $wantW + ' (dpi ' + $dpi + ')')
-    Ck ('T20.2 ... and ' + $wantH + ' px high (140 px at 96 dpi), title strip and frame included') ($gh -eq $wantH) ('height ' + $gh + ', wanted ' + $wantH + ' (dpi ' + $dpi + ')')
     $bar = Chrome-Kid $app 'mp_menubar'; $st = Chrome-Kid $app 'mp_status'; $ed = Get-Edit $app
     $b = [U]::WRect($bar); $s = [U]::WRect($st); $e = [U]::WRect($ed)
+    $sbw = $s[2] - $s[0]                                                         # the status bar spans the client area: the frame is what the window has more
+    $frameW = $gw - $sbw
+    $btns = 3 * [int][Math]::Round($IDM.BAR_BTN_W * $dpi / 96, [MidpointRounding]::AwayFromZero)
+    $pad = [int][Math]::Round(4 * $dpi / 96, [MidpointRounding]::AwayFromZero)
+    $panelPad = 5 * [int][Math]::Round(16 * $dpi / 96, [MidpointRounding]::AwayFromZero)   # (each of the five text panels pads 8 px on both sides at 96 dpi, on top of its text)
+    $needW = $frameW + $pad + $btns + $panelPad
+    Ck ('T20.1 shrunk as far as it goes the whole window is max(' + $wantW + ' px (320 px at 96 dpi), what the status bar needs: panels + its three buttons + frame) wide: never below the floor, and never below the buttons + the panel padding + the frame') (($gw -ge $wantW) -and ($gw -gt $needW)) ('width ' + $gw + ', floor ' + $wantW + ', the status bar needs more than ' + $needW + ' (dpi ' + $dpi + ')')
+    Info ('T20.1 the window is ' + $gw + ' px wide at its minimum (floor ' + $wantW + ': ' + $(if ($gw -gt $wantW) { 'the status bar sets it' } else { 'the floor sets it' }) + ')')
+    Ck ('T20.2 ... and ' + $wantH + ' px high (140 px at 96 dpi), title strip and frame included') ($gh -eq $wantH) ('height ' + $gh + ', wanted ' + $wantH + ' (dpi ' + $dpi + ')')
     Ck 'T20.3 at that size the menu bar, the editor (at least one pixel high) and the status bar still stack inside the window without overlapping' (($e[3] - (Trim-Px $app) -gt $e[1]) -and ($b[3] -le $e[1]) -and ($e[3] - (Trim-Px $app) -le $s[1]) -and ($s[3] -le $w[3])) ('menu bar ' + ($b -join ',') + ' editor ' + ($e -join ',') + ' status bar ' + ($s -join ',') + ' window ' + ($w -join ','))
     [void][Nd]::Size([long]$app.Main, 900, 600)                                  # and it still grows
     $g = WaitFor { $r = [U]::WRect([long]$app.Main); if (($r[2] - $r[0]) -eq 900 -and ($r[3] - $r[1]) -eq 600) { $r } } 3000
@@ -1796,9 +1804,10 @@ function Test-T21 {
 }
 
 # =========================================================================================================== T22
-# the status bar text: "line:col[ [N L N B]] | lines | size in bytes | line ending | encoding" (what WM_GETTEXT of the mp_status child answers).
+# the status bar text: "line:col[ *] | lines | size in bytes | line ending | encoding" (what WM_GETTEXT of the mp_status child answers).
 # the size is what a save would write: the encoding's bytes (+ bom), a line break as long as the chosen line ending; the lines are the number of the last line.
-# a selection shows the lines it covers and the bytes a save would write for it (same encoding and line ending, no bom): "1:3 [1 L 2 B]"
+# a selection only shows in the position panel: "line:col *" (a space and an asterisk) while any text is selected, plain "line:col" otherwise. the other panels always describe
+# the whole document, selection or not
 function Status-Text($app) { [U]::Text((Chrome-Kid $app 'mp_status')) }
 function Status-Has($app, [string]$pat) { [bool](WaitFor { (Status-Text $app) -match $pat } 3000) }
 function Test-T22 {
@@ -1807,40 +1816,40 @@ function Test-T22 {
     Reset-Doc $app 'abc'
     CkEq 'T22.1 "abc": position 1:1, then 1 L, 3 B, crlf, utf8, in that order (the lines sit before the size, both before the line ending)' '1:1 | 1 L | 3 B | crlf | utf8' (Status-Text $app)
     [void](Snd $ed $EM_SETSEL 0 2)
-    Ck 'T22.2 two characters selected: "1:3 [1 L 2 B]" after the position' ((Status-Text $app) -match '^1:\d+ \[1 L 2 B\] \| 1 L \| 3 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.2 two characters selected: the position ends with " *" and the totals do not change (the selection is not counted)' ((Status-Text $app) -match '^1:\d+ \* \| 1 L \| 3 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
     [void](Snd $ed $EM_SETSEL 1 1)
-    Ck 'T22.3 nothing selected any more: the position is back to just line:column' ((Status-Text $app) -match '^1:2 \| 1 L \| 3 B \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.3 nothing selected any more: the position is back to just line:column, no " *"' ((Status-Text $app) -match '^1:2 \| 1 L \| 3 B \|') ('status [' + (Status-Text $app) + ']')
 
     Reset-Doc $app ("ab`r`ncd")                                                  # a b CR LF c d
     [void](Snd $ed $EM_SETSEL 1 5)                                               # "b", the line break, "c"
-    Ck 'T22.4 "b", the break and "c": 2 L, 4 B (the break is two bytes in a crlf file)' ((Status-Text $app) -match ' \[2 L 4 B\] \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.4 "b", the break and "c" selected: " *", and the totals stay 2 L, 6 B (the break is two bytes in a crlf file)' ((Status-Text $app) -match '^\d+:\d+ \* \| 2 L \| 6 B \| crlf \|') ('status [' + (Status-Text $app) + ']')
     [void](Snd $ed $EM_SETSEL 0 -1)
-    Ck 'T22.5 select all of "ab", break, "cd": 2 L, 6 B selected, and 2 L, 6 B in all' ((Status-Text $app) -match ' \[2 L 6 B\] \| 2 L \| 6 B \| crlf') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.5 select all of "ab", break, "cd": " *", and 2 L, 6 B in all' ((Status-Text $app) -match '^\d+:\d+ \* \| 2 L \| 6 B \| crlf') ('status [' + (Status-Text $app) + ']')
     Cmd $app 'IDM_EOL_LF'
-    Ck 'T22.6 line ending lf: the same text is 5 B (still 2 L), the selection too' (Status-Has $app ' \[2 L 5 B\] \| 2 L \| 5 B \| lf \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.6 line ending lf: the same text is 5 B (still 2 L), the selection still shows " *"' (Status-Has $app '^\d+:\d+ \* \| 2 L \| 5 B \| lf \|') ('status [' + (Status-Text $app) + ']')
     Cmd $app 'IDM_EOL_CR'
-    Ck 'T22.7 line ending cr: 5 B' (Status-Has $app ' \[2 L 5 B\] \| 2 L \| 5 B \| cr \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.7 line ending cr: 5 B' (Status-Has $app '^\d+:\d+ \* \| 2 L \| 5 B \| cr \|') ('status [' + (Status-Text $app) + ']')
     Cmd $app 'IDM_EOL_CRLF'
-    Ck 'T22.8 back to crlf: 6 B' (Status-Has $app ' \[2 L 6 B\] \| 2 L \| 6 B \| crlf \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.8 back to crlf: 6 B' (Status-Has $app '^\d+:\d+ \* \| 2 L \| 6 B \| crlf \|') ('status [' + (Status-Text $app) + ']')
 
     Reset-Doc $app ('a' + [char]::ConvertFromUtf32(0x1F600) + 'b')               # a, a surrogate pair (one emoji), b
     Ck 'T22.9 an emoji is 4 bytes in utf-8: 6 B in all' (Status-Has $app '^1:1 \| 1 L \| 6 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
     [void](Snd $ed $EM_SETSEL 0 -1)
-    Ck 'T22.10 select all of "a", the emoji, "b": 1 L, 6 B (the pair is 4 bytes, not 2 x 3)' ((Status-Text $app) -match ' \[1 L 6 B\] \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.10 select all of "a", the emoji, "b": " *", the total is still 6 B (the pair is 4 bytes, not 2 x 3)' ((Status-Text $app) -match '^1:\d+ \* \| 1 L \| 6 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
     Cmd $app 'IDM_ENC_UTF8BOM'
-    Ck 'T22.11 utf-8 with bom: the file is 3 bytes more (9 B), the selection is not (the mark belongs to the file): 6 B' (Status-Has $app ' \[1 L 6 B\] \| 1 L \| 9 B \| crlf \| utf8 bom$') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.11 utf-8 with bom: the file is 3 bytes more (9 B), " *" stays' (Status-Has $app '^1:\d+ \* \| 1 L \| 9 B \| crlf \| utf8 bom$') ('status [' + (Status-Text $app) + ']')
     Cmd $app 'IDM_ENC_UTF16LE'
-    Ck 'T22.12 utf-16 le: the file is the mark (2) + 4 units * 2 = 10 B, the selection 4 units = 8 B' (Status-Has $app ' \[1 L 8 B\] \| 1 L \| 10 B \| crlf \| utf16 le$') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.12 utf-16 le: the file is the mark (2) + 4 units * 2 = 10 B' (Status-Has $app '^1:\d+ \* \| 1 L \| 10 B \| crlf \| utf16 le$') ('status [' + (Status-Text $app) + ']')
     Cmd $app 'IDM_ENC_UTF16BE'
-    Ck 'T22.13 utf-16 be: 10 B and 8 B' (Status-Has $app ' \[1 L 8 B\] \| 1 L \| 10 B \| crlf \| utf16 be$') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.13 utf-16 be: 10 B' (Status-Has $app '^1:\d+ \* \| 1 L \| 10 B \| crlf \| utf16 be$') ('status [' + (Status-Text $app) + ']')
     Cmd $app 'IDM_ENC_UTF8'
-    Ck 'T22.14 back to utf-8: 6 B and 6 B' (Status-Has $app ' \[1 L 6 B\] \| 1 L \| 6 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.14 back to utf-8: 6 B' (Status-Has $app '^1:\d+ \* \| 1 L \| 6 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
 
     Reset-Doc $app 'e'                                                           # an edit that keeps the length but not the size ("e" -> "e acute": 1 -> 2 bytes)
     CkEq 'T22.15 "e": 1 B' '1:1 | 1 L | 1 B | crlf | utf8' (Status-Text $app)
     [void](Snd $ed $EM_SETSEL 0 -1)
     [void][U]::SndStr($ed, $EM_REPLACESEL, 1, [string][char]0xE9)
-    Ck 'T22.16 replaced by an accented e (same length, 2 bytes in utf-8): the size follows' ((Status-Text $app) -match '\| 1 L \| 2 B \| crlf') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.16 replaced by an accented e (same length, 2 bytes in utf-8): the size follows, and the selection is gone (no " *")' (((Status-Text $app) -match '\| 1 L \| 2 B \| crlf') -and ((Status-Text $app) -notmatch ' \*')) ('status [' + (Status-Text $app) + ']')
     Ed-Dirty $app 'xyz'
     Ck 'T22.17 typing 3 more characters: 5 B' ((Status-Text $app) -match '\| 1 L \| 5 B \| crlf') ('status [' + (Status-Text $app) + ']')
 
@@ -1853,35 +1862,38 @@ function Test-T22 {
     Ed-Dirty $app ("x`r`n")                                                      # typing a line break (EN_CHANGE): one more line
     Ck 'T22.21 inserting "x" and a break at the start: 3 L' (Status-Has $app '\| 3 L \| 6 B \| crlf') ('status [' + (Status-Text $app) + ']')
 
-    # the lines of a selection: every line break in it ends one line, the text after the last break is one more, unless the selection ends right at the start of a line
-    Reset-Doc $app ("a`r`nb`r`nc`r`n")                                           # a CR LF b CR LF c CR LF = chars 0..8
+    # any selection shows " *", whatever it covers (whole lines, a lone line break, a range that runs over several lines); the totals do not follow it
+    Reset-Doc $app ("a`r`nb`r`nc`r`n")                                           # a CR LF b CR LF c CR LF = chars 0..8: 4 L, 9 B
     [void](Snd $ed $EM_SETSEL 0 6)                                               # "a", break, "b", break: ends at the start of line 3
-    Ck 'T22.22 two whole lines (the selection ends at the start of the third): 2 L, not 3; 6 B' (Status-Has $app ' \[2 L 6 B\] \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.22 two whole lines (the selection ends at the start of the third): " *", the totals are the document''s 4 L, 9 B' (Status-Has $app '^\d+:\d+ \* \| 4 L \| 9 B \|') ('status [' + (Status-Text $app) + ']')
     [void](Snd $ed $EM_SETSEL 0 7)                                               # ... one more character: "c" is in it
-    Ck 'T22.23 one character further, "c" is [3 L 7 B]' (Status-Has $app ' \[3 L 7 B\] \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.23 one character further, "c" is in it: still " *", still 4 L, 9 B' (Status-Has $app '^\d+:\d+ \* \| 4 L \| 9 B \|') ('status [' + (Status-Text $app) + ']')
     [void](Snd $ed $EM_SETSEL 1 3)                                               # nothing but the first line break
-    Ck 'T22.24 just a line break: 1 L, 2 B' (Status-Has $app ' \[1 L 2 B\] \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.24 just a line break selected: " *"' (Status-Has $app '^\d+:\d+ \* \| 4 L \| 9 B \|') ('status [' + (Status-Text $app) + ']')
     [void](Snd $ed $EM_SETSEL 1 7)                                               # from the end of line 1 into line 3: break, "b", break, "c"
-    Ck 'T22.25 from the end of one line into the third: 3 L, 6 B' (Status-Has $app ' \[3 L 6 B\] \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.25 from the end of one line into the third: " *"' (Status-Has $app '^\d+:\d+ \* \| 4 L \| 9 B \|') ('status [' + (Status-Text $app) + ']')
+    [void](Snd $ed $EM_SETSEL 7 7)                                               # a caret again: the star goes
+    Ck 'T22.25b the selection collapsed to a caret: no " *" and the position is 3:2' (Status-Has $app '^3:2 \| 4 L \| 9 B \|') ('status [' + (Status-Text $app) + ']')
     Cmd $app 'IDM_EOL_LF'
     [void](Snd $ed $EM_SETSEL 0 7)
-    Ck 'T22.26 line ending lf: "a", break, "b", break, "c" is 5 B' (Status-Has $app ' \[3 L 5 B\] \| 4 L \| 6 B \| lf \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.26 line ending lf: a selection shows " *" and the totals are the lf ones (4 L, 6 B)' (Status-Has $app '^\d+:\d+ \* \| 4 L \| 6 B \| lf \|') ('status [' + (Status-Text $app) + ']')
     Cmd $app 'IDM_EOL_CRLF'
 
     $cjk = -join ([char]0x65E5, [char]0x672C, [char]0x8A9E)                      # three cjk characters: 3 bytes each in utf-8
     Reset-Doc $app $cjk
     [void](Snd $ed $EM_SETSEL 0 -1)
-    Ck 'T22.27 three cjk characters: 9 B in utf-8' (Status-Has $app ' \[1 L 9 B\] \| 1 L \| 9 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.27 three cjk characters selected: " *", 9 B in all in utf-8' (Status-Has $app '^1:\d+ \* \| 1 L \| 9 B \| crlf \| utf8$') ('status [' + (Status-Text $app) + ']')
     [void](Snd $ed $EM_SETSEL 1 2)
-    Ck 'T22.28 one of them: 3 B' (Status-Has $app ' \[1 L 3 B\] \| 1 L \| 9 B \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.28 one of them selected: " *", the total is still 9 B' (Status-Has $app '^1:\d+ \* \| 1 L \| 9 B \|') ('status [' + (Status-Text $app) + ']')
 
-    Reset-Doc $app 'ab'                                                          # the same range after an edit that keeps its length: the numbers are not kept from before
+    Reset-Doc $app 'ab'                                                          # the same range after an edit that keeps its length: the star and the totals are not kept from before
     [void](Snd $ed $EM_SETSEL 0 1)
-    Ck 'T22.29 "a" selected: 1 B' (Status-Has $app ' \[1 L 1 B\] \| 1 L \| 2 B \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.29 "a" selected: " *", 2 B in all' (Status-Has $app '^1:\d+ \* \| 1 L \| 2 B \|') ('status [' + (Status-Text $app) + ']')
     [void](Snd $ed $EM_SETSEL 0 1)
     [void][U]::SndStr($ed, $EM_REPLACESEL, 1, [string][char]0xE9)                # "a" -> accented e, same length, 2 bytes
+    Ck 'T22.30a after replacing "a" by an accented e the selection is gone: no " *", 3 B in all' (Status-Has $app '^1:2 \| 1 L \| 3 B \|') ('status [' + (Status-Text $app) + ']')
     [void](Snd $ed $EM_SETSEL 0 1)
-    Ck 'T22.30 the same range after replacing "a" by an accented e: 2 B' (Status-Has $app ' \[1 L 2 B\] \| 1 L \| 3 B \|') ('status [' + (Status-Text $app) + ']')
+    Ck 'T22.30 the same range selected again: " *" is back, and the total is the new 3 B' (Status-Has $app '^1:\d+ \* \| 1 L \| 3 B \|') ('status [' + (Status-Text $app) + ']')
 }
 
 # =========================================================================================================== T23
@@ -2455,29 +2467,31 @@ function Test-T26 {
 }
 
 # =========================================================================================================== T28
-# the theme button, the right-most of the two buttons at the right end of the menu bar (menu.c "theme button"): no frame, no fill, no sunken state. its icon is the theme in use (a moon
+# the theme button, the right-most of the icon buttons at the right end of the STATUS bar (status.c): as high as the bar, no frame, no fill, no sunken state. its icon is the theme in use (a moon
 # in the dark theme, a sun in the light one), so a click just swaps the icons. the icon is BAR_BTN_OPACITY percent opaque (20) at rest and fully opaque, with the
 # accent behind it, while hovered. a hover can only be looked at in the probe build (tools\probe.bat /DMENU_NO_TRACK: the bar asks the system for a mouse-leave message
 # and the system, finding the real pointer elsewhere, sends it at once, which ends a synthetic hover before anything can look at it): skipped otherwise
-function Bar-Geo($app) {                                                         # the bar and its two buttons: the theme button is the last BAR_BTN_W px of the bar, the word wrap button the BAR_BTN_W px before it (dpi scaled); Off = how far the button we look at is from the right edge (0 = the theme button; T29 sets Bw: the wrap button); Ox / Oy = where the bar starts in a PrintWindow shot of the main window
-    $bar = Chrome-Kid $app 'mp_menubar'
+function Bar-Geo($app) {                                                         # the status bar (mp_status) and its icon buttons, flush at its right end, each BAR_BTN_W px wide (dpi scaled) and as high as the bar. Off = how far the button we look at is from the right edge of the bar (0 = the theme button; Bw = word wrap, 2 * Bw = always on top; with view > toolbar menu on, the hamburger is at 0 and the others sit one Bw further left); Ox / Oy = where the bar starts in a PrintWindow shot of the main window
+    $bar = Chrome-Kid $app 'mp_status'
     $dpi = [U]::Dpi([long]$app.Main)
     $r = [U]::WRect($bar); $w = [U]::WRect([long]$app.Main)
-    return @{ Bar = $bar; W = ($r[2] - $r[0]); H = ($r[3] - $r[1]); Bw = [int][Math]::Round($IDM.BAR_BTN_W * $dpi / 96, [MidpointRounding]::AwayFromZero); Ox = ($r[0] - $w[0]); Oy = ($r[1] - $w[1]); Off = 0 }
+    return @{ Bar = $bar; W = ($r[2] - $r[0]); H = ($r[3] - $r[1]); Bw = [int][Math]::Round($IDM.BAR_BTN_W * $dpi / 96, [MidpointRounding]::AwayFromZero); Ox = ($r[0] - $w[0]); Oy = ($r[1] - $w[1]); Off = 0; Dpi = $dpi }
 }
+function Sdpi($g, [int]$v) { [int][Math]::Round($v * $g.Dpi / 96, [MidpointRounding]::AwayFromZero) }   # S(v): a 96 dpi size at the window's dpi
+function Btn-X($g, [int]$off) { return [int]($g.W - $off - [int]($g.Bw / 2)) }   # the middle of the button that is $off px from the right edge, in bar client x
 function Btn-Look1($app, $g, $bg) {                                              # one shot of the button as PrintWindow shows it: the pixels that differ from $bg, the one that differs most (and its colour), whether the rim of the button is plain $bg
     $bmp = [U]::Grab([long]$app.Main)
     try {
         $x0 = $g.W - $g.Bw - $g.Off
         $mask = New-Object 'bool[]' ($g.Bw * $g.H)
         $best = 0; $bc = @(0, 0, 0); $rim = $true; $n = 0
-        for ($y = 0; $y -lt $g.H - 1; $y++) {                                    # (the bar's last row is a 1 px margin under the button: always bar colour)
+        for ($y = 0; $y -lt $g.H; $y++) {                                        # (the button is as high as the bar: every row of it)
             for ($x = 0; $x -lt $g.Bw; $x++) {
                 $c = $bmp.GetPixel($g.Ox + $x0 + $x, $g.Oy + $y)
                 $d = [Math]::Abs([int]$c.R - $bg[0]) + [Math]::Abs([int]$c.G - $bg[1]) + [Math]::Abs([int]$c.B - $bg[2])
                 if ($d -gt 12) { $mask[$y * $g.Bw + $x] = $true; $n++ }
                 if ($d -gt $best) { $best = $d; $bc = @([int]$c.R, [int]$c.G, [int]$c.B) }
-                if (($x -lt 3 -or $x -ge $g.Bw - 3 -or $y -lt 3 -or $y -ge $g.H - 4) -and $d -gt 3) { $rim = $false }
+                if (($x -lt 3 -or $x -ge $g.Bw - 3 -or $y -lt 3 -or $y -ge $g.H - 3) -and $d -gt 3) { $rim = $false }
             }
         }
         return @{ Mask = $mask; Count = $n; Best = $bc; Rim = $rim; Bw = $g.Bw; H = $g.H }
@@ -2505,18 +2519,18 @@ function Test-T28 {
     $app = Start-App                                                             # dark: the moon
     $g = Bar-Geo $app
     $edit0 = Get-Edit $app                                                       # (a click on the theme button must not toggle word wrap: that re-creates the editor)
-    Ck 'T28.1 the bar has room for the menus and the button (a 900 px window)' ($g.W -gt 3 * $g.Bw) ('bar ' + $g.W + ' px wide, button ' + $g.Bw)
+    Ck 'T28.1 the status bar has room for its panels and the three buttons, the theme button flush at its right end (a 900 px window)' (($g.W -gt 6 * $g.Bw) -and ($g.H -gt 10)) ('bar ' + $g.W + ' x ' + $g.H + ' px, button ' + $g.Bw)
     $rest = $pal.dark.face
     $look = Btn-Look $app $g $rest
-    Ck 'T28.2 dark theme: an icon is there, and nothing else: the rim of the button is plain bar colour (no frame, no fill, no sunken state)' (($look.Count -gt 20) -and ($look.Count -lt 200) -and $look.Rim) ('differing pixels ' + $look.Count + ', rim plain ' + $look.Rim)
+    Ck 'T28.2 dark theme: an icon is there, and nothing else: the rim of the button (it is as high as the bar) is plain bar colour (no frame, no fill, no sunken state)' (($look.Count -gt 20) -and ($look.Count -lt 200) -and $look.Rim) ('differing pixels ' + $look.Count + ', rim plain ' + $look.Rim)
     $want = Mix-Rgb $rest $pal.dark.text $op
     Ck ('T28.3 ... drawn at ' + $op + '% opacity: its strongest pixel is that share of the text colour over the bar colour') (Near-Rgb $look.Best $want 4) ('strongest pixel rgb(' + ($look.Best -join ',') + '), wanted about rgb(' + ($want -join ',') + ')')
     $asymMoon = Look-Asym $look
     Ck 'T28.4 ... and it is the moon (a crescent is not mirror symmetric)' ($asymMoon -gt 12) ('mirror mismatches ' + $asymMoon)
 
-    Bar-Click $g ($g.W - $g.Off - [int]($g.Bw / 2))                                       # the middle of the button
+    Bar-Click $g (Btn-X $g $g.Off)                                                        # the middle of the button
     CkEq 'T28.5 a click on the button switches to the light theme (settings.ini: theme=light)' 'light' (Ini-Val $app 'view' 'theme' 'light')
-    Ck 'T28.5b ... it is the theme button, not the word wrap one (word wrap would have re-created the editor: it is still the same window)' ((Get-Edit $app) -eq $edit0) 'the editor was re-created: the click toggled word wrap'
+    Ck 'T28.5b ... it is the theme button, not the word wrap one (word wrap would have re-created the editor: it is still the same window), and not the always on top one' (((Get-Edit $app) -eq $edit0) -and (([U]::ExStyle([long]$app.Main) -band 8) -eq 0)) 'the editor was re-created (word wrap toggled) or the window went topmost'
     Start-Sleep -Milliseconds 400
     $rest = $pal.light.face
     $look = Btn-Look $app $g $rest
@@ -2526,9 +2540,9 @@ function Test-T28 {
     $asymBulb = Look-Asym $look
     Ck 'T28.8 ... and the icon is now the sun (mirror symmetric: the moon was not)' (($asymBulb -le 4) -and ($asymBulb -lt $asymMoon)) ('mirror mismatches: sun ' + $asymBulb + ', moon was ' + $asymMoon)
 
-    Bar-Click $g ($g.W - 2 * $g.Bw - 6)                                              # just left of the two buttons: free bar, nothing there
+    Bar-Click $g ($g.W - 3 * $g.Bw - 1)                                              # just left of the three buttons: the 2 px between the panels and the first button, nothing there
     Start-Sleep -Milliseconds 500
-    CkEq 'T28.9 a click just left of the two buttons (free bar) does nothing: still the light theme' 'light' (Ini-Val $app 'view' 'theme' 'light' 300)
+    CkEq 'T28.9 a click just left of the three buttons (the gap before them) does nothing: still the light theme' 'light' (Ini-Val $app 'view' 'theme' 'light' 300)
         Start-Sleep -Milliseconds 500
     Bar-Click $g ($g.W - $g.Off - 3)                                                      # the very right edge: still the button
     CkEq 'T28.10 the button reaches the right edge of the bar: a click 3 px from it switches back to dark' 'dark' (Ini-Val $app 'view' 'theme' 'dark')
@@ -2548,7 +2562,7 @@ function Test-T28 {
         $why = 'differing pixels ' + $look.Count + ', rim plain ' + $look.Rim + ', strongest rgb(' + ($look.Best -join ',') + ')'
         Ck ('T28.12 ' + $th + ': hovered, the button is filled with the accent (the same as a hovered menu) ...') ($look.Rim -and $look.Count -gt 20 -and $look.Count -lt 250) $why
         Ck ('T28.13 ' + $th + ': ... and the icon is at full strength in the on-accent colour, not faded') (Near-Rgb $look.Best $p.onAccent 2) $why
-        Mouse $g.Bar 0x200 ($g.W - 2 * $g.Bw - 40) $y 0                              # away from it (free bar)
+        Mouse $g.Bar 0x200 ($g.W - 3 * $g.Bw - 1) $y 0                               # away from it (the gap left of the three buttons: no button, no hot panel)
         Start-Sleep -Milliseconds 300
         $look = Btn-Look $app $g $p.face
         $want = Mix-Rgb $p.face $p.text $op
@@ -2564,24 +2578,24 @@ function Test-T28 {
 }
 
 # =========================================================================================================== T29
-# the word wrap button: the left one of the menu bar's two buttons (the theme button is flush right, right of it). one click = alt+z (word wrap on / off); its icon is
+# the word wrap button: the middle one of the status bar's three buttons (always on top left of it, the theme button flush right, right of it). one click = alt+z (word wrap on / off); its icon is
 # BAR_BTN_OPACITY percent opaque while wrap is off and BAR_BTN_OPACITY_ON while it is on. and the resize: the edit re-wraps once per size, a drag of a big
 # wrapped document does not block for it every step (the last size gets its wrap after a pause)
 function Test-T29 {
     $pal = Read-Palette
     $app = Start-App
     $g = Bar-Geo $app
-    $g.Off = $g.Bw                                                                  # the wrap button is the one left of the theme button
+    $g.Off = $g.Bw                                                                  # the wrap button is the one left of the theme button (and right of the always on top one)
     $edit0 = Get-Edit $app
     $look0 = Btn-Look $app $g $pal.dark.face
-    Ck 'T29.1 word wrap off: an icon at the very right, nothing around it' (($look0.Count -gt 15) -and $look0.Rim) ('differing pixels ' + $look0.Count + ', rim plain ' + $look0.Rim)
+    Ck 'T29.1 word wrap off: an icon in its button (the second from the right), nothing around it' (($look0.Count -gt 15) -and $look0.Rim) ('differing pixels ' + $look0.Count + ', rim plain ' + $look0.Rim)
     $want = Mix-Rgb $pal.dark.face $pal.dark.text $IDM.BAR_BTN_OPACITY
     Ck 'T29.2 ... drawn at the resting opacity' (Near-Rgb $look0.Best $want 4) ('strongest pixel rgb(' + ($look0.Best -join ',') + '), wanted about rgb(' + ($want -join ',') + ')')
     if ([U]::Dpi([long]$app.Main) -eq 96) {                                      # (the rows of the icon are worked out here for 96 dpi)
         $row0 = -1
         for ($y = 0; $y -lt $look0.H -and $row0 -lt 0; $y++) { for ($x = 0; $x -lt $look0.Bw; $x++) { if ($look0.Mask[$y * $look0.Bw + $x]) { $row0 = $y; break } } }
-        $wantRow = [int][Math]::Floor(($g.H - 1 - $IDM.BAR_BTN_ICON) / 2) + $IDM.BAR_WRAP_ICON_DY + 1
-        Ck 'T29.2b ... and it sits BAR_WRAP_ICON_DY px below the middle of its button (first icon row = the box centred in the button + the offset + 1: the first line is the second row of the box)' ($row0 -eq $wantRow) ('first icon row ' + $row0 + ' px below the top of the bar, wanted ' + $wantRow)
+        $wantRow = [int][Math]::Floor(($g.H - $IDM.BAR_BTN_ICON) / 2) + $IDM.BAR_WRAP_ICON_DY + 1
+        Ck 'T29.2b ... and it sits BAR_WRAP_ICON_DY px below the middle of its button (the button is as high as the status bar: first icon row = the box centred in it + the offset + 1: the first line is the second row of the box)' ($row0 -eq $wantRow) ('first icon row ' + $row0 + ' px below the top of the status bar, wanted ' + $wantRow)
     }
     Bar-Click $g ($g.W - $g.Off - [int]($g.Bw / 2))
     Start-Sleep -Milliseconds 700
@@ -2620,8 +2634,8 @@ function Test-T29 {
 }
 
 # =========================================================================================================== T30
-# the tooltips of the two bar buttons (menu.c "tooltips"): once the pointer has rested BAR_TIP_DELAY ms on a button, a small popup (class mp_tip) shows right under the bar with its right
-# edge on the button's: what the button does + its key combo (read from the menu item that runs the same command). it looks like a menu popup (the face2 fill, the text colour), never takes
+# the tooltips of the status bar's icon buttons (status.c "TipShow"): once the pointer has rested BAR_TIP_DELAY ms on a button, a small popup (class mp_tip) shows right ABOVE the status bar (its bottom 2 px
+# above the button's top) with its right edge on the button's: what the button does + its key combo (read from the menu item that runs the same command). it looks like a menu popup (the face2 fill, the text colour), never takes
 # the mouse, follows the pointer from one button to the other, and goes when the pointer leaves, on a click (and then stays away until the pointer has left and returned), and after BAR_TIP_SHOW ms.
 # like the hover of T28 it needs the probe build (tools\probe.bat /DSHOTDC /DMENU_NO_TRACK): the bar asks the system for a mouse-leave message and the system sends it at once for a synthetic
 # hover on a private desktop, which would end every hover before the delay is over: skipped on a normal exe
@@ -2649,14 +2663,16 @@ function Test-T30 {
     if ([long](Snd $g.Bar (0x8000 + 91) 0 0) -ne 0x4D494E54) { Skip 'T30 button tooltips' 'this exe has no WM_APP + 91 (build the probe: tools\probe.bat /DSHOTDC /DMENU_NO_TRACK, run with -Exe build\probe\notepad-mint.exe)'; return }
     $delay = $IDM.BAR_TIP_DELAY; $show = $IDM.BAR_TIP_SHOW
     $y = [int]($g.H / 2)
-    $xWrap = $g.W - $g.Bw - [int]($g.Bw / 2)                                     # the middle of the word wrap button (left) ...
-    $xTheme = $g.W - [int]($g.Bw / 2)                                            # ... and of the theme button (flush right)
-    $away = $g.W - 2 * $g.Bw - 40                                                # free bar, left of both buttons
-    $bar = [U]::WRect($g.Bar)                                                    # the bar in screen coordinates
+    $xWrap = Btn-X $g $g.Bw                                                      # the middle of the word wrap button (the middle one) ...
+    $xTheme = Btn-X $g 0                                                         # ... of the theme button (flush right) ...
+    $xTop = Btn-X $g (2 * $g.Bw)                                                 # ... and of the always on top button (left of the three)
+    $away = $g.W - 3 * $g.Bw - 1                                                 # the gap left of the three buttons: no button, no hot panel
+    $bar = [U]::WRect($g.Bar)                                                    # the status bar in screen coordinates
+    $gap = Sdpi $g 2                                                               # S(2): tip bottom = button top - S(2)
 
-    Mouse $g.Bar 0x200 20 $y 0                                                   # a menu title: no tip for it
+    Mouse $g.Bar 0x200 20 $y 0                                                   # a text panel (the position): no tip for it
     Start-Sleep -Milliseconds ($delay + 400)
-    Ck 'T30.1 a menu title gets no tip' ((Tip-Win $app) -eq 0) 'a tip showed over a menu title'
+    Ck 'T30.1 a text panel of the status bar gets no tip' ((Tip-Win $app) -eq 0) 'a tip showed over a text panel'
     Mouse $g.Bar 0x200 $xWrap $y 0                                               # the pointer arrives on the word wrap button
     Start-Sleep -Milliseconds ([int]($delay / 4))
     Ck 'T30.2 a quarter of the delay later there is no tip yet' ((Tip-Win $app) -eq 0) 'a tip was up almost at once'
@@ -2665,7 +2681,7 @@ function Test-T30 {
     if (-not $tip) { return }
     CkEq 'T30.4 word wrap button: what it does and its key combo (the one the menu shows)' 'toggle word wrap (alt+z)' ([U]::Text([long]$tip))
     $t = [U]::WRect([long]$tip)
-    Ck 'T30.5 ... right under the bar' (($t[1] -ge $bar[3]) -and ($t[1] -le $bar[3] + 6)) ('tip top ' + $t[1] + ', bar bottom ' + $bar[3])
+    Ck 'T30.5 ... right ABOVE the status bar: its bottom is S(2) above the button''s top' ([Math]::Abs($t[3] - ($bar[1] - $gap)) -le 1) ('tip bottom ' + $t[3] + ', button top ' + $bar[1] + ', gap ' + $gap)
     Ck 'T30.6 ... with its right edge on the right edge of the button' ([Math]::Abs($t[2] - ($bar[2] - $g.Bw)) -le 1) ('tip right ' + $t[2] + ', button right ' + ($bar[2] - $g.Bw))
     CkEq 'T30.7 ... and it never takes the mouse (WM_NCHITTEST says HTTRANSPARENT)' -1 (Snd $tip 0x84 0 0)
     $look = Tip-Look $tip $pal.dark.face2
@@ -2682,7 +2698,7 @@ function Test-T30 {
     if (-not $tip2) { return }
     CkEq 'T30.12 theme button: what it does and its key combo' 'toggle dark / light theme (alt+x)' ([U]::Text([long]$tip2))
     $t = [U]::WRect([long]$tip2)
-    Ck 'T30.13 ... with its right edge on the right edge of the bar (the theme button is flush right)' ([Math]::Abs($t[2] - $bar[2]) -le 1) ('tip right ' + $t[2] + ', bar right ' + $bar[2])
+    Ck 'T30.13 ... with its right edge on the right edge of the bar (the theme button is flush right), again above the bar' (([Math]::Abs($t[2] - $bar[2]) -le 1) -and ([Math]::Abs($t[3] - ($bar[1] - $gap)) -le 1)) ('tip right ' + $t[2] + ', bar right ' + $bar[2] + ', tip bottom ' + $t[3] + ', bar top ' + $bar[1])
     Ck 'T30.14 ... and the first tip is gone (one tip at a time)' (-not [U]::Visible([long]$tip)) 'the first tip window is still visible'
 
     Mouse $g.Bar 0x200 $away $y 0                                                # the pointer leaves the buttons
@@ -2699,6 +2715,195 @@ function Test-T30 {
     Ck 'T30.18 once the pointer has left and returned the tip shows again' ([bool]$tip4) 'no tip after the pointer returned'
     if ($tip4) { Ck ('T30.19 the tip goes by itself after ' + $show + ' ms') (Gone ([long]$tip4) ($show + 2500)) 'still visible long after BAR_TIP_SHOW' }
     Mouse $g.Bar 0x200 $away $y 0
+    Mouse $g.Bar 0x200 $xTop $y 0                                                # the always on top button
+    $tip5 = WaitFor { $h = Tip-Win $app; if ($h -and ([U]::Text($h) -like 'toggle always on top*')) { $h } } ($delay + 2000)
+    Ck 'T30.20 always on top button: what it does and its key combo' ([bool]$tip5) ('the tip text is [' + (Show ([U]::Text((Tip-Win $app)))) + ']')
+    if ($tip5) {
+        CkEq 'T30.21 ... the text' 'toggle always on top (alt+a)' ([U]::Text([long]$tip5))
+        $t = [U]::WRect([long]$tip5)
+        Ck 'T30.22 ... right edge on the button''s (2 buttons left of the bar''s right edge), bottom S(2) above the bar' (([Math]::Abs($t[2] - ($bar[2] - 2 * $g.Bw)) -le 1) -and ([Math]::Abs($t[3] - ($bar[1] - $gap)) -le 1)) ('tip right ' + $t[2] + ', button right ' + ($bar[2] - 2 * $g.Bw) + ', tip bottom ' + $t[3] + ', bar top ' + $bar[1])
+    }
+    Mouse $g.Bar 0x200 $away $y 0
+}
+
+# =========================================================================================================== T53
+# the status bar's buttons beyond theme / word wrap (status.c, main.c, menu.c) and view > toolbar menu. (T50 is the always on top WINDOW test in view_test.ps1; this one drives the button and the option.)
+#   - the always on top button, the left one of the three (2 * BAR_BTN_W from the right edge): a click toggles WS_EX_TOPMOST of the main window, its icon is BAR_BTN_OPACITY percent opaque at rest and BAR_BTN_OPACITY_ON while the window is topmost
+#   - view > toolbar menu (IDM_VIEW_TOOLBAR, settings.ini [view] toolbar=0/1, written when the window closes, read at the next start): hides the menu bar (mp_menubar), the editor moves up by its height, a 4th button (a hamburger, BAR_MENU_OPACITY) appears
+#     flush right with the other three one button further left, and the status bar is forced visible (view > status bar / ctrl+u does nothing, the ini's statusbar value is left alone)
+#   - the hamburger opens an mp_popup (file / edit / format / view / help, each a submenu) whose right edge is the status bar's right edge and whose bottom is the status bar's top; alt (WM_SYSCOMMAND SC_KEYMENU,
+#     lParam 0) opens the same popup with the first item selected, alt + a mnemonic (f e o v h) opens it AND that submenu: two mp_popup windows
+#   - the position panel shows " *" while text is selected; the option off shows the menu bar again
+# the hover of the hamburger (its tip "menu (alt)" above the bar, its accent fill) needs the probe build, like T28 / T30: skipped otherwise
+function Popups($app) { @([U]::Tops($app.Pid, $true) | Where-Object { [U]::Cls($_) -eq 'mp_popup' }) }
+function Bar-Press($g, [int]$x) { Pst $g.Bar 0x201 1 ((([long]([int]($g.H / 2))) -shl 16) -bor ([long]$x)) }   # WM_LBUTTONDOWN posted: a click on the hamburger runs a menu loop inside it, a sent message would not return
+function Wait-Popups($app, [int]$n, [int]$ms = 2500) { [void](WaitFor { @(Popups $app).Count -eq $n } $ms); return @(Popups $app).Count }   # how many mp_popup windows are up once there are $n (or the time is up)
+function Popups-Closed($app) { Close-Dialogs $app; return ((Wait-Popups $app 0 2000) -eq 0) }
+function Ini-Opt($app, [string]$sec, [string]$key) { $i = Read-Ini $app.Ini; if ($i.ContainsKey($sec) -and $i[$sec].ContainsKey($key)) { return [string]$i[$sec][$key] } else { return '' } }
+function Pop-Accent([long]$h, $acc) {                                            # the pixels of a popup window that are the accent colour (the selected item)
+    $bmp = [U]::Grab($h); $n = 0
+    try { for ($y = 0; $y -lt $bmp.Height; $y++) { for ($x = 0; $x -lt $bmp.Width; $x++) { $c = $bmp.GetPixel($x, $y); if ([Math]::Abs($c.R - $acc[0]) + [Math]::Abs($c.G - $acc[1]) + [Math]::Abs($c.B - $acc[2]) -le 6) { $n++ } } } } finally { $bmp.Dispose() }
+    return $n
+}
+function Test-T53 {
+    $pal = Read-Palette
+    if (-not $pal) { Skip 'T53 status buttons' 'could not parse the g_themes palette table in src\ui.c'; return }
+    $face = $pal.dark.face; $txt = $pal.dark.text
+    $op = $IDM.BAR_BTN_OPACITY; $opOn = $IDM.BAR_BTN_OPACITY_ON; $opMenu = $IDM.BAR_MENU_OPACITY
+    $app = Start-App                                                             # dark, menu bar, status bar
+    [void][Nd]::Size([long]$app.Main, 900, 600)
+    Start-Sleep -Milliseconds 400
+    $g = Bar-Geo $app
+    $bar = Chrome-Kid $app 'mp_menubar'
+    $edit0 = Get-Edit $app
+    $at = $g.Clone(); $at.Off = 2 * $g.Bw                                        # the always on top button
+
+    # ---- the always on top button
+    Ck 'T53.1 the window starts without always on top (no WS_EX_TOPMOST)' (([U]::ExStyle([long]$app.Main) -band 8) -eq 0) 'the window is topmost at the start'
+    $look = Btn-Look $app $at $face
+    Ck 'T53.2 the always on top button (third from the right): an icon at the resting opacity, nothing around it' (($look.Count -gt 15) -and ($look.Count -lt 200) -and $look.Rim -and (Near-Rgb $look.Best (Mix-Rgb $face $txt $op) 4)) ('differing pixels ' + $look.Count + ', rim plain ' + $look.Rim + ', strongest rgb(' + ($look.Best -join ',') + '), wanted about rgb(' + ((Mix-Rgb $face $txt $op) -join ',') + ')')
+    Bar-Click $g (Btn-X $g $at.Off)
+    Ck 'T53.3 a click on it makes the main window topmost (WS_EX_TOPMOST)' ([bool](WaitFor { ([U]::ExStyle([long]$app.Main) -band 8) -ne 0 } 3000)) 'no WS_EX_TOPMOST 3 s after the click'
+    Start-Sleep -Milliseconds 400
+    $look = Btn-Look $app $at $face
+    Ck 'T53.4 ... and its icon is brighter now (BAR_BTN_OPACITY_ON)' (Near-Rgb $look.Best (Mix-Rgb $face $txt $opOn) 4) ('strongest rgb(' + ($look.Best -join ',') + '), wanted about rgb(' + ((Mix-Rgb $face $txt $opOn) -join ',') + ')')
+    Ck 'T53.5 ... it is that button and no other: the editor is the same window (no word wrap) and the theme is still dark' (((Get-Edit $app) -eq $edit0) -and ((Ini-Val $app 'view' 'theme' 'light' 300) -ne 'light')) 'the click toggled word wrap or the theme as well'
+    Bar-Click $g (Btn-X $g $at.Off)
+    Ck 'T53.6 a second click takes the topmost style off again' ([bool](WaitFor { ([U]::ExStyle([long]$app.Main) -band 8) -eq 0 } 3000)) 'still WS_EX_TOPMOST 3 s after the second click'
+    Start-Sleep -Milliseconds 400
+    $look = Btn-Look $app $at $face
+    Ck 'T53.7 ... and the icon is back at the resting opacity' (Near-Rgb $look.Best (Mix-Rgb $face $txt $op) 4) ('strongest rgb(' + ($look.Best -join ',') + ')')
+    Cmd $app 'IDM_VIEW_ONTOP'
+    [void](WaitFor { ([U]::ExStyle([long]$app.Main) -band 8) -ne 0 } 3000)
+    Start-Sleep -Milliseconds 400
+    $look = Btn-Look $app $at $face
+    Ck 'T53.8 view > always on top (the command alt+a runs) lights the button too' ((([U]::ExStyle([long]$app.Main) -band 8) -ne 0) -and (Near-Rgb $look.Best (Mix-Rgb $face $txt $opOn) 4)) ('strongest rgb(' + ($look.Best -join ',') + ')')
+    Cmd $app 'IDM_VIEW_ONTOP'
+    [void](WaitFor { ([U]::ExStyle([long]$app.Main) -band 8) -eq 0 } 3000)
+
+    # ---- view > toolbar menu on
+    Ck 'T53.9 the menu bar is visible and the toolbar option is off at the start (default 0)' (([U]::Visible([long]$bar)) -and ((Ini-Opt $app 'view' 'toolbar') -ne '1')) 'the menu bar is hidden or toolbar=1 already'
+    $barH = ([U]::WRect([long]$bar))[3] - ([U]::WRect([long]$bar))[1]
+    $e0 = [U]::WRect((Get-Edit $app))
+    Cmd $app 'IDM_VIEW_TOOLBAR'
+    Ck 'T53.10 ... the menu bar window is hidden' ([bool](WaitFor { -not [U]::Visible([long]$bar) } 3000)) 'mp_menubar is still visible'
+    $up = WaitFor { $r = [U]::WRect((Get-Edit $app)); if (($e0[1] - $r[1]) -eq $barH) { $r } } 3000
+    Ck 'T53.11 ... and the editor moved up by the height of the menu bar' ([bool]$up) ('editor top ' + (([U]::WRect((Get-Edit $app)))[1]) + ' was ' + $e0[1] + ', the menu bar is ' + $barH + ' px high')
+    $g = Bar-Geo $app
+    Ck 'T53.12 the status bar is visible' ([U]::Visible([long]$g.Bar)) 'the status bar is hidden'
+    $hb = $g.Clone(); $hb.Off = 0
+    $look = Btn-Look $app $hb $face
+    Ck 'T53.13 the hamburger button is flush right: an icon of its own (BAR_MENU_OPACITY), nothing around it' (($look.Count -gt 10) -and ($look.Count -lt 200) -and $look.Rim -and (Near-Rgb $look.Best (Mix-Rgb $face $txt $opMenu) 4)) ('differing pixels ' + $look.Count + ', rim plain ' + $look.Rim + ', strongest rgb(' + ($look.Best -join ',') + '), wanted about rgb(' + ((Mix-Rgb $face $txt $opMenu) -join ',') + ')')
+    $th = $g.Clone(); $th.Off = $g.Bw
+    $look = Btn-Look $app $th $face
+    Ck 'T53.14 the theme button moved one button left (a moon in the dark theme)' (($look.Count -gt 20) -and $look.Rim -and ((Look-Asym $look) -gt 12)) ('differing pixels ' + $look.Count + ', rim plain ' + $look.Rim + ', mirror mismatches ' + (Look-Asym $look))
+    $oa = $g.Clone(); $oa.Off = 3 * $g.Bw
+    $look = Btn-Look $app $oa $face
+    Ck 'T53.15 ... and so did always on top (now third from the right plus one: 3 * BAR_BTN_W from the edge)' (($look.Count -gt 15) -and $look.Rim) ('differing pixels ' + $look.Count + ', rim plain ' + $look.Rim)
+    $sbIni = Ini-Opt $app 'view' 'statusbar'
+    Cmd $app 'IDM_VIEW_STATUS'                                                   # ctrl+u: nothing while the toolbar is on
+    Start-Sleep -Milliseconds 600
+    Ck 'T53.16 view > status bar (ctrl+u) while the toolbar option is on leaves the status bar visible ...' ([U]::Visible([long]$g.Bar)) 'the status bar was hidden'
+    CkEq 'T53.17 ... and the statusbar value of settings.ini is not touched' $sbIni (Ini-Opt $app 'view' 'statusbar')
+    $dpi = [U]::Dpi([long]$app.Main)
+    [void][Nd]::Size([long]$app.Main, 100, 50)
+    $w = WaitFor { $r = [U]::WRect([long]$app.Main); if (($r[2] - $r[0]) -le 2000) { $r } } 3000
+    $sbr = [U]::WRect([long]$g.Bar)
+    $frameW = ($w[2] - $w[0]) - ($sbr[2] - $sbr[0])
+    $needW = $frameW + (Sdpi $g 4) + 4 * $g.Bw + 5 * (Sdpi $g 16)
+    Ck 'T53.18 the window''s minimum width counts all four buttons (frame + 4 + 4 * BAR_BTN_W + the panel padding at least)' (($w[2] - $w[0]) -gt $needW) ('minimum width ' + ($w[2] - $w[0]) + ', needs more than ' + $needW)
+    [void][Nd]::Size([long]$app.Main, 900, 600)
+    Start-Sleep -Milliseconds 400
+    $g = Bar-Geo $app; $y = [int]($g.H / 2)
+
+    # ---- the hover (probe build only)
+    $probe = ([long](Snd $g.Bar (0x8000 + 91) 0 0)) -eq 0x4D494E54
+    if ($probe) {
+        $hb = $g.Clone(); $hb.Off = 0
+        Mouse $g.Bar 0x200 (Btn-X $g 0) $y 0
+        $tip = WaitFor { Tip-Win $app } ($IDM.BAR_TIP_DELAY + 2000)
+        Ck 'T53.19 resting on the hamburger shows its tip "menu (alt)"' ([bool]$tip -and ([U]::Text([long]$tip) -ceq 'menu (alt)')) ('tip text [' + (Show ([U]::Text((Tip-Win $app)))) + ']')
+        if ($tip) {
+            $t = [U]::WRect([long]$tip); $sr = [U]::WRect([long]$g.Bar)
+            Ck 'T53.20 ... above the status bar (bottom S(2) over it) with its right edge on the bar''s right edge' (([Math]::Abs($t[2] - $sr[2]) -le 1) -and ([Math]::Abs($t[3] - ($sr[1] - (Sdpi $g 2))) -le 1)) ('tip ' + ($t -join ',') + ', status bar ' + ($sr -join ','))
+        }
+        $look = Btn-Look $app $hb $pal.dark.accent
+        Ck 'T53.21 hovered, the hamburger is filled with the accent and its icon is at full strength in the on-accent colour' ($look.Rim -and (Near-Rgb $look.Best $pal.dark.onAccent 2)) ('rim plain ' + $look.Rim + ', strongest rgb(' + ($look.Best -join ',') + ')')
+        Mouse $g.Bar 0x200 ($g.W - 4 * $g.Bw - 1) $y 0
+        Start-Sleep -Milliseconds 300
+    } else { Skip 'T53.19-T53.21 the hamburger hover and tip' 'this exe has no WM_APP + 91 (build the probe: tools\probe.bat /DSHOTDC /DMENU_NO_TRACK, run with -Exe build\probe\notepad-mint.exe)' }
+
+    # ---- the hamburger opens the main popup
+    Bar-Press $g (Btn-X $g 0)
+    $n = Wait-Popups $app 1
+    CkEq 'T53.22 a click on the hamburger opens one popup (class mp_popup)' 1 $n
+    $p = @(Popups $app)
+    if ($p.Count -ge 1) {
+        $r = [U]::WRect([long]$p[0]); $sr = [U]::WRect([long]$g.Bar)
+        Ck 'T53.23 ... its right edge is the status bar''s right edge and its bottom is the status bar''s top' (([Math]::Abs($r[2] - $sr[2]) -le 2) -and ([Math]::Abs($r[3] - $sr[1]) -le 2)) ('popup ' + ($r -join ',') + ', status bar ' + ($sr -join ','))
+    }
+    Ck 'T53.24 esc closes it' (Popups-Closed $app) 'a popup is still up'
+
+    # ---- alt (SC_KEYMENU)
+    Pst $app.Main 0x0112 0xF100 0
+    CkEq 'T53.25 SC_KEYMENU with lParam 0 (a tap on alt) opens the popup: one window' 1 (Wait-Popups $app 1)
+    $p = @(Popups $app)
+    if ($p.Count -ge 1) {
+        $r = [U]::WRect([long]$p[0]); $sr = [U]::WRect([long]$g.Bar)
+        Ck 'T53.26 ... in the same place as after a click on the hamburger' (([Math]::Abs($r[2] - $sr[2]) -le 2) -and ([Math]::Abs($r[3] - $sr[1]) -le 2)) ('popup ' + ($r -join ',') + ', status bar ' + ($sr -join ','))
+        $acc = Pop-Accent ([long]$p[0]) $pal.dark.accent
+        Ck 'T53.27 ... with the first item selected (accent fill in the popup)' ($acc -gt 20) ('accent pixels ' + $acc)
+    }
+    Ck 'T53.28 esc closes it' (Popups-Closed $app) 'a popup is still up'
+    Bar-Press $g (Btn-X $g 0)
+    [void](Wait-Popups $app 1)
+    $p = @(Popups $app)
+    if ($p.Count -ge 1) { $acc = Pop-Accent ([long]$p[0]) $pal.dark.accent; Ck 'T53.29 opened by a click (the pointer is not on an item) nothing is selected: no accent fill' ($acc -lt 20) ('accent pixels ' + $acc) }
+    [void](Popups-Closed $app)
+    $k = 29
+    foreach ($m in @(@('f', 'file'), @('e', 'edit'), @('o', 'format'), @('v', 'view'), @('h', 'help'))) {
+        $k++
+        Pst $app.Main 0x0112 0xF100 ([int][char]$m[0])
+        $n = Wait-Popups $app 2
+        CkEq ('T53.' + $k + ' alt + ' + $m[0] + ' opens the popup and its ' + $m[1] + ' submenu: two mp_popup windows') 2 $n
+        [void](Popups-Closed $app)
+    }
+
+    # ---- the selection star in toolbar mode
+    $ed = Get-Edit $app
+    Reset-Doc $app 'abc'
+    [void](Snd $ed $EM_SETSEL 0 2)
+    Ck 'T53.35 text selected (toolbar mode): the position ends with " *" ("1:3 *")' (Status-Has $app '^1:\d+ \* \| 1 L \| 3 B \|') ('status [' + (Status-Text $app) + ']')
+    [void](Snd $ed $EM_SETSEL 1 1)
+    Ck 'T53.36 nothing selected: no " *"' (Status-Has $app '^1:2 \| 1 L \| 3 B \|') ('status [' + (Status-Text $app) + ']')
+
+    # ---- the option is saved when the window closes, and the next start comes up in toolbar mode
+    Stop-App $app
+    CkEq 'T53.37 closing the window saves the option: settings.ini says [view] toolbar=1' '1' (Ini-Val $app 'view' 'toolbar' '1')
+    $app = Start-App '' $app.AppData
+    $bar = Chrome-Kid $app 'mp_menubar'
+    $g = Bar-Geo $app
+    Start-Sleep -Milliseconds 400
+    Ck 'T53.38 the next start is in toolbar mode: the menu bar hidden, the status bar visible' ((-not [U]::Visible([long]$bar)) -and [U]::Visible([long]$g.Bar)) ('menu bar visible ' + [U]::Visible([long]$bar) + ', status bar visible ' + [U]::Visible([long]$g.Bar))
+    $hb = $g.Clone(); $hb.Off = 0
+    $look = Btn-Look $app $hb $face
+    Ck 'T53.39 ... with the hamburger at the right end' (($look.Count -gt 10) -and $look.Rim -and (Near-Rgb $look.Best (Mix-Rgb $face $txt $opMenu) 4)) ('differing pixels ' + $look.Count + ', rim plain ' + $look.Rim + ', strongest rgb(' + ($look.Best -join ',') + ')')
+
+    # ---- off again
+    $e1 = [U]::WRect((Get-Edit $app))
+    Cmd $app 'IDM_VIEW_TOOLBAR'
+    Ck 'T53.40 view > toolbar menu off: the menu bar is shown again' ([bool](WaitFor { [U]::Visible([long]$bar) } 3000)) 'mp_menubar is still hidden'
+    $back = WaitFor { $r = [U]::WRect((Get-Edit $app)); if (($r[1] - $e1[1]) -eq $barH) { $r } } 3000
+    Ck 'T53.41 ... and the editor moved down by its height again' ([bool]$back) ('editor top ' + (([U]::WRect((Get-Edit $app)))[1]) + ', was ' + $e1[1] + ' with the toolbar on, the menu bar is ' + $barH + ' px high')
+    $g = Bar-Geo $app
+    $look = Btn-Look $app $g $face
+    Ck 'T53.42 the hamburger is gone: the theme button (a moon) is flush right again' (($look.Count -gt 20) -and $look.Rim -and ((Look-Asym $look) -gt 12)) ('differing pixels ' + $look.Count + ', rim plain ' + $look.Rim + ', mirror mismatches ' + (Look-Asym $look))
+    Cmd $app 'IDM_VIEW_STATUS'
+    Ck 'T53.43 ctrl+u hides the status bar again (it works outside toolbar mode)' ([bool](WaitFor { -not [U]::Visible([long]$g.Bar) } 3000)) 'the status bar is still visible'
+    Cmd $app 'IDM_VIEW_STATUS'
+    Ck 'T53.44 ... and shows it again' ([bool](WaitFor { [U]::Visible([long]$g.Bar) } 3000)) 'the status bar is still hidden'
+    Stop-App $app
+    CkEq 'T53.45 closing saves it: settings.ini says toolbar=0 again' '0' (Ini-Val $app 'view' 'toolbar' '0')
 }
 
 # =========================================================================================================== T31
@@ -3093,7 +3298,7 @@ if ($NoRun) { return }
 if ($deskName) { Info ('the app runs on a private desktop (' + $deskName + '): nothing shows on your screen and no keystroke can reach it (-Visible: real desktop)') }
 else { Info 'the app runs on the real desktop: its windows pop up and TAKE THE FOREGROUND (it activates itself at startup): do not type until the run is over' }
 try {
-    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43', 'T44', 'T45', 'T46', 'T47', 'T48', 'T49', 'T50', 'T51', 'T52')) { Run-Case $c }
+    foreach ($c in @('T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T15', 'T16', 'T17', 'T18', 'T19', 'T20', 'T21', 'T22', 'T23', 'T24', 'T25', 'T26', 'T28', 'T29', 'T30', 'T31', 'T32', 'T33', 'T34', 'T35', 'T36', 'T37', 'T38', 'T39', 'T40', 'T41', 'T42', 'T43', 'T44', 'T45', 'T46', 'T47', 'T48', 'T49', 'T50', 'T51', 'T52', 'T53')) { Run-Case $c }
 } finally {
     try { Stop-All } catch {}
     Kill-Mine

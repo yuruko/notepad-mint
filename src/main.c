@@ -9,7 +9,7 @@ static HWND   g_bar;
 static HACCEL g_accel;
 static WCHAR  g_title[PATH_CAP + 64];
 
-#define MIN_WIN_W 320
+#define MIN_WIN_W 280
 #define MIN_WIN_H 140
 #define DROP_ASK  10
 #define DND_TIMER 9
@@ -63,16 +63,16 @@ void AppUpdateTitle(void) {
     title[0] = 0;
     if (AppIsDirty()) wcopy(title, L"*", COUNTOF(title));
     wcat(title, AppDocName(), COUNTOF(title));
-    wcat(title, TITLE_TAIL, COUNTOF(title));
     if (wcmp(title, g_title) != 0) {
         wcopy(g_title, title, COUNTOF(g_title));
         SetWindowTextW(g_hwnd, title);
     }
 }
 
+
 static void EditArea(RECT *area) {
     RECT client;
-    int statusHeight = g_pf.statusbar ? StatusHeight() : 0;
+    int statusHeight = STATUS_ON ? StatusHeight() : 0;
     GetClientRect(g_hwnd, &client);
     area->left = 0;
     area->top = FrameHeight() + MenuBarHeight();
@@ -87,7 +87,7 @@ static void EditArea(RECT *area) {
 static void Layout(void) {
     RECT client, editRect;
     HDWP defer;
-    int statusHeight = g_pf.statusbar ? StatusHeight() : 0;
+    int statusHeight = STATUS_ON ? StatusHeight() : 0;
     GetClientRect(g_hwnd, &client);
     EditArea(&editRect);
     defer = BeginDeferWindowPos(3);
@@ -342,7 +342,7 @@ static void ToggleWrap(void) {
         return;
     }
     Layout();
-    if (g_bar) InvalidateRect(g_bar, NULL, FALSE);
+    if (g_status) InvalidateRect(g_status, NULL, FALSE);
     AppUpdateTitle();
     AppUpdateStatus();
 }
@@ -479,8 +479,13 @@ static void Cmd(int id) {
     case IDM_VIEW_ONTOP:
         SetWindowPos(g_hwnd, (GetWindowLongPtrW(g_hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) ? HWND_NOTOPMOST : HWND_TOPMOST,
                      0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        if (g_status) InvalidateRect(g_status, NULL, FALSE);
         break;
-    case IDM_VIEW_INVISIBLES: EditShowInvisibles(!EditInvisiblesShown()); break;
+    case IDM_VIEW_INVISIBLES:
+        g_pf.invisibles = !EditInvisiblesShown();
+        EditShowInvisibles(g_pf.invisibles);
+        if (g_status) InvalidateRect(g_status, NULL, FALSE);
+        break;
     case IDM_ZOOM_IN:       EditZoomStep(1); break;
     case IDM_ZOOM_OUT:      EditZoomStep(-1); break;
     case IDM_ZOOM_RESET:    EditZoomReset(); break;
@@ -753,11 +758,11 @@ static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
         }
         if ((wParam & 0xFFF0) == SC_KEYMENU && lParam != ' ') {
-            if (lParam == 0) {
+            int index = lParam ? MenuBarMnemonic((WCHAR)lParam) : -1;
+            if (!lParam) {
                 MenuBarActivate(0, 0);
-            } else {
-                int index = MenuBarMnemonic((WCHAR)lParam);
-                if (index >= 0) MenuBarActivate(index, 1);
+            } else if (index >= 0) {
+                MenuBarActivate(index, 1);
             }
             return 0;
         }

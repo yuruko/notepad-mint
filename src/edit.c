@@ -978,6 +978,51 @@ static int InvisibleHit(HWND hwnd, int row, int index, const POINT *pos, const P
     return delta >= -2 && delta <= 2;
 }
 
+static int EofEm(int pitch) {
+    return ClampInt((pitch - 2 * S(EOF_GAP)) * 2 / 3, 6, 64);
+}
+
+static HFONT EofFont(int pitch) {
+    static HFONT font, madeFor;
+    static int madePitch;
+    LOGFONTW lf;
+    if (font && madeFor == g_font && madePitch == pitch) return font;
+    if (font) DeleteObject(font);
+    memset(&lf, 0, sizeof lf);
+    lf.lfHeight = -EofEm(pitch);
+    lf.lfWeight = FW_NORMAL;
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lf.lfQuality = ANTIALIASED_QUALITY;
+    wcopy(lf.lfFaceName, g_pf.font, 32);
+    font = CreateFontIndirectW(&lf);
+    madeFor = g_font; madePitch = pitch;
+    return font;
+}
+
+static void InvisibleEof(HDC hdc, int length, int pitch, const RECT *view, COLORREF color) {
+    static const WCHAR letters[] = L"eof";
+    SIZE size = { 0, 0 };
+    TEXTMETRICW tm;
+    POINT pos;
+    HFONT font;
+    HGDIOBJ oldFont;
+    int i, x, step, xHeight, baseline;
+    if (!IndexPos(length, &pos) || pos.y + pitch <= view->top || pos.y >= view->bottom) return;
+    font = EofFont(pitch);
+    if (!font) return;
+    oldFont = SelectObject(hdc, font);
+    GetTextMetricsW(hdc, &tm);
+    GetTextExtentPoint32W(hdc, L"o", 1, &size);
+    xHeight = EofEm(pitch) / 2;
+    step = size.cx > S(2) ? size.cx : S(2);
+    x = EditIsRtl() ? pos.x - S(1) - 2 * step - size.cx : pos.x + S(1);
+    baseline = pos.y + (pitch - 3 * xHeight - 2 * S(EOF_GAP)) / 2 + xHeight;
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, color);
+    for (i = 0; i < 3; i++) TextOutW(hdc, x + i * step, baseline + i * (xHeight + S(EOF_GAP)) - tm.tmAscent, letters + i, 1);
+    SelectObject(hdc, oldFont);
+}
+
 static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip) {
     RECT view, formatRect;
     HDC ownDc = NULL;
@@ -1045,6 +1090,7 @@ static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip) {
             previousKind = kind; previousX = pos.x; previousY = pos.y; previousColor = color;
         }
     }
+    if (last >= lineCount) InvisibleEof(hdc, length, pitch, &view, InvisibleColor(normal, C_EDIT_FG));
     RestoreDC(hdc, saved);
 done:
     if (caretHidden) ShowCaret(hwnd);

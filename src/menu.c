@@ -16,7 +16,6 @@ static int         g_np;
 static HWND        g_bar, g_owner;
 static MenuStateFn g_stateFn;
 static int         g_hot = -1, g_open = -1, g_kbd = -1, g_barIdx = -1, g_barH;
-static int         g_hotBtn = -1;
 static int         g_itemL[MENU_BAR_COUNT + 1];
 static BOOL        g_active, g_done, g_cancel;
 static int         g_result;
@@ -26,6 +25,7 @@ static RECT        g_doubleRect;
 static DWORD       g_doubleTime;
 static int         g_doubleArmed;
 static int         g_cues;
+static int         g_hotTheme;
 
 static void Strip(const WCHAR *src, WCHAR *dst, int cap) {
     int j = 0;
@@ -69,7 +69,7 @@ static BOOL Selectable(const Pop *pop, int index) {
 
 static void BarLayout(void) {
     HDC hdc = GetDC(NULL);
-    HGDIOBJ oldFont = SelectObject(hdc, g_fontMenu);
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontBar);
     TEXTMETRICW tm;
     WCHAR buf[64];
     int i, x = 0;
@@ -109,95 +109,23 @@ int MenuBarMnemonic(WCHAR ch) {
     return -1;
 }
 
-enum { TB_LIGHT, TB_DARK, TB_WRAP };
-enum { BT_WRAP, BT_THEME, BT_COUNT };
-static const struct { int id; const WCHAR *tip; } g_btn[BT_COUNT] = {
-    [BT_WRAP]  = { IDM_FMT_WRAP,     L"toggle word wrap" },
-    [BT_THEME] = { IDM_THEME_TOGGLE, L"toggle dark / light theme" },
-};
-#define ICON_SS  8
-#define ICON_MAX 64
-
 int MenuBarMinWidth(void) {
     if (!g_barH) BarLayout();
-    return g_itemL[MENU_BAR_COUNT] + BT_COUNT * S(BAR_BTN_W);
+    return g_itemL[MENU_BAR_COUNT] + S(BAR_THEME_W);
 }
 
-static void BtnRect(int clientWidth, int button, RECT *rect) {
-    rect->left = clientWidth - (BT_COUNT - button) * S(BAR_BTN_W);
-    rect->right = rect->left + S(BAR_BTN_W);
-    rect->top = 0;
-    rect->bottom = g_barH - S(1);
+static void ThemeRect(HWND hwnd, RECT *rect) {
+    GetClientRect(hwnd, rect);
+    rect->left = rect->right - S(BAR_THEME_W);
+    rect->bottom -= S(1);
 }
 
-static int BtnHit(HWND hwnd, int x, int y) {
-    RECT client, rect;
-    int button;
-    if (y < 0 || y >= g_barH) return -1;
-    GetClientRect(hwnd, &client);
-    for (button = 0; button < BT_COUNT; button++) {
-        BtnRect(client.right, button, &rect);
-        if (x >= rect.left && x < rect.right) return button;
-    }
-    return -1;
-}
-
-#define D(v) ((v) * 64)
-static int IconInside(int kind, int x, int y) {
-    int dx = x - D(28), dy = y - D(28), ax, ay, bx, by;
-    if (kind == TB_WRAP) {
-#define PX(k) ((k) * 299 - 149)
-        if (y >= PX(1) && y < PX(2) && x >= PX(1) && x < PX(11)) return 1;
-        if (y >= PX(3) && y < PX(4) && x >= PX(1) && x < PX(10)) return 1;
-        if (x >= PX(9) && x < PX(10) && y >= PX(3) && y < PX(7)) return 1;
-        if (y >= PX(6) && y < PX(7) && x >= PX(3) && x < PX(10)) return 1;
-        ax = x - PX(2); ay = y - (PX(6) + 150); if (ay < 0) ay = -ay;
-        if (ax >= 0 && x < PX(5) && ay * 2 <= ax + 150) return 1;
-        return y >= PX(9) && y < PX(10) && x >= PX(1) && x < PX(6);
-#undef PX
-    }
-    if (kind == TB_LIGHT) {
-        if (dx * dx + dy * dy < D(11) * D(11)) return 1;
-        if (dx < 0) dx = -dx;
-        if (dy < 0) dy = -dy;
-        if (dx < 154 && dy >= 1043 && dy < D(25)) return 1;
-        if (dy < 154 && dx >= 1043 && dx < D(25)) return 1;
-        return dx - dy < 217 && dy - dx < 217 && dx + dy >= 1448 && dx + dy < 2037;
-    }
-    ax = x - D(26); ay = y - D(30); bx = x - D(38); by = y - D(22);
-    return ax * ax + ay * ay < D(22) * D(22) && bx * bx + by * by >= D(19) * D(19);
-}
-#undef D
-
-static BYTE g_icCov[3][ICON_MAX * ICON_MAX];
-static int  g_icSize[3];
-
-static void IconCoverage(int kind, int size, BYTE *out) {
-    int grid[ICON_MAX * ICON_SS], count, i, j, subX, subY, coverage, shift;
-    count = size * ICON_SS;
-    shift = (size & 1) ? 0 : 1792 / size;
-    for (i = 0; i < count; i++) grid[i] = (2 * i + 1) * 56 * 32 / count - shift;
-    for (j = 0; j < size; j++) for (i = 0; i < size; i++) {
-            coverage = 0;
-            for (subY = 0; subY < ICON_SS; subY++) for (subX = 0; subX < ICON_SS; subX++) coverage += IconInside(kind, grid[i * ICON_SS + subX], grid[j * ICON_SS + subY]);
-            out[j * size + i] = (BYTE)coverage;
-        }
-}
-
-static void ThemeIcon(HDC hdc, int kind, int x, int y, int size, COLORREF fg, COLORREF bg, int opacity) {
-    int i, j, coverage, num, den = ICON_SS * ICON_SS * 100;
-    const BYTE *coverageMap;
-    if (size > ICON_MAX) size = ICON_MAX;
-    if (g_icSize[kind] != size) { IconCoverage(kind, size, g_icCov[kind]); g_icSize[kind] = size; }
-    coverageMap = g_icCov[kind];
-    for (j = 0; j < size; j++) {
-        for (i = 0; i < size; i++) {
-            coverage = coverageMap[j * size + i];
-            if (!coverage) continue;
-            num = coverage * opacity;
-            SetPixelV(hdc, x + i, y + j, num >= den ? fg : RGB(GetRValue(bg) + (GetRValue(fg) - GetRValue(bg)) * num / den, GetGValue(bg) + (GetGValue(fg) - GetGValue(bg)) * num / den, GetBValue(bg) + (GetBValue(fg) - GetBValue(bg)) * num / den));
-        }
-    }
+static BOOL ThemeHit(HWND hwnd, int x, int y) {
+    RECT rect;
+    POINT pt;
+    ThemeRect(hwnd, &rect);
+    pt.x = x; pt.y = y;
+    return PtInRect(&rect, pt);
 }
 
 static void BarPaint(HWND hwnd) {
@@ -206,7 +134,7 @@ static void BarPaint(HWND hwnd) {
     HBITMAP bitmap;
     HGDIOBJ oldBitmap, oldFont;
     RECT client, rect;
-    int i, iconSize = S(BAR_BTN_ICON);
+    int i;
     COLORREF idleText = RGB(
         GetRValue(C_FACE) + (GetRValue(C_TEXT) - GetRValue(C_FACE)) * 80 / 100,
         GetGValue(C_FACE) + (GetGValue(C_TEXT) - GetGValue(C_FACE)) * 80 / 100,
@@ -215,7 +143,7 @@ static void BarPaint(HWND hwnd) {
     memDc = CreateCompatibleDC(hdc);
     bitmap = CreateCompatibleBitmap(hdc, client.right, client.bottom);
     oldBitmap = SelectObject(memDc, bitmap);
-    oldFont = SelectObject(memDc, g_fontMenu);
+    oldFont = SelectObject(memDc, g_fontBar);
     FillC(memDc, &client, C_FACE);
     for (i = 0; i < (int)MENU_BAR_COUNT; i++) {
         BOOL on = (i == g_open || i == g_kbd || i == g_hot);
@@ -224,13 +152,11 @@ static void BarPaint(HWND hwnd) {
         if (on) FillC(memDc, &rect, C_ACCENT);
         TextC(memDc, g_menuEntries[i].title, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | CueFormat(), on ? C_ON_ACCENT : idleText);
     }
-    for (i = 0; i < BT_COUNT; i++) {
-        BOOL hot = (i == g_hotBtn);
-        int kind = i == BT_WRAP ? TB_WRAP : (ThemeGet() == THEME_LIGHT ? TB_LIGHT : TB_DARK);
-        int opacity = (i == BT_WRAP && g_pf.wrap) ? BAR_BTN_OPACITY_ON : BAR_BTN_OPACITY;
-        BtnRect(client.right, i, &rect);
-        if (hot) FillC(memDc, &rect, C_ACCENT);
-        ThemeIcon(memDc, kind, (rect.left + rect.right - iconSize) / 2, (rect.top + rect.bottom - iconSize) / 2 + (i == BT_WRAP ? S(BAR_WRAP_ICON_DY) : 0), iconSize, hot ? C_ON_ACCENT : C_TEXT, hot ? C_ACCENT : C_FACE, hot ? 100 : opacity);
+    {
+        int iconSize = S(BAR_BTN_ICON);
+        ThemeRect(hwnd, &rect);
+        if (g_hotTheme) FillC(memDc, &rect, C_ACCENT);
+        ThemeIconDraw(memDc, (rect.left + rect.right - iconSize) / 2, (rect.top + rect.bottom - iconSize) / 2, iconSize, g_hotTheme ? C_ON_ACCENT : C_TEXT, g_hotTheme ? C_ACCENT : C_FACE, g_hotTheme ? 100 : BAR_BTN_OPACITY);
     }
     BitBlt(hdc, 0, 0, client.right, client.bottom, memDc, 0, 0, SRCCOPY);
     SelectObject(memDc, oldFont);
@@ -240,92 +166,9 @@ static void BarPaint(HWND hwnd) {
     EndPaint(hwnd, &ps);
 }
 
-#define TIP_TIMER 1
-static HWND g_tip;
-
-static void TipHide(void) {
-    if (g_bar) KillTimer(g_bar, TIP_TIMER);
-    if (g_tip) DestroyWindow(g_tip);
-    g_tip = NULL;
-}
-
-static void TipShow(int button) {
-    WCHAR text[96];
-    const WCHAR *accel = MenuAccelOf(g_btn[button].id);
-    HDC hdc = GetDC(NULL);
-    HGDIOBJ oldFont = SelectObject(hdc, g_fontMenu);
-    TEXTMETRICW tm;
-    MONITORINFO mi;
-    RECT rect;
-    POINT pt;
-    int width, height;
-    wcopy(text, g_btn[button].tip, 96);
-    if (accel) { wcat(text, L" (", 96); wcat(text, accel, 96); wcat(text, L")", 96); }
-    GetTextMetricsW(hdc, &tm);
-    width = TextW(hdc, text, -1) + 2 * (BW + S(7));
-    height = tm.tmHeight + 2 * (BW + S(3));
-    SelectObject(hdc, oldFont);
-    ReleaseDC(NULL, hdc);
-    GetClientRect(g_bar, &rect);
-    BtnRect(rect.right, button, &rect);
-    pt.x = rect.right - width; pt.y = g_barH + S(2);
-    ClientToScreen(g_bar, &pt);
-    mi.cbSize = sizeof mi;
-    GetMonitorInfoW(MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST), &mi);
-    if (pt.x + width > mi.rcWork.right) pt.x = mi.rcWork.right - width;
-    if (pt.x < mi.rcWork.left) pt.x = mi.rcWork.left;
-    g_tip = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"mp_tip", text, WS_POPUP, pt.x, pt.y, width, height, GetParent(g_bar), NULL, g_hinst, NULL);
-    ShowWindow(g_tip, SW_SHOWNOACTIVATE);
-    SetTimer(g_bar, TIP_TIMER, BAR_TIP_SHOW, NULL);
-}
-
-static void TipTrack(int button) {
-    BOOL wasShown = g_tip != NULL;
-    TipHide();
-    if (button < 0 || g_active) return;
-    if (wasShown) TipShow(button);
-    else SetTimer(g_bar, TIP_TIMER, BAR_TIP_DELAY, NULL);
-}
-
-static LRESULT CALLBACK TipProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    switch (msg) {
-    case WM_NCHITTEST:
-        return (LRESULT)-1;
-    case WM_MOUSEACTIVATE:
-        return MA_NOACTIVATE;
-    case WM_ERASEBKGND:
-        return 1;
-    case WM_PAINT: {
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hwnd, &ps), memDc;
-        HBITMAP bitmap;
-        HGDIOBJ oldBitmap, oldFont;
-        RECT client, textRect;
-        WCHAR text[96];
-        int length = GetWindowTextW(hwnd, text, 96);
-        GetClientRect(hwnd, &client);
-        memDc = CreateCompatibleDC(hdc);
-        bitmap = CreateCompatibleBitmap(hdc, client.right, client.bottom);
-        oldBitmap = SelectObject(memDc, bitmap);
-        oldFont = SelectObject(memDc, g_fontMenu);
-        FillC(memDc, &client, C_FACE2);
-        Bevel(memDc, &client, BV_RAISED);
-        textRect = client; textRect.left = BW + S(7);
-        TextC(memDc, text, length, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, C_TEXT);
-        BitBlt(hdc, 0, 0, client.right, client.bottom, memDc, 0, 0, SRCCOPY);
-        SelectObject(memDc, oldFont);
-        SelectObject(memDc, oldBitmap);
-        DeleteObject(bitmap);
-        DeleteDC(memDc);
-        EndPaint(hwnd, &ps);
-        return 0; }
-    }
-    return DefWindowProcW(hwnd, msg, wParam, lParam);
-}
-
 static void PopMeasure(Pop *pop) {
     HDC hdc = GetDC(NULL);
-    HGDIOBJ oldFont = SelectObject(hdc, g_fontMenu);
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontBar);
     TEXTMETRICW tm;
     WCHAR buf[64];
     int i, labelWidth = 0, accelWidth = 0, y, textWidth, rowHeight;
@@ -365,7 +208,7 @@ static void PopDraw(Pop *pop, HDC hdc) {
     client.left = 0; client.top = 0; client.right = pop->width; client.bottom = pop->height;
     FillC(hdc, &client, C_FACE2);
     Bevel(hdc, &client, BV_RAISED);
-    SelectObject(hdc, g_fontMenu);
+    SelectObject(hdc, g_fontBar);
     for (i = 0; i < pop->count; i++) {
         const MenuItem *item = &pop->def->items[i];
         itemRect.left = BW; itemRect.right = pop->width - BW; itemRect.top = pop->itemTop[i]; itemRect.bottom = pop->itemTop[i] + pop->itemHeight[i];
@@ -622,11 +465,13 @@ static void RunMenu(HWND owner, int barIdx, int openPopup, const MenuDef *root, 
     DBG(L"runmenu", barIdx, g_active);
     if (g_active) return;
     g_active = TRUE; g_done = FALSE; g_cancel = FALSE; g_result = 0; g_haveRedisp = FALSE;
-    g_owner = owner; g_np = 0; g_hot = -1; g_hotBtn = -1; TipHide();
+    g_owner = owner; g_np = 0; g_hot = -1;
     g_barIdx = root ? -1 : barIdx;
     g_open = -1; g_kbd = -1;
     if (root) {
         PopOpen(0, root, x, y, anchorBottom, 0);
+        if (openPopup == -1) MoveSel(0, 1);
+        else if (openPopup >= 0) Activate(0, openPopup);
     } else if (openPopup) {
         OpenBarPopup(barIdx, FALSE);
     } else {
@@ -738,7 +583,7 @@ void MenuBarActivate(int index, int openPopup) {
 }
 
 void MenuPopup(HWND owner, const MenuDef *def, int x, int y, int anchorBottom) {
-    RunMenu(owner, -1, 1, def, x, y, anchorBottom);
+    RunMenu(owner, -1, -2, def, x, y, anchorBottom);
 }
 
 static LRESULT CALLBACK BarProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -754,11 +599,16 @@ static LRESULT CALLBACK BarProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 #endif
     case WM_MOUSEMOVE: {
         int index = BarHit(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
-        int button = index < 0 ? BtnHit(hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)) : -1;
-        if (index != g_hot || button != g_hotBtn) {
+        int theme = ThemeHit(hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+        if (index != g_hot || theme != g_hotTheme) {
             TRACKMOUSEEVENT te;
-            if (button != g_hotBtn) TipTrack(button);
-            g_hot = index; g_hotBtn = button;
+            if (theme != g_hotTheme) {
+                RECT rect;
+                ThemeRect(hwnd, &rect);
+                TipTrack(hwnd, theme ? &rect : NULL, L"toggle dark / light theme", IDM_THEME_TOGGLE, 1);
+            }
+            g_hot = index;
+            g_hotTheme = theme;
             te.cbSize = sizeof te; te.dwFlags = TME_LEAVE; te.hwndTrack = hwnd; te.dwHoverTime = 0;
 #ifndef MENU_NO_TRACK
             TrackMouseEvent(&te);
@@ -766,15 +616,10 @@ static LRESULT CALLBACK BarProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             InvalidateRect(hwnd, NULL, FALSE);
         }
         return 0; }
-    case WM_TIMER:
-        if (wParam == TIP_TIMER) {
-            if (g_tip || g_hotBtn < 0 || g_active) TipHide();
-            else TipShow(g_hotBtn);
-        }
-        return 0;
     case WM_MOUSELEAVE:
-        TipTrack(-1);
-        g_hot = -1; g_hotBtn = -1;
+        if (g_hotTheme) TipTrack(hwnd, NULL, NULL, 0, 0);
+        g_hot = -1;
+        g_hotTheme = 0;
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     case WM_SIZE:
@@ -783,10 +628,8 @@ static LRESULT CALLBACK BarProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK: {
         int index = BarHit(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
-        int button = index < 0 ? BtnHit(hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)) : -1;
-        TipHide();
+        if (ThemeHit(hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) { TipHide(); PostMessageW(GetParent(hwnd), WM_COMMAND, MAKEWPARAM(IDM_THEME_TOGGLE, 0), 0); return 0; }
         if (index >= 0) { g_hot = -1; RunMenu(GetParent(hwnd), index, 1, NULL, 0, 0, 0); }
-        else if (button >= 0) PostMessageW(GetParent(hwnd), WM_COMMAND, MAKEWPARAM(g_btn[button].id, 0), 0);
         return 0; }
     }
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -795,7 +638,6 @@ static LRESULT CALLBACK BarProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 HWND MenuBarCreate(HWND parent, MenuStateFn stateFn) {
     g_stateFn = stateFn;
     RegClass(L"mp_popup", PopProc, CS_DROPSHADOW, NULL);
-    RegClass(L"mp_tip", TipProc, CS_DROPSHADOW, NULL);
     RegClass(L"mp_menubar", BarProc, CS_DBLCLKS, NULL);
     BarLayout();
     g_bar = CreateWindowExW(0, L"mp_menubar", NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 100, g_barH, parent, NULL, g_hinst, NULL);

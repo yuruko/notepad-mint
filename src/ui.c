@@ -5,7 +5,7 @@
 
 HINSTANCE g_hinst;
 int       g_dpi = 96;
-HFONT     g_fontUI, g_fontUIB, g_fontMenu, g_fontMenuB;
+HFONT     g_fontUI, g_fontUIB, g_fontMenu, g_fontMenuB, g_fontBar;
 HBRUSH    g_brFace, g_brField;
 Palette   g_pal;
 
@@ -153,6 +153,8 @@ static void MakeMenuFont(void) {
     }
     g_fontMenu = change.font;
     g_fontMenuB = change.bold;
+    if (g_fontBar) DeleteObject(g_fontBar);
+    g_fontBar = FacePx(g_chromeFace, MENU_PX, FW_NORMAL);
     if (change.old || change.oldBold) EnumThreadWindows(GetCurrentThreadId(), RefontWindow, (LPARAM)&change);
     if (change.old) DeleteObject(change.old);
     if (change.oldBold) DeleteObject(change.oldBold);

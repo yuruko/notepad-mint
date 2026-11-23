@@ -6,7 +6,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.4.0"
+#define APP_VERSION  L"1.5.0"
 #define PATH_CAP     1024
 
 typedef struct Palette {
@@ -111,8 +111,9 @@ enum { BV_RAISED, BV_SUNKEN, BV_ETCHED, BV_FLAT_DN };
 extern HINSTANCE g_hinst;
 extern int       g_dpi;
 extern HFONT     g_fontUI, g_fontUIB;
-extern HFONT     g_fontMenu, g_fontMenuB;
+extern HFONT     g_fontMenu, g_fontMenuB, g_fontBar;
 #define CHROME_PX 11
+#define MENU_PX 10
 extern HBRUSH    g_brFace, g_brField;
 
 int   S(int v);
@@ -160,15 +161,19 @@ typedef struct MenuDef MenuDef;
 typedef struct MenuItem { const WCHAR *label, *accel; int id; const MenuDef *sub; } MenuItem;
 struct MenuDef { const MenuItem *items; int n; };
 typedef unsigned (*MenuStateFn)(int id);
-#define BAR_BTN_W 31
+#define BAR_BTN_W 23
+#define BAR_THEME_W 31
+#define EOF_GAP 1
 #define BAR_BTN_ICON 12
 #define BAR_BTN_OPACITY_ON 60
 #define BAR_BTN_OPACITY 20
 #define BAR_WRAP_ICON_DY 1
+#define BAR_PIN_ICON_DY 1
+#define BAR_INVIS_ICON_DY 1
 #define BAR_TIP_DELAY 500
 #define BAR_TIP_SHOW 5000
 
-extern const MenuDef g_mdEditCtx, g_mdEol, g_mdEnc, g_mdZoom, g_mdUcc, g_mdSys;
+extern const MenuDef g_mdEditCtx, g_mdEol, g_mdEnc, g_mdEncEol, g_mdZoom, g_mdUcc, g_mdSys;
 extern const MenuDef g_mdTab;
 extern MenuDef g_mdRecent;
 #define RECENT_MAX 9
@@ -183,13 +188,18 @@ void  MenuPopup(HWND owner, const MenuDef *def, int x, int y, int anchorBottom);
 void  MenuCancel(void);
 void  MenuArmDoubleClose(const RECT *screenRect, DWORD time);
 void  MenuShowCues(void);
+const WCHAR *MenuAccelOf(int id);
 
-enum { SB_POS, SB_ZOOM, SB_LINES, SB_BYTES, SB_EOL, SB_ENC, SB_COUNT };
+enum { SB_POS, SB_ZOOM, SB_BYTES, SB_ENC, SB_COUNT };
 HWND  StatusCreate(HWND parent);
 int   StatusHeight(void);
 int   StatusMinWidth(void);
 void  StatusSet(HWND hwnd, int index, const WCHAR *text);
 void  StatusRefont(HWND hwnd);
+void  TipTrack(HWND host, const RECT *anchor, const WCHAR *tip, int id, int below);
+void  TipTimer(void);
+void  TipHide(void);
+void  ThemeIconDraw(HDC hdc, int x, int y, int size, COLORREF fg, COLORREF bg, int opacity);
 
 int      FrameEnabled(void);
 int      FrameHeight(void);
@@ -234,7 +244,7 @@ typedef struct Prefs {
     int      pt, bold, italic;
     int      cur;
     int      theme;
-    int      wrap, statusbar;
+    int      wrap, statusbar, invisibles;
     int      tab;
     int      winx, winy, winw, winh, maximized;
     int      matchCase, wrapAround, wholeWord, findUp;
@@ -244,6 +254,7 @@ typedef struct Prefs {
 } Prefs;
 extern Prefs g_pf;
 extern HWND  g_hwnd, g_edit, g_status;
+#define STATUS_ON (g_pf.statusbar)
 
 typedef struct DocState {
     WCHAR path[PATH_CAP];
@@ -280,7 +291,6 @@ void   EditScrollSoon(void);
 const WCHAR *EditLockText(void **hText, int *length);
 void   EditUnlockText(void *hText);
 void   EditCaretPos(int *line, int *col);
-BOOL   EditSelStats(int enc, int eol, int *lines, DWORD *bytes);
 BOOL   EditGotoLine(int line);
 void   EditClearLine(void);
 void   EditZoomStep(int dir);
