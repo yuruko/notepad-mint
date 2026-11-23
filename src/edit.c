@@ -1001,6 +1001,120 @@ static void InvisibleEof(HDC hdc, int length, int cell, int pitch, const RECT *v
     FillC(hdc, &box, color);
 }
 
+static int HeadRow(const WCHAR *text, int length, int rowStart, int *lineStart) {
+    if (rowStart == 0 || text[rowStart - 1] == L'\n' || text[rowStart - 1] == L'\r') *lineStart = rowStart;
+    else if (*lineStart < 0) {
+        *lineStart = rowStart;
+        while (*lineStart > 0 && text[*lineStart - 1] != L'\n' && text[*lineStart - 1] != L'\r') (*lineStart)--;
+    }
+    return *lineStart < length && text[*lineStart] == L'#';
+}
+
+static void HeadRun(HDC hdc, const WCHAR *text, int start, int end, int weight, COLORREF color) {
+    POINT pos;
+    int d;
+    if (end <= start || !IndexPos(start, &pos)) return;
+    SetTextColor(hdc, color);
+    for (d = 1; d <= weight; d++) TextOutW(hdc, pos.x + d, pos.y, text + start, end - start);
+}
+
+static void HeadsPaint(HWND hwnd, HDC hdc, const RECT *clip) {
+    RECT view, formatRect;
+    HDC ownDc = NULL;
+    HLOCAL hText;
+    const WCHAR *text;
+    DWORD selStart = 0, selEnd = 0;
+    COLORREF normal = C_EDIT_FG, selected = GetSysColor(COLOR_HIGHLIGHTTEXT);
+    int saved, length, pitch, first, last, lineCount, row, weight, lineStart = -1, caretHidden = 0;
+    if (hwnd != g_edit || EditIsRtl()) return;
+    EditViewRect(hwnd, &view);
+    if (clip && !IntersectRect(&view, &view, clip)) return;
+    if (view.right <= view.left || view.bottom <= view.top) return;
+    hText = (HLOCAL)Ctl(hwnd, EM_GETHANDLE, 0, 0);
+    text = hText ? (const WCHAR *)LocalLock(hText) : NULL;
+    if (!text) return;
+    if (!hdc) {
+        ownDc = hdc = GetDC(hwnd);
+        if (!hdc) { LocalUnlock(hText); return; }
+        caretHidden = GetFocus() == hwnd && HideCaret(hwnd);
+    }
+    saved = SaveDC(hdc);
+    if (!saved) goto done;
+    IntersectClipRect(hdc, view.left, view.top, view.right, view.bottom);
+    SelectObject(hdc, g_font);
+    SetBkMode(hdc, TRANSPARENT);
+    Ctl(hwnd, EM_GETRECT, 0, (LPARAM)&formatRect);
+    Ctl(hwnd, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    if (GetFocus() != hwnd && !(GetWindowLongPtrW(hwnd, GWL_STYLE) & ES_NOHIDESEL)) selEnd = selStart;
+    length = (int)Ctl(hwnd, WM_GETTEXTLENGTH, 0, 0);
+    lineCount = (int)Ctl(hwnd, EM_GETLINECOUNT, 0, 0);
+    first = (int)Ctl(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0);
+    pitch = LineHeight();
+    last = first + (view.bottom - formatRect.top + pitch - 1) / pitch + 1;
+    if (last > lineCount) last = lineCount;
+    if (first > 0) first--;
+    if (!g_stubW) StubMetrics(hwnd);
+    weight = pitch / 24 > 1 ? pitch / 24 : 1;
+    for (row = first; row < last; row++) {
+        int rowStart = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)row, 0);
+        int rowEnd = row + 1 < lineCount ? (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)(row + 1), 0) : length;
+        int i, start, end, runStart;
+        POINT origin;
+        if (rowStart < 0 || rowEnd < rowStart || rowEnd > length) { lineStart = -1; continue; }
+        if (!HeadRow(text, length, rowStart, &lineStart) || !IndexPos(rowStart, &origin)) continue;
+        if (origin.y >= view.bottom || origin.y + pitch <= view.top) continue;
+        InvisibleRange(hwnd, row, rowStart, rowEnd, origin.y + pitch / 2, &view, &start, &end);
+        runStart = start;
+        for (i = start; i <= end; i++) {
+            int control = i < end && text[i] < 0x20;
+            if (i < end && !control && (DWORD)i != selStart && (DWORD)i != selEnd) continue;
+            HeadRun(hdc, text, runStart, i, weight, (DWORD)runStart >= selStart && (DWORD)runStart < selEnd ? selected : normal);
+            runStart = control ? i + 1 : i;
+        }
+    }
+    RestoreDC(hdc, saved);
+done:
+    if (caretHidden) ShowCaret(hwnd);
+    if (ownDc) ReleaseDC(hwnd, ownDc);
+    LocalUnlock(hText);
+}
+
+static void HeadsSync(HWND hwnd) {
+    RECT view, formatRect, band;
+    HLOCAL hText;
+    const WCHAR *text;
+    int length, pitch, first, last, lineCount, row, lineStart = -1, any = 0;
+    if (g_invisibles || g_invisSync || g_paintDepth || g_inBars || hwnd != g_edit || EditIsRtl() || !IsWindowVisible(hwnd)) return;
+    EditViewRect(hwnd, &view);
+    if (view.right <= view.left || view.bottom <= view.top) return;
+    hText = (HLOCAL)Ctl(hwnd, EM_GETHANDLE, 0, 0);
+    text = hText ? (const WCHAR *)LocalLock(hText) : NULL;
+    if (!text) return;
+    Ctl(hwnd, EM_GETRECT, 0, (LPARAM)&formatRect);
+    length = (int)Ctl(hwnd, WM_GETTEXTLENGTH, 0, 0);
+    lineCount = (int)Ctl(hwnd, EM_GETLINECOUNT, 0, 0);
+    first = (int)Ctl(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0);
+    pitch = LineHeight();
+    last = first + (view.bottom - formatRect.top + pitch - 1) / pitch + 1;
+    if (last > lineCount) last = lineCount;
+    if (first > 0) first--;
+    for (row = first; row < last; row++) {
+        int rowStart = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)row, 0);
+        POINT origin;
+        if (rowStart < 0 || rowStart > length) { lineStart = -1; continue; }
+        if (!HeadRow(text, length, rowStart, &lineStart) || !IndexPos(rowStart, &origin)) continue;
+        band = view;
+        band.top = origin.y;
+        band.bottom = origin.y + pitch;
+        if (IntersectRect(&band, &band, &view)) { InvalidateRect(hwnd, &band, FALSE); any = 1; }
+    }
+    LocalUnlock(hText);
+    if (!any) return;
+    g_invisSync = 1;
+    UpdateWindow(hwnd);
+    g_invisSync = 0;
+}
+
 static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip) {
     RECT view, formatRect;
     HDC ownDc = NULL;
@@ -1009,6 +1123,7 @@ static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip) {
     DWORD selStart = 0, selEnd = 0;
     COLORREF normal, selected;
     int saved, length, pitch, first, last, lineCount, row, cell, caretHidden = 0;
+    HeadsPaint(hwnd, hdc, clip);
     if (!g_invisibles || hwnd != g_edit) return;
     EditViewRect(hwnd, &view);
     if (clip && !IntersectRect(&view, &view, clip)) return;
@@ -1077,6 +1192,7 @@ done:
 }
 
 static void InvisiblesSync(HWND hwnd) {
+    HeadsSync(hwnd);
     if (!g_invisibles || g_invisSync || g_paintDepth || g_inBars || hwnd != g_edit || !IsWindowVisible(hwnd)) return;
     g_invisSync = 1;
     InvalidateRect(hwnd, NULL, FALSE);

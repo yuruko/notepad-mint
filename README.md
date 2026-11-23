@@ -25,6 +25,7 @@ one 32-bit exe (under 170 kb) runs on 32-bit windows, 64-bit windows and windows
   - **quick toggles**: three small buttons near the right end of the status bar switch always on top, show invisibles and word wrap, and the sun / moon at the right of the menu bar switches the theme; hover one for a moment and a tooltip says what it does and its key combo;
   - **always on top**: view > always on top, or alt+a, keeps this window above other windows; each window starts with it off and can be toggled independently;
   - **show invisibles**: view > show invisibles, or alt+s, draws simple markers for spaces, tabs, newlines and other invisible unicode / control characters at 10% foreground opacity, plus a `▪` after the last character to mark the end of the file; the markers are a display overlay, so copying, saving and printing keep the original text;
+  - **heading lines**: a line whose first character is `#` is drawn bold in the editor (an overstrike, so character widths and the caret do not move); printing is unchanged;
   - **tab size**: format > tab size: 2, 4 or 8 columns (4 by default), remembered, also used when printing;
   - **recent files**: file > recent keeps the last 9 files you opened or saved (newest first, press 1-9), shared by all open windows; "clear list" at the bottom empties it;
   - **whole-word search**: find, previous / next, replace and replace all share the same word boundaries; remembers the option alongside match case and wrap around;
