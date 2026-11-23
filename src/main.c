@@ -448,6 +448,8 @@ static void Cmd(int id) {
         break; }
     case IDM_EDIT_TIMEDATE: if (OtherFocus()) return; InsertTimeDate(); break;
     case IDM_EDIT_CLEARLINE: if (OtherFocus()) return; EditClearLine(); break;
+    case IDM_EDIT_LINEUP:   if (OtherFocus()) return; EditMoveLines(-1); break;
+    case IDM_EDIT_LINEDOWN: if (OtherFocus()) return; EditMoveLines(1); break;
     case IDM_FMT_WRAP:      ToggleWrap(); break;
     case IDM_FMT_FONT:      if (FontDlg(g_hwnd)) AppApplyPrefs(); break;
     case IDM_TAB_2: case IDM_TAB_4: case IDM_TAB_8:
@@ -817,6 +819,8 @@ static ACCEL g_acc[] = {
     { FVIRTKEY | FCONTROL,           'H',            IDM_EDIT_REPLACE },
     { FVIRTKEY | FCONTROL,           'G',            IDM_EDIT_GOTO },
     { FVIRTKEY | FCONTROL,           'K',            IDM_EDIT_CLEARLINE },
+    { FVIRTKEY | FALT,               VK_UP,          IDM_EDIT_LINEUP },
+    { FVIRTKEY | FALT,               VK_DOWN,        IDM_EDIT_LINEDOWN },
     { FVIRTKEY,                      VK_F3,          IDM_EDIT_FINDNEXT },
     { FVIRTKEY | FSHIFT,             VK_F3,          IDM_EDIT_FINDPREV },
     { FVIRTKEY,                      VK_F5,          IDM_EDIT_TIMEDATE },

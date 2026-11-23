@@ -12,42 +12,84 @@ typedef struct HistItem {
     WCHAR *text;
     int pos, textLen, replaceLen;
     int undoStart, undoEnd, redoStart, redoEnd;
-    int kind, endsLine;
+    int kind, endsLine, step;
+    int *cursors;
 } HistItem;
 
-static HistItem g_undo[HIST_MAX], g_redo[HIST_MAX];
-static int g_undoCount, g_redoCount, g_open, g_busy;
+typedef struct HistStack {
+    HistItem *items;
+    int count, cap, steps;
+} HistStack;
+
+static HistStack g_undo, g_redo;
+static HistItem *g_pend;
+static int g_pendCount, g_pendCap, g_group, g_stepSeq;
+static int g_open, g_busy;
 static size_t g_bytes;
 static struct { int active, failed, lo, hi, length, selStart, selEnd, kind; WCHAR *old; WCHAR small[HIST_SMALL]; } g_cap;
 
+static size_t CursorBytes(const int *cursors) {
+    return cursors ? (size_t)(2 + 2 * (cursors[0] + cursors[1])) * sizeof(int) : 0;
+}
+
 static size_t ItemBytes(const HistItem *item) {
-    return (size_t)item->textLen * sizeof(WCHAR);
+    return (size_t)item->textLen * sizeof(WCHAR) + CursorBytes(item->cursors);
 }
 
 static void ItemFree(HistItem *item) {
     g_bytes -= ItemBytes(item);
     mem_free(item->text);
+    mem_free(item->cursors);
     item->text = NULL;
+    item->cursors = NULL;
     item->textLen = 0;
 }
 
-static void ClearStack(HistItem *stack, int *count) {
-    while (*count > 0) ItemFree(&stack[--*count]);
+static void ClearStack(HistStack *stack) {
+    while (stack->count > 0) ItemFree(&stack->items[--stack->count]);
+    stack->steps = 0;
+}
+
+static void PendClear(void) {
+    while (g_pendCount > 0) mem_free(g_pend[--g_pendCount].text);
+}
+
+static int TopStep(const HistStack *stack) {
+    int n = 1;
+    if (!stack->count) return 0;
+    while (n < stack->count && stack->items[stack->count - 1 - n].step == stack->items[stack->count - 1].step) n++;
+    return n;
+}
+
+static BOOL StackPush(HistStack *stack, const HistItem *item) {
+    if (stack->count == stack->cap) {
+        int cap = stack->cap ? stack->cap * 2 : 256;
+        HistItem *grown = (HistItem *)mem_realloc(stack->items, (size_t)cap * sizeof(HistItem));
+        if (!grown) return FALSE;
+        stack->items = grown;
+        stack->cap = cap;
+    }
+    stack->items[stack->count++] = *item;
+    return TRUE;
 }
 
 static void DropOldest(void) {
-    ItemFree(&g_undo[0]);
-    memmove(g_undo, g_undo + 1, (size_t)(g_undoCount - 1) * sizeof(HistItem));
-    g_undoCount--;
+    int n = 1, i;
+    while (n < g_undo.count && g_undo.items[n].step == g_undo.items[0].step) n++;
+    for (i = 0; i < n; i++) ItemFree(&g_undo.items[i]);
+    memmove(g_undo.items, g_undo.items + n, (size_t)(g_undo.count - n) * sizeof(HistItem));
+    g_undo.count -= n;
+    g_undo.steps--;
 }
 
 static void Trim(void) {
-    while (g_bytes > HIST_BYTES && g_undoCount > 1) DropOldest();
+    while (g_bytes > HIST_BYTES && g_undo.steps > 1) DropOldest();
 }
 
 void HistClear(void) {
-    ClearStack(g_undo, &g_undoCount);
-    ClearStack(g_redo, &g_redoCount);
+    ClearStack(&g_undo);
+    ClearStack(&g_redo);
+    PendClear();
     g_open = 0;
 }
 
@@ -56,11 +98,11 @@ void HistBreak(void) {
 }
 
 BOOL HistCanUndo(void) {
-    return g_undoCount > 0;
+    return g_undo.count > 0;
 }
 
 BOOL HistCanRedo(void) {
-    return g_redoCount > 0;
+    return g_redo.count > 0;
 }
 
 static int KindOf(UINT msg, WPARAM wParam) {
@@ -126,45 +168,161 @@ int HistEnter(UINT msg, WPARAM wParam) {
     return 1;
 }
 
-static BOOL Merge(HistItem *top, HistItem *item) {
-    WCHAR *joined;
+static BOOL MergeOk(const HistItem *top, const HistItem *item, int shift) {
+    int pos = top->pos + shift;
     if (item->kind == HK_OTHER || top->kind != item->kind) return FALSE;
+    if (item->kind == HK_TYPE) return item->textLen == 0 && !top->endsLine && item->pos == pos + top->replaceLen;
+    return item->kind == HK_BACK ? item->pos + item->textLen == pos : item->pos == pos;
+}
+
+static WCHAR *MergeText(const HistItem *top, const HistItem *item) {
+    WCHAR *joined;
+    int back = item->kind == HK_BACK;
+    if (item->kind == HK_TYPE) return NULL;
+    joined = (WCHAR *)mem_alloc(((size_t)item->textLen + top->textLen + 1) * sizeof(WCHAR));
+    if (!joined) return NULL;
+    memcpy(joined, back ? item->text : top->text, (size_t)(back ? item->textLen : top->textLen) * sizeof(WCHAR));
+    memcpy(joined + (back ? item->textLen : top->textLen), back ? top->text : item->text, (size_t)(back ? top->textLen : item->textLen) * sizeof(WCHAR));
+    joined[item->textLen + top->textLen] = 0;
+    return joined;
+}
+
+static void MergeApply(HistItem *top, HistItem *item, int shift, WCHAR *joined) {
+    top->pos += shift;
     if (item->kind == HK_TYPE) {
-        if (item->textLen != 0 || top->endsLine || item->pos != top->pos + top->replaceLen) return FALSE;
         top->replaceLen += item->replaceLen;
         top->endsLine = item->endsLine;
     } else {
-        int back = item->kind == HK_BACK;
-        if (back ? item->pos + item->textLen != top->pos : item->pos != top->pos) return FALSE;
-        joined = (WCHAR *)mem_alloc(((size_t)item->textLen + top->textLen + 1) * sizeof(WCHAR));
-        if (!joined) return FALSE;
-        memcpy(joined, back ? item->text : top->text, (size_t)(back ? item->textLen : top->textLen) * sizeof(WCHAR));
-        memcpy(joined + (back ? item->textLen : top->textLen), back ? top->text : item->text, (size_t)(back ? top->textLen : item->textLen) * sizeof(WCHAR));
-        joined[item->textLen + top->textLen] = 0;
-        g_bytes += ItemBytes(item);
+        g_bytes += (size_t)item->textLen * sizeof(WCHAR);
         mem_free(top->text);
         top->text = joined;
         top->textLen += item->textLen;
-        if (back) top->pos = item->pos;
+        if (item->kind == HK_BACK) top->pos = item->pos;
     }
     top->redoStart = item->redoStart;
     top->redoEnd = item->redoEnd;
     mem_free(item->text);
     item->text = NULL;
+}
+
+static int *CursorsMake(const int *before, int beforeCount, const int *after, int afterCount) {
+    int *cursors = (int *)mem_alloc((size_t)(2 + 2 * (beforeCount + afterCount)) * sizeof(int));
+    if (!cursors) return NULL;
+    cursors[0] = beforeCount;
+    cursors[1] = afterCount;
+    memcpy(cursors + 2, before, (size_t)beforeCount * 2 * sizeof(int));
+    memcpy(cursors + 2 + 2 * beforeCount, after, (size_t)afterCount * 2 * sizeof(int));
+    return cursors;
+}
+
+static void HeadSel(HistItem *head, const int *before, int beforeCount, const int *after, int afterCount) {
+    int *cursors;
+    if (!before || !after || beforeCount < 1 || afterCount < 1) return;
+    head->undoStart = before[0] < before[1] ? before[0] : before[1];
+    head->undoEnd = before[0] < before[1] ? before[1] : before[0];
+    head->redoStart = after[0] < after[1] ? after[0] : after[1];
+    head->redoEnd = after[0] < after[1] ? after[1] : after[0];
+    if (beforeCount == 1 && afterCount == 1 && !head->cursors) return;
+    cursors = CursorsMake(before, beforeCount, after, afterCount);
+    g_bytes -= CursorBytes(head->cursors);
+    mem_free(head->cursors);
+    head->cursors = cursors;
+    g_bytes += CursorBytes(cursors);
+}
+
+static BOOL MergeStep(const int *after, int afterCount) {
+    int n = g_pendCount, base = g_undo.count - n, i, shift = 0, ok = 1;
+    HistItem *head;
+    WCHAR **joined;
+    if (!g_open || n < 1 || base < 0 || TopStep(&g_undo) != n) return FALSE;
+    for (i = 0; i < n; i++) {
+        if (!MergeOk(&g_undo.items[base + i], &g_pend[i], shift)) return FALSE;
+        shift += g_pend[i].replaceLen - g_pend[i].textLen;
+    }
+    joined = (WCHAR **)mem_zalloc((size_t)n * sizeof(WCHAR *));
+    if (!joined) return FALSE;
+    for (i = 0; i < n && ok; i++) if (g_pend[i].kind != HK_TYPE && !(joined[i] = MergeText(&g_undo.items[base + i], &g_pend[i]))) ok = 0;
+    if (!ok) {
+        for (i = 0; i < n; i++) mem_free(joined[i]);
+        mem_free(joined);
+        return FALSE;
+    }
+    for (i = 0, shift = 0; i < n; i++) {
+        int delta = g_pend[i].replaceLen - g_pend[i].textLen;
+        MergeApply(&g_undo.items[base + i], &g_pend[i], shift, joined[i]);
+        shift += delta;
+    }
+    mem_free(joined);
+    head = &g_undo.items[g_undo.count - 1];
+    if (after && afterCount > 0) {
+        if (head->cursors) {
+            int *cursors = CursorsMake(head->cursors + 2, head->cursors[0], after, afterCount);
+            if (cursors) {
+                g_bytes -= CursorBytes(head->cursors);
+                mem_free(head->cursors);
+                head->cursors = cursors;
+                g_bytes += CursorBytes(cursors);
+            }
+        }
+        head->redoStart = after[0] < after[1] ? after[0] : after[1];
+        head->redoEnd = after[0] < after[1] ? after[1] : after[0];
+    }
+    g_pendCount = 0;
     return TRUE;
 }
 
-static void Push(HistItem *item) {
-    ClearStack(g_redo, &g_redoCount);
-    if (g_open && g_undoCount && Merge(&g_undo[g_undoCount - 1], item)) {
+static void Commit(const int *before, int beforeCount, const int *after, int afterCount) {
+    int n = g_pendCount, i, step, open = 1;
+    if (!n) return;
+    ClearStack(&g_redo);
+    if (MergeStep(after, afterCount)) {
         Trim();
         return;
     }
-    if (g_undoCount == HIST_MAX) DropOldest();
-    g_undo[g_undoCount++] = *item;
-    g_bytes += ItemBytes(item);
-    g_open = item->kind != HK_OTHER;
+    if (g_undo.steps >= HIST_MAX) DropOldest();
+    step = ++g_stepSeq;
+    for (i = 0; i < n; i++) {
+        g_pend[i].step = step;
+        if (g_pend[i].kind == HK_OTHER || g_pend[i].kind != g_pend[0].kind) open = 0;
+        if (!StackPush(&g_undo, &g_pend[i])) {
+            while (g_undo.count > 0 && g_undo.items[g_undo.count - 1].step == step) g_undo.count--;
+            PendClear();
+            HistClear();
+            return;
+        }
+        g_bytes += ItemBytes(&g_pend[i]);
+    }
+    g_undo.steps++;
+    g_pendCount = 0;
+    HeadSel(&g_undo.items[g_undo.count - 1], before, beforeCount, after, afterCount);
+    g_open = open;
     Trim();
+}
+
+static void Pend(HistItem *item) {
+    if (g_pendCount == g_pendCap) {
+        int cap = g_pendCap ? g_pendCap * 2 : 16;
+        HistItem *grown = (HistItem *)mem_realloc(g_pend, (size_t)cap * sizeof(HistItem));
+        if (!grown) {
+            mem_free(item->text);
+            PendClear();
+            HistClear();
+            return;
+        }
+        g_pend = grown;
+        g_pendCap = cap;
+    }
+    g_pend[g_pendCount++] = *item;
+}
+
+void HistGroupBegin(void) {
+    PendClear();
+    g_group = 1;
+}
+
+void HistGroupEnd(const int *before, int beforeCount, const int *after, int afterCount) {
+    g_group = 0;
+    Commit(before, beforeCount, after, afterCount);
 }
 
 void HistLeave(void) {
@@ -227,14 +385,15 @@ void HistLeave(void) {
     item.endsLine = putLen > 0 && text[item.pos + putLen - 1] == '\n';
     EditUnlockText(lock);
     CapFree();
-    Push(&item);
+    Pend(&item);
+    if (!g_group) Commit(NULL, 0, NULL, 0);
 }
 
-static BOOL Replay(HistItem *item, BOOL undoing) {
+static BOOL Replay(HistItem *item) {
     void *lock = NULL;
     const WCHAR *text;
     WCHAR *current = NULL, *swap;
-    int length = 0, after, selStart, selEnd, tempLen;
+    int length = 0, after, tempLen;
     text = EditLockText(&lock, &length);
     if (!text || item->pos < 0 || item->pos + item->replaceLen > length) {
         EditUnlockText(lock);
@@ -250,56 +409,77 @@ static BOOL Replay(HistItem *item, BOOL undoing) {
         current[item->replaceLen] = 0;
     }
     EditUnlockText(lock);
-    g_busy++;
     SendMessageW(g_edit, EM_SETSEL, (WPARAM)item->pos, (LPARAM)(item->pos + item->replaceLen));
     SendMessageW(g_edit, EM_REPLACESEL, FALSE, (LPARAM)(item->text ? item->text : L""));
     EditNativeUndoClear();
     after = GetWindowTextLengthW(g_edit);
     if (after != length - item->replaceLen + item->textLen) {
-        g_busy--;
         mem_free(current);
         return FALSE;
     }
+    g_bytes -= ItemBytes(item);
     swap = item->text;
     item->text = current;
     mem_free(swap);
     tempLen = item->textLen;
     item->textLen = item->replaceLen;
     item->replaceLen = tempLen;
-    selStart = undoing ? item->undoStart : item->redoStart;
-    selEnd = undoing ? item->undoEnd : item->redoEnd;
-    if (selStart > after) selStart = after;
-    if (selEnd > after) selEnd = after;
-    if (selEnd < selStart) selEnd = selStart;
-    SendMessageW(g_edit, EM_SETSEL, (WPARAM)selStart, (LPARAM)selEnd);
-    SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);
-    g_busy--;
+    g_bytes += ItemBytes(item);
     return TRUE;
 }
 
-static BOOL Step(HistItem *from, int *fromCount, HistItem *to, int *toCount, BOOL undoing) {
-    HistItem item;
-    if (!*fromCount || g_cap.active) return FALSE;
-    item = from[--*fromCount];
-    g_bytes -= ItemBytes(&item);
+static BOOL Step(HistStack *from, HistStack *to, BOOL undoing) {
+    int n, i, selStart, selEnd, length, *cursors;
+    HistItem *head;
+    if (!from->count || g_cap.active || g_group) return FALSE;
+    n = TopStep(from);
     g_open = 0;
-    if (!Replay(&item, undoing)) {
-        g_bytes += ItemBytes(&item);
-        from[(*fromCount)++] = item;
-        HistClear();
-        return FALSE;
+    head = &from->items[undoing ? from->count - 1 : from->count - n];
+    cursors = head->cursors;
+    selStart = undoing ? head->undoStart : head->redoStart;
+    selEnd = undoing ? head->undoEnd : head->redoEnd;
+    g_busy++;
+    EditFreeze(TRUE);
+    for (i = 0; i < n; i++) {
+        if (!Replay(&from->items[from->count - 1 - i])) {
+            EditFreeze(FALSE);
+            g_busy--;
+            HistClear();
+            return FALSE;
+        }
     }
-    item.kind = HK_OTHER;
-    to[(*toCount)++] = item;
-    g_bytes += ItemBytes(&item);
+    for (i = 0; i < n; i++) {
+        HistItem item = from->items[--from->count];
+        item.kind = HK_OTHER;
+        if (!StackPush(to, &item)) {
+            ItemFree(&item);
+            EditFreeze(FALSE);
+            g_busy--;
+            HistClear();
+            return FALSE;
+        }
+    }
+    from->steps--;
+    to->steps++;
+    length = GetWindowTextLengthW(g_edit);
+    if (cursors) EditMultiRestore(cursors + 2 + (undoing ? 0 : 2 * cursors[0]), undoing ? cursors[0] : cursors[1]);
+    else {
+        if (selStart > length) selStart = length;
+        if (selEnd > length) selEnd = length;
+        if (selEnd < selStart) selEnd = selStart;
+        EditMultiRestore(NULL, 0);
+        SendMessageW(g_edit, EM_SETSEL, (WPARAM)selStart, (LPARAM)selEnd);
+    }
+    EditFreeze(FALSE);
+    g_busy--;
     Trim();
     return TRUE;
 }
 
 BOOL HistUndo(void) {
-    return Step(g_undo, &g_undoCount, g_redo, &g_redoCount, TRUE);
+    return Step(&g_undo, &g_redo, TRUE);
 }
 
 BOOL HistRedo(void) {
-    return Step(g_redo, &g_redoCount, g_undo, &g_undoCount, FALSE);
+    return Step(&g_redo, &g_undo, FALSE);
 }

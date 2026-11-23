@@ -9,7 +9,7 @@ setlocal
 cd /d "%~dp0.."
 set "ROOT=%CD%"
 set "VER=%1"
-if "%VER%"=="" set "VER=1.7.2"
+if "%VER%"=="" set "VER=1.8.0"
 
 if not exist "%ROOT%\build\notepad-mint.exe" echo installer: build\notepad-mint.exe is missing: run build.bat first & exit /b 1
 

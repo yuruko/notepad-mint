@@ -17,7 +17,7 @@ void EditUnlockText(void *hText) {
 BOOL EditHasSel(void) {
     DWORD selStart = 0, selEnd = 0;
     SendMessageW(g_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
-    return selStart != selEnd;
+    return selStart != selEnd || EditMultiHasSel();
 }
 
 static int g_activeCaret, g_caretAdjusted;
@@ -132,6 +132,7 @@ WCHAR *EditGetDocText(int *length) {
 }
 
 void EditInsert(const WCHAR *text) {
+    if (EditMultiInsert(text)) return;
     SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)text);
     SendMessageW(g_edit, EM_SCROLLCARET, 0, 0);
 }
@@ -141,6 +142,13 @@ int WordClass(WCHAR ch) {
     if (ch >= 0x80) return 1;
     if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_') return 1;
     return 2;
+}
+
+static int g_wordFloor = -1, g_wordCeil = -1;
+
+void EditWordBounds(int floor, int ceil) {
+    g_wordFloor = floor;
+    g_wordCeil = ceil;
 }
 
 void EditDeleteWord(int dir) {
@@ -179,7 +187,9 @@ void EditDeleteWord(int dir) {
         }
     }
     LocalUnlock(hText);
-    if (start != end) {
+    if (g_wordFloor >= 0 && start < g_wordFloor) start = g_wordFloor;
+    if (g_wordCeil >= 0 && end > g_wordCeil) end = g_wordCeil;
+    if (start < end) {
         SendMessageW(g_edit, EM_SETSEL, (WPARAM)start, (LPARAM)end);
         SendMessageW(g_edit, EM_REPLACESEL, TRUE, (LPARAM)L"");
     }

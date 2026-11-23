@@ -6,7 +6,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.7.2"
+#define APP_VERSION  L"1.8.0"
 #define PATH_CAP     1024
 
 typedef struct Palette {
@@ -39,7 +39,7 @@ enum {
     IDM_FILE_NEW = 101, IDM_FILE_NEWWIN, IDM_FILE_OPEN, IDM_FILE_SAVE, IDM_FILE_SAVEAS, IDM_FILE_PAGESETUP, IDM_FILE_PRINT, IDM_FILE_EXIT,
     IDM_EDIT_UNDO = 201, IDM_EDIT_CUT, IDM_EDIT_COPY, IDM_EDIT_PASTE, IDM_EDIT_DELETE,
     IDM_EDIT_FIND, IDM_EDIT_FINDNEXT, IDM_EDIT_FINDPREV, IDM_EDIT_REPLACE, IDM_EDIT_GOTO,
-    IDM_EDIT_SELALL, IDM_EDIT_TIMEDATE, IDM_EDIT_CLEARLINE, IDM_EDIT_REDO,
+    IDM_EDIT_SELALL, IDM_EDIT_TIMEDATE, IDM_EDIT_CLEARLINE, IDM_EDIT_REDO, IDM_EDIT_LINEUP, IDM_EDIT_LINEDOWN,
     IDM_FMT_WRAP = 301, IDM_FMT_FONT, IDM_TAB_2 = 305, IDM_TAB_4, IDM_TAB_8,
     IDM_EOL_CRLF = 311, IDM_EOL_LF, IDM_EOL_CR,
     IDM_ENC_UTF8 = 321, IDM_ENC_UTF8BOM, IDM_ENC_UTF16LE, IDM_ENC_UTF16BE, IDM_ENC_ANSI, IDM_ENC_OTHER, IDM_ENC_REOPEN,
@@ -309,6 +309,13 @@ int    EditIndexFromPoint(POINT pt);
 BOOL   EditCaretRect(int index, RECT *rect);
 BOOL   EditHitSelection(POINT pt);
 void   EditNativeUndoClear(void);
+int    EditMultiCount(void);
+void   EditMultiClear(void);
+void   EditMultiRestore(const int *pairs, int count);
+BOOL   EditMultiInsert(const WCHAR *text);
+BOOL   EditMultiHasSel(void);
+void   EditMoveLines(int dir);
+void   EditFreeze(BOOL on);
 
 #define HIST_MAX 128
 #define EM_REDO 0x0454
@@ -321,6 +328,8 @@ BOOL   HistUndo(void);
 BOOL   HistRedo(void);
 int    HistEnter(UINT msg, WPARAM wParam);
 void   HistLeave(void);
+void   HistGroupBegin(void);
+void   HistGroupEnd(const int *before, int beforeCount, const int *after, int afterCount);
 
 void   DndInit(HWND hwnd);
 void   DndShutdown(void);

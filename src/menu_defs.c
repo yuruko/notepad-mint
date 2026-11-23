@@ -56,6 +56,8 @@ static const MenuItem miEdit[] = {
     IT(L"&paste",         L"ctrl+v",   IDM_EDIT_PASTE),
     IT(L"de&lete",        L"del",      IDM_EDIT_DELETE),
     IT(L"cl&ear line",    L"ctrl+k",   IDM_EDIT_CLEARLINE),
+    IT(L"&move line up",  L"alt+up",   IDM_EDIT_LINEUP),
+    IT(L"move line do&wn", L"alt+down", IDM_EDIT_LINEDOWN),
     SEP,
     IT(L"&find...",       L"ctrl+f",   IDM_EDIT_FIND),
     IT(L"find &next",     L"f3",       IDM_EDIT_FINDNEXT),

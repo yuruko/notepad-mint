@@ -23,7 +23,7 @@ static int     g_stubW, g_stubMax, g_italDirty;
 static int g_barsPending, g_inBars;
 static int g_revealPending, g_sizeDeferred;
 static int g_allowTallReveal, g_revealing, g_tallCaret;
-static int g_invisibles, g_invisSync;
+static int g_invisibles, g_invisSync, g_holdSync;
 
 static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip);
 static void InvisiblesSync(HWND hwnd);
@@ -94,6 +94,14 @@ static int HNeeded(void) {
 }
 
 #define BARS(e) (GetWindowLongPtrW(e, GWL_STYLE) & (WS_VSCROLL | WS_HSCROLL))
+
+static int HScrollPos(HWND hwnd) {
+    SCROLLINFO si;
+    memset(&si, 0, sizeof si);
+    si.cbSize = sizeof si;
+    si.fMask = SIF_POS;
+    return GetScrollInfo(hwnd, SB_HORZ, &si) ? si.nPos : 0;
+}
 
 static void UpdateBars(void) {
     int pass;
@@ -766,7 +774,7 @@ static int EditPaintBuffered(HWND hwnd, const RECT *dirty) {
     if (RestoreDC(memDc, saved)) {
         StubPaint(hwnd, memDc, NULL);
         BandPaint(hwnd, memDc, NULL);
-        InvisiblesPaint(hwnd, memDc, NULL);
+        InvisiblesPaint(hwnd, memDc, dirty);
         copied = BitBlt(hdc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top, memDc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
     }
     saved = 0;
@@ -843,6 +851,19 @@ static void ShotDc(HWND hwnd, int width, int height, int startY) {
 
 int EditLineHeight(void) {
     return LineHeight();
+}
+
+LRESULT EditCtl(UINT msg, WPARAM wParam, LPARAM lParam) {
+    return g_edit && g_orig ? CallWindowProcW(g_orig, g_edit, msg, wParam, lParam) : 0;
+}
+
+HFONT EditFont(void) { return g_font; }
+
+int EditHScroll(void) { return g_edit ? HScrollPos(g_edit) : 0; }
+
+int EditCellWidth(void) {
+    if (!g_stubW && g_edit) StubMetrics(g_edit);
+    return g_stubW ? g_stubW : 1;
 }
 
 static BOOL IndexPos(int index, POINT *pos) {
@@ -988,6 +1009,48 @@ static int InvisibleHit(HWND hwnd, int row, int index, const POINT *pos, const P
     return delta >= -2 && delta <= 2;
 }
 
+#define FAST_ROW 4096
+static int g_rowX[FAST_ROW + 2];
+static INT g_rowPart[FAST_ROW + 2];
+
+static int FastCh(WCHAR ch) {
+    if (ch == '\t' || ch == '\r' || ch == '\n') return 1;
+    if (ch < 0x20 || (ch >= 0x7F && ch <= 0x9F)) return 0;
+    if (ch < 0x0300 || (ch >= 0x0370 && ch < 0x0590) || (ch >= 0x1E00 && ch < 0x200B) || (ch >= 0x2010 && ch < 0x2028) || (ch >= 0x2030 && ch < 0x2060) || (ch >= 0x20A0 && ch < 0x2C00)) return 1;
+    return (ch >= 0x3000 && ch < 0xA000) || (ch >= 0xAC00 && ch < 0xD7A4) || (ch >= 0xFF00 && ch < 0xFFF0);
+}
+
+static int RowXs(HWND hwnd, HDC hdc, const WCHAR *text, int rowStart, int rowEnd, int originX) {
+    int count = rowEnd - rowStart, k, x = originX, segment, last = -1;
+    SIZE size;
+    LRESULT probe;
+    if (count <= 0 || count > FAST_ROW || EditIsRtl() || g_tabPx <= 0) return 0;
+    for (k = 0; k < count; k++) if (!FastCh(text[rowStart + k])) return 0;
+    for (k = 0; k < count;) {
+        WCHAR ch = text[rowStart + k];
+        if (ch == '\r' || ch == '\n') { g_rowX[k++] = x; continue; }
+        last = k;
+        if (ch == '\t') { g_rowX[k++] = x; x = originX + ((x - originX) / g_tabPx + 1) * g_tabPx; continue; }
+        for (segment = k; segment < count && text[rowStart + segment] >= 0x20; segment++) {}
+        if (!GetTextExtentExPointW(hdc, text + rowStart + k, segment - k, 0x7FFFFFFF, NULL, g_rowPart, &size)) return 0;
+        g_rowX[k] = x;
+        for (last = k + 1; last < segment; last++) g_rowX[last] = x + g_rowPart[last - k - 1];
+        x += g_rowPart[segment - k - 1];
+        last = segment - 1;
+        k = segment;
+    }
+    g_rowX[count] = x;
+    if (last <= 0) return 1;
+    probe = Ctl(hwnd, EM_POSFROMCHAR, (WPARAM)(rowStart + last), 0);
+    return probe != -1 && (short)LOWORD(probe) == g_rowX[last];
+}
+
+BOOL EditIndexPos(int index, POINT *pos) { return g_edit && IndexPos(index, pos); }
+
+const int *EditRowXs(HDC hdc, const WCHAR *text, int rowStart, int rowEnd, int originX) {
+    return g_edit && RowXs(g_edit, hdc, text, rowStart, rowEnd, originX) ? g_rowX : NULL;
+}
+
 static void InvisibleEof(HDC hdc, int length, int cell, int pitch, const RECT *view, COLORREF color) {
     static const WCHAR mark[] = { 0x25AA, 0 };
     WORD glyph = 0xFFFF;
@@ -1110,15 +1173,17 @@ static int HeadRow(const WCHAR *text, int length, int rowStart, int *lineStart) 
     return *lineStart < length && text[*lineStart] == L'#';
 }
 
-static void StyleRun(HDC hdc, const WCHAR *text, int start, int end, int pitch, int weight, int italic, COLORREF fg, COLORREF bg) {
+static void StyleRun(HDC hdc, const WCHAR *text, int start, int end, const POINT *at, int pitch, int weight, int italic, COLORREF fg, COLORREF bg) {
     POINT pos;
     SIZE size;
     RECT box;
     int count = end - start, k, d;
-    if (count <= 0 || count > STYLE_RUN || !IndexPos(start, &pos)) return;
+    if (count <= 0 || count > STYLE_RUN) return;
     for (k = start; italic && k < end; k++) if (text[k] >= 0x590) italic = 0;
+    if (!italic && !weight) return;
+    if (at) pos = *at;
+    else if (!IndexPos(start, &pos)) return;
     if (!italic) {
-        if (!weight) return;
         SetTextColor(hdc, fg);
         for (d = 1; d <= weight; d++) TextOutW(hdc, pos.x + d, pos.y, text + start, count);
         return;
@@ -1174,15 +1239,15 @@ static void StylePaint(HWND hwnd, HDC hdc, const RECT *clip) {
     for (row = first; row < last; row++) {
         int rowStart = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)row, 0);
         int rowEnd = row + 1 < lineCount ? (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)(row + 1), 0) : length;
-        int i, start, end, stop, k, spanIndex, bold, italic, picked;
-        POINT origin;
+        int i, start, end, stop, k, spanIndex, bold, italic, picked, fast;
+        POINT origin, at;
         if (rowStart < 0 || rowEnd < rowStart || rowEnd > length) { lineStart = -1; continue; }
         bold = HeadRow(text, length, rowStart, &lineStart);
         spanIndex = SpanFirst(rowStart);
         if (!bold && (spanIndex >= g_ital.count || g_ital.list[spanIndex].start >= rowEnd)) continue;
         if (!IndexPos(rowStart, &origin)) continue;
         if (origin.y >= view.bottom || origin.y + pitch <= view.top) continue;
-        InvisibleRange(hwnd, row, rowStart, rowEnd, origin.y + pitch / 2, &view, &start, &end);
+        fast = !InvisibleRange(hwnd, row, rowStart, rowEnd, origin.y + pitch / 2, &view, &start, &end) && RowXs(hwnd, hdc, text, rowStart, rowEnd, origin.x);
         spanIndex = SpanFirst(start);
         for (i = start; i < end;) {
             if (text[i] < 0x20) { i++; continue; }
@@ -1193,7 +1258,8 @@ static void StylePaint(HWND hwnd, HDC hdc, const RECT *clip) {
             if ((int)selEnd > i && (int)selEnd < stop) stop = (int)selEnd;
             for (k = i; k < stop; k++) if (text[k] < 0x20) { stop = k; break; }
             picked = i >= (int)selStart && i < (int)selEnd;
-            StyleRun(hdc, text, i, stop, pitch, bold ? weight : 0, italic, picked ? selected : normal, picked ? selectedBg : normalBg);
+            at.x = fast ? g_rowX[i - rowStart] : 0; at.y = origin.y;
+            StyleRun(hdc, text, i, stop, fast ? &at : NULL, pitch, bold ? weight : 0, italic, picked ? selected : normal, picked ? selectedBg : normalBg);
             i = stop;
             while (spanIndex < g_ital.count && g_ital.list[spanIndex].end <= i) spanIndex++;
         }
@@ -1210,7 +1276,7 @@ static void StyleSync(HWND hwnd) {
     HLOCAL hText;
     const WCHAR *text;
     int length, pitch, first, last, lineCount, row, lineStart = -1, any = 0;
-    if (g_invisibles || g_invisSync || g_paintDepth || g_inBars || hwnd != g_edit || EditIsRtl() || !IsWindowVisible(hwnd)) return;
+    if (g_invisibles || g_invisSync || g_holdSync || g_paintDepth || g_inBars || hwnd != g_edit || EditIsRtl() || !IsWindowVisible(hwnd)) return;
     EditViewRect(hwnd, &view);
     if (view.right <= view.left || view.bottom <= view.top) return;
     hText = (HLOCAL)Ctl(hwnd, EM_GETHANDLE, 0, 0);
@@ -1255,6 +1321,7 @@ static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip) {
     COLORREF normal, selected;
     int saved, length, pitch, first, last, lineCount, row, cell, caretHidden = 0;
     StylePaint(hwnd, hdc, clip);
+    EditMultiPaint(hwnd, hdc, clip);
     if (!g_invisibles || hwnd != g_edit) return;
     EditViewRect(hwnd, &view);
     if (clip && !IntersectRect(&view, &view, clip)) return;
@@ -1288,23 +1355,31 @@ static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip) {
     for (row = first; row < last; row++) {
         int rowStart = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)row, 0);
         int rowEnd = row + 1 < lineCount ? (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)(row + 1), 0) : length;
-        int i, start, end, y, checkHit, previousKind = 0, previousX = 0, previousY = 0;
+        int i, start, end, y, checkHit, fast, previousKind = 0, previousX = 0, previousY = 0;
         COLORREF previousColor = 0;
         POINT origin;
         if (rowStart < 0 || rowEnd < rowStart || rowEnd > length || !IndexPos(rowStart, &origin)) continue;
         y = origin.y;
         if (y >= view.bottom || y + pitch <= view.top) continue;
         checkHit = InvisibleRange(hwnd, row, rowStart, rowEnd, y + pitch / 2, &view, &start, &end);
+        fast = !checkHit && RowXs(hwnd, hdc, text, rowStart, rowEnd, origin.x);
         for (i = start; i < end; i++) {
             int kind = InvisibleKind(text, i, length), rtl = EditIsRtl(), advance = cell;
             COLORREF color;
             POINT pos, next;
             BOOL hasNext;
-            if (!kind || !IndexPos(i, &pos) || pos.y + pitch <= view.top || pos.y >= view.bottom) continue;
-            hasNext = i + 1 <= length && IndexPos(i + 1, &next);
+            if (!kind) continue;
+            if (fast) {
+                pos.x = g_rowX[i - rowStart]; pos.y = y;
+                next.x = g_rowX[i - rowStart + 1]; next.y = y;
+                hasNext = TRUE;
+            } else {
+                if (!IndexPos(i, &pos) || pos.y + pitch <= view.top || pos.y >= view.bottom) continue;
+                hasNext = i + 1 <= length && IndexPos(i + 1, &next);
+            }
             if (checkHit && !InvisibleHit(hwnd, row, i, &pos, hasNext ? &next : NULL, pitch)) continue;
             if (kind == INV_BREAK && rtl && pos.x > origin.x) rtl = 0;
-            color = (DWORD)i >= selStart && (DWORD)i < selEnd ? selected : normal;
+            color = ((DWORD)i >= selStart && (DWORD)i < selEnd) || EditMultiSelected(i) ? selected : normal;
             if (kind == previousKind && pos.x == previousX && pos.y == previousY && color == previousColor) continue;
             if (kind == INV_WIDE) {
                 SIZE size = { 0, 0 };
@@ -1324,7 +1399,7 @@ done:
 
 static void InvisiblesSync(HWND hwnd) {
     StyleSync(hwnd);
-    if (!g_invisibles || g_invisSync || g_paintDepth || g_inBars || hwnd != g_edit || !IsWindowVisible(hwnd)) return;
+    if ((!g_invisibles && !EditMultiCount()) || g_invisSync || g_holdSync || g_paintDepth || g_inBars || hwnd != g_edit || !IsWindowVisible(hwnd)) return;
     g_invisSync = 1;
     InvalidateRect(hwnd, NULL, FALSE);
     UpdateWindow(hwnd);
@@ -1541,26 +1616,30 @@ static LRESULT CALLBACK EditProcMain(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         }
         KillTimer(hwnd, SIZE_TIMER);
         g_sizeDeferred = 0;
+        g_holdSync++;
         EditPad2(hwnd, 0);
         lastAt = GetTickCount(); lastCost = lastAt - now;
         RevealCaret(hwnd);
+        g_holdSync--;
         EditScrollSoon();
         SbarSync(hwnd);
         StubSync(hwnd);
         BandSync(hwnd);
-        InvisiblesSync(hwnd);
+        InvalidateRect(hwnd, NULL, FALSE);
         return 0; }
     case WM_TIMER:
         if (wParam == SIZE_TIMER) {
             KillTimer(hwnd, SIZE_TIMER);
             g_sizeDeferred = 0;
+            g_holdSync++;
             EditPad2(hwnd, 0);
             RevealCaret(hwnd);
+            g_holdSync--;
             EditScrollSoon();
             SbarSync(hwnd);
             StubSync(hwnd);
             BandSync(hwnd);
-            InvisiblesSync(hwnd);
+            InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
         break;
@@ -1588,12 +1667,16 @@ static LRESULT CALLBACK EditProcMain(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         result = CallWindowProcW(g_orig, hwnd, msg, wParam, lParam);
         g_paintDepth--;
         return result;
-    case WM_BARS:
+    case WM_BARS: {
+        int firstLine = (int)Ctl(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0), scrollX = HScrollPos(hwnd);
+        LONG_PTR bars = BARS(hwnd);
         g_barsPending = 0;
+        g_holdSync++;
         UpdateBars();
-        InvisiblesSync(hwnd);
+        g_holdSync--;
+        if (firstLine != (int)Ctl(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0) || scrollX != HScrollPos(hwnd) || bars != BARS(hwnd)) InvalidateRect(hwnd, NULL, FALSE);
         if (g_tallCaret) FitTallCaret(hwnd);
-        return 0;
+        return 0; }
     case WM_MOUSEWHEEL:
         g_shiftDir = 0;
         if (wParam & MK_CONTROL) {
@@ -1625,7 +1708,7 @@ static LRESULT CALLBACK EditProcMain(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         break;
     case WM_LBUTTONDOWN:
         g_shiftDir = 0;
-        if (!g_dragBypass && !(wParam & MK_SHIFT) && DndReady()) {
+        if (!g_dragBypass && !(wParam & MK_SHIFT) && !(GetKeyState(VK_MENU) & 0x8000) && DndReady()) {
             POINT pt;
             pt.x = GET_X_LPARAM(lParam);
             pt.y = GET_Y_LPARAM(lParam);
@@ -1767,6 +1850,7 @@ void EditNativeUndoClear(void) {
 static LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     LRESULT result;
     int captured;
+    if (EditMultiRoute(hwnd, msg, wParam, lParam, &result)) return result;
     switch (msg) {
     case WM_UNDO: case EM_UNDO: return HistUndo();
     case EM_REDO: return HistRedo();
@@ -1788,6 +1872,7 @@ static LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     }
     captured = HistEnter(msg, wParam);
     result = EditProcMain(hwnd, msg, wParam, lParam);
+    if (msg == WM_LBUTTONUP) EditMultiNormalize();
     if (captured) {
         HistLeave();
         EditNativeUndoClear();
@@ -1804,6 +1889,7 @@ HWND EditCreate(HWND parent) {
     LONG_PTR exStyle = 0;
     int modified = 0, hadFocus = 0, x = 0, y = 0, width = 0, height = 0, backward = 0;
     if (!g_pf.wrap) style |= WS_HSCROLL | ES_AUTOHSCROLL;
+    EditMultiClear();
     if (oldEdit) {
         RECT windowRect;
         POINT topLeft, bottomRight;
