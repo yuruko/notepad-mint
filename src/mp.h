@@ -6,7 +6,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.7.1"
+#define APP_VERSION  L"1.7.2"
 #define PATH_CAP     1024
 
 typedef struct Palette {
@@ -191,7 +191,7 @@ void  MenuArmDoubleClose(const RECT *screenRect, DWORD time);
 void  MenuShowCues(void);
 const WCHAR *MenuAccelOf(int id);
 
-enum { SB_POS, SB_ZOOM, SB_BYTES, SB_ENC, SB_COUNT };
+enum { SB_POS, SB_BYTES, SB_ENC, SB_COUNT };
 HWND  StatusCreate(HWND parent);
 int   StatusHeight(void);
 int   StatusMinWidth(void);

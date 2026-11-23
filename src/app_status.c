@@ -11,10 +11,6 @@ void AppUpdateStatus(void) {
     EditCaretPos(&line, &col);
     wsprintfW(label, EditHasSel() ? L"%d:%d *" : L"%d:%d", line, col);
     StatusSet(g_status, SB_POS, label);
-    if (g_pf.cur != g_pf.pt) wsprintfW(label, L"%d%%", MulDiv(g_pf.cur, 100, g_pf.pt));
-    else label[0] = 0;
-    StatusSet(g_status, SB_ZOOM, label);
-    StatusFontSize(g_status, g_pf.pt);
     {
         static struct { DWORD rev, bytes; int textLength, enc, eol, valid; } c;
         int textLength = GetWindowTextLengthW(g_edit);

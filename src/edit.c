@@ -879,9 +879,9 @@ static int InvisibleKind(const WCHAR *text, int index, int length) {
 }
 
 static COLORREF InvisibleColor(COLORREF bg, COLORREF fg) {
-    return RGB((9 * GetRValue(bg) + GetRValue(fg)) / 10,
-               (9 * GetGValue(bg) + GetGValue(fg)) / 10,
-               (9 * GetBValue(bg) + GetBValue(fg)) / 10);
+    return RGB((17 * GetRValue(bg) + 3 * GetRValue(fg)) / 20,
+               (17 * GetGValue(bg) + 3 * GetGValue(fg)) / 20,
+               (17 * GetBValue(bg) + 3 * GetBValue(fg)) / 20);
 }
 
 static void InvisibleLine(HDC hdc, int x, int y, int endX, int endY) {
@@ -1186,8 +1186,8 @@ static void StylePaint(HWND hwnd, HDC hdc, const RECT *clip) {
         spanIndex = SpanFirst(start);
         for (i = start; i < end;) {
             if (text[i] < 0x20) { i++; continue; }
-            italic = spanIndex < g_ital.count && g_ital.list[spanIndex].start <= i;
-            stop = italic ? g_ital.list[spanIndex].end : spanIndex < g_ital.count ? g_ital.list[spanIndex].start : end;
+            italic = bold || (spanIndex < g_ital.count && g_ital.list[spanIndex].start <= i);
+            stop = bold ? end : italic ? g_ital.list[spanIndex].end : spanIndex < g_ital.count ? g_ital.list[spanIndex].start : end;
             if (stop > end) stop = end;
             if ((int)selStart > i && (int)selStart < stop) stop = (int)selStart;
             if ((int)selEnd > i && (int)selEnd < stop) stop = (int)selEnd;
