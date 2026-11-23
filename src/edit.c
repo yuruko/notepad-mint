@@ -2,11 +2,14 @@
 
 #define IDC_EDIT 100
 #define SIZE_TIMER 0x4D50
+#define ITAL_MAX 8000000
+#define ITAL_LOOK 2048
+#define STYLE_RUN 8192
 
 HWND g_edit;
 
 static WNDPROC g_orig;
-static HFONT   g_font;
+static HFONT   g_font, g_fontItalic;
 static HBRUSH  g_brEdit;
 static int     g_wheel, g_hwheel;
 static int     g_dragPress, g_dragBypass;
@@ -14,7 +17,7 @@ static WPARAM  g_dragKeys;
 static LPARAM  g_dragDown;
 static int     g_paintDepth;
 static int     g_shiftDir;
-static int     g_stubW, g_stubMax;
+static int     g_stubW, g_stubMax, g_italDirty;
 
 #define WM_BARS (WM_APP + 7)
 static int g_barsPending, g_inBars;
@@ -218,7 +221,7 @@ void EditApplyTabs(void) {
 
 void EditApplyFont(void) {
     LOGFONTW lf;
-    HFONT newFont, oldFont = g_font;
+    HFONT newFont, newItalic = NULL, oldFont = g_font, oldItalic = g_fontItalic;
     int px = MulDiv(g_pf.cur, g_dpi, 720);
     if (px < 1) px = 1;
     memset(&lf, 0, sizeof lf);
@@ -233,14 +236,21 @@ void EditApplyFont(void) {
     wcopy(lf.lfFaceName, g_pf.font, 32);
     newFont = CreateFontIndirectW(&lf);
     if (!newFont) return;
+    if (!g_pf.italic) {
+        lf.lfItalic = 1;
+        newItalic = CreateFontIndirectW(&lf);
+    }
     if (g_edit) EditCaretRemember(g_edit, g_font);
     g_font = newFont;
+    g_fontItalic = newItalic;
+    g_italDirty = 1;
     g_stubW = 0;
     if (g_edit) {
         SendMessageW(g_edit, WM_SETFONT, (WPARAM)newFont, TRUE);
         EditApplyTabs();
     }
     if (oldFont) DeleteObject(oldFont);
+    if (oldItalic) DeleteObject(oldItalic);
 }
 
 HBRUSH EditBrush(void) {
@@ -255,7 +265,7 @@ void EditApplyColors(void) {
     if (oldBrush) DeleteObject(oldBrush);
 }
 
-static const int g_ladder[] = { 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 220, 240, 260, 280, 300, 320, 340, 360,
+static const int g_ladder[] = { 80, 90, 100, 105, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 220, 240, 260, 280, 300, 320, 340, 360,
                                 400, 440, 480 };
 
 static int Ladder(int current, int dir) {
@@ -1001,6 +1011,97 @@ static void InvisibleEof(HDC hdc, int length, int cell, int pitch, const RECT *v
     FillC(hdc, &box, color);
 }
 
+typedef struct Span { int start, end; } Span;
+
+static struct { Span *list; int count, cap, length, valid; DWORD rev; const WCHAR *text; } g_ital;
+static INT g_styleDx[STYLE_RUN + 16], g_stylePart[STYLE_RUN + 16];
+
+static int IsEol(WCHAR ch) { return ch == L'\r' || ch == L'\n' || ch == 0x2028 || ch == 0x2029; }
+
+static int IsWordCh(WCHAR ch) { return (ch >= L'0' && ch <= L'9') || (ch >= L'A' && ch <= L'Z') || (ch >= L'a' && ch <= L'z') || (ch >= 0xC0 && ch < 0x2000) || ch >= 0x3040; }
+
+static void SpanAdd(int start, int end) {
+    if (end <= start) return;
+    if (g_ital.count == g_ital.cap) {
+        int cap = g_ital.cap ? g_ital.cap * 2 : 256;
+        Span *grown = (Span *)mem_realloc(g_ital.list, (size_t)cap * sizeof(Span));
+        if (!grown) return;
+        g_ital.list = grown;
+        g_ital.cap = cap;
+    }
+    g_ital.list[g_ital.count].start = start;
+    g_ital.list[g_ital.count].end = end;
+    g_ital.count++;
+}
+
+static int LineEnd(const WCHAR *text, int length, int from) {
+    while (from < length && !IsEol(text[from])) from++;
+    return from;
+}
+
+static int TripleEnd(const WCHAR *text, int length, int from, WCHAR ch) {
+    int k;
+    for (k = from; k + 3 <= length; k++) if (text[k] == ch && text[k + 1] == ch && text[k + 2] == ch) return k + 3;
+    return length;
+}
+
+static int BlockEnd(const WCHAR *text, int length, int from) {
+    int k;
+    for (k = from; k + 2 <= length; k++) if (text[k] == L'*' && text[k + 1] == L'/') return k + 2;
+    return length;
+}
+
+static int QuoteEnd(const WCHAR *text, int length, int from, WCHAR close) {
+    int k, limit = from + 1 + ITAL_LOOK;
+    if (limit > length) limit = length;
+    for (k = from + 1; k < limit; k++) {
+        if (IsEol(text[k])) return -1;
+        if (text[k] == L'\\' && k + 1 < limit && !IsEol(text[k + 1])) { k++; continue; }
+        if (text[k] != close) continue;
+        if ((close == L'\'' || close == 0x2019) && k + 1 < length && IsWordCh(text[k + 1])) continue;
+        return k + 1;
+    }
+    return -1;
+}
+
+static void ItalScan(const WCHAR *text, int length) {
+    int i = 0;
+    while (i < length) {
+        WCHAR ch = text[i];
+        int end = -1, lineStart = i == 0 || IsEol(text[i - 1]);
+        if ((ch == L'`' || ch == L'"' || ch == L'\'') && i + 2 < length && text[i + 1] == ch && text[i + 2] == ch) end = TripleEnd(text, length, i + 3, ch);
+        else if (ch == L'/' && i + 1 < length && text[i + 1] == L'*') end = BlockEnd(text, length, i + 2);
+        else if (ch == L'/' && i + 1 < length && text[i + 1] == L'/' && (i == 0 || text[i - 1] == L' ' || text[i - 1] == L'\t' || text[i - 1] == L';' || text[i - 1] == L'{' || text[i - 1] == L'}' || text[i - 1] == L')' || text[i - 1] == L',' || IsEol(text[i - 1]))) end = LineEnd(text, length, i);
+        else if (ch == L'#' && !lineStart && (text[i - 1] == L' ' || text[i - 1] == L'\t') && (i + 1 >= length || text[i + 1] == L' ' || text[i + 1] == L'\t' || text[i + 1] == L'#' || IsEol(text[i + 1]))) end = LineEnd(text, length, i);
+        else if (ch == L'`' || ch == L'"') end = QuoteEnd(text, length, i, ch);
+        else if (ch == 0x201C) end = QuoteEnd(text, length, i, 0x201D);
+        else if ((ch == L'\'' || ch == 0x2018) && (i == 0 || !IsWordCh(text[i - 1]))) end = QuoteEnd(text, length, i, ch == L'\'' ? L'\'' : 0x2019);
+        if (end > i) { SpanAdd(i, end); i = end; }
+        else i++;
+    }
+}
+
+static void ItalEnsure(const WCHAR *text, int length) {
+    if (!g_italDirty && g_ital.valid && g_ital.rev == g_textRev && g_ital.length == length && g_ital.text == text) return;
+    g_italDirty = 0;
+    g_ital.count = 0;
+    g_ital.valid = 1;
+    g_ital.rev = g_textRev;
+    g_ital.length = length;
+    g_ital.text = text;
+    if (g_fontItalic && length <= ITAL_MAX) ItalScan(text, length);
+}
+
+static int SpanFirst(int index) {
+    int lo = 0, hi = g_ital.count;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (g_ital.list[mid].end > index) hi = mid;
+        else lo = mid + 1;
+    }
+    return lo;
+}
+
 static int HeadRow(const WCHAR *text, int length, int rowStart, int *lineStart) {
     if (rowStart == 0 || text[rowStart - 1] == L'\n' || text[rowStart - 1] == L'\r') *lineStart = rowStart;
     else if (*lineStart < 0) {
@@ -1010,21 +1111,36 @@ static int HeadRow(const WCHAR *text, int length, int rowStart, int *lineStart) 
     return *lineStart < length && text[*lineStart] == L'#';
 }
 
-static void HeadRun(HDC hdc, const WCHAR *text, int start, int end, int weight, COLORREF color) {
+static void StyleRun(HDC hdc, const WCHAR *text, int start, int end, int pitch, int weight, int italic, COLORREF fg, COLORREF bg) {
     POINT pos;
-    int d;
-    if (end <= start || !IndexPos(start, &pos)) return;
-    SetTextColor(hdc, color);
-    for (d = 1; d <= weight; d++) TextOutW(hdc, pos.x + d, pos.y, text + start, end - start);
+    SIZE size;
+    RECT box;
+    int count = end - start, k, d;
+    if (count <= 0 || count > STYLE_RUN || !IndexPos(start, &pos)) return;
+    for (k = start; italic && k < end; k++) if (text[k] >= 0x590) italic = 0;
+    if (!italic) {
+        if (!weight) return;
+        SetTextColor(hdc, fg);
+        for (d = 1; d <= weight; d++) TextOutW(hdc, pos.x + d, pos.y, text + start, count);
+        return;
+    }
+    if (!GetTextExtentExPointW(hdc, text + start, count, 0x7FFFFFFF, NULL, g_stylePart, &size)) return;
+    for (k = 0; k < count; k++) g_styleDx[k] = g_stylePart[k] - (k ? g_stylePart[k - 1] : 0);
+    box.left = pos.x; box.top = pos.y; box.right = pos.x + size.cx; box.bottom = pos.y + pitch;
+    FillC(hdc, &box, bg);
+    SelectObject(hdc, g_fontItalic);
+    SetTextColor(hdc, fg);
+    for (d = 0; d <= weight; d++) ExtTextOutW(hdc, pos.x + d, pos.y, 0, NULL, text + start, (UINT)count, g_styleDx);
+    SelectObject(hdc, g_font);
 }
 
-static void HeadsPaint(HWND hwnd, HDC hdc, const RECT *clip) {
+static void StylePaint(HWND hwnd, HDC hdc, const RECT *clip) {
     RECT view, formatRect;
     HDC ownDc = NULL;
     HLOCAL hText;
     const WCHAR *text;
     DWORD selStart = 0, selEnd = 0;
-    COLORREF normal = C_EDIT_FG, selected = GetSysColor(COLOR_HIGHLIGHTTEXT);
+    COLORREF normal = C_EDIT_FG, selected = GetSysColor(COLOR_HIGHLIGHTTEXT), normalBg = C_EDIT_BG, selectedBg = GetSysColor(COLOR_HIGHLIGHT);
     int saved, length, pitch, first, last, lineCount, row, weight, lineStart = -1, caretHidden = 0;
     if (hwnd != g_edit || EditIsRtl()) return;
     EditViewRect(hwnd, &view);
@@ -1047,6 +1163,7 @@ static void HeadsPaint(HWND hwnd, HDC hdc, const RECT *clip) {
     Ctl(hwnd, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
     if (GetFocus() != hwnd && !(GetWindowLongPtrW(hwnd, GWL_STYLE) & ES_NOHIDESEL)) selEnd = selStart;
     length = (int)Ctl(hwnd, WM_GETTEXTLENGTH, 0, 0);
+    ItalEnsure(text, length);
     lineCount = (int)Ctl(hwnd, EM_GETLINECOUNT, 0, 0);
     first = (int)Ctl(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0);
     pitch = LineHeight();
@@ -1058,18 +1175,28 @@ static void HeadsPaint(HWND hwnd, HDC hdc, const RECT *clip) {
     for (row = first; row < last; row++) {
         int rowStart = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)row, 0);
         int rowEnd = row + 1 < lineCount ? (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)(row + 1), 0) : length;
-        int i, start, end, runStart;
+        int i, start, end, stop, k, spanIndex, bold, italic, picked;
         POINT origin;
         if (rowStart < 0 || rowEnd < rowStart || rowEnd > length) { lineStart = -1; continue; }
-        if (!HeadRow(text, length, rowStart, &lineStart) || !IndexPos(rowStart, &origin)) continue;
+        bold = HeadRow(text, length, rowStart, &lineStart);
+        spanIndex = SpanFirst(rowStart);
+        if (!bold && (spanIndex >= g_ital.count || g_ital.list[spanIndex].start >= rowEnd)) continue;
+        if (!IndexPos(rowStart, &origin)) continue;
         if (origin.y >= view.bottom || origin.y + pitch <= view.top) continue;
         InvisibleRange(hwnd, row, rowStart, rowEnd, origin.y + pitch / 2, &view, &start, &end);
-        runStart = start;
-        for (i = start; i <= end; i++) {
-            int control = i < end && text[i] < 0x20;
-            if (i < end && !control && (DWORD)i != selStart && (DWORD)i != selEnd) continue;
-            HeadRun(hdc, text, runStart, i, weight, (DWORD)runStart >= selStart && (DWORD)runStart < selEnd ? selected : normal);
-            runStart = control ? i + 1 : i;
+        spanIndex = SpanFirst(start);
+        for (i = start; i < end;) {
+            if (text[i] < 0x20) { i++; continue; }
+            italic = spanIndex < g_ital.count && g_ital.list[spanIndex].start <= i;
+            stop = italic ? g_ital.list[spanIndex].end : spanIndex < g_ital.count ? g_ital.list[spanIndex].start : end;
+            if (stop > end) stop = end;
+            if ((int)selStart > i && (int)selStart < stop) stop = (int)selStart;
+            if ((int)selEnd > i && (int)selEnd < stop) stop = (int)selEnd;
+            for (k = i; k < stop; k++) if (text[k] < 0x20) { stop = k; break; }
+            picked = i >= (int)selStart && i < (int)selEnd;
+            StyleRun(hdc, text, i, stop, pitch, bold ? weight : 0, italic, picked ? selected : normal, picked ? selectedBg : normalBg);
+            i = stop;
+            while (spanIndex < g_ital.count && g_ital.list[spanIndex].end <= i) spanIndex++;
         }
     }
     RestoreDC(hdc, saved);
@@ -1079,7 +1206,7 @@ done:
     LocalUnlock(hText);
 }
 
-static void HeadsSync(HWND hwnd) {
+static void StyleSync(HWND hwnd) {
     RECT view, formatRect, band;
     HLOCAL hText;
     const WCHAR *text;
@@ -1092,6 +1219,7 @@ static void HeadsSync(HWND hwnd) {
     if (!text) return;
     Ctl(hwnd, EM_GETRECT, 0, (LPARAM)&formatRect);
     length = (int)Ctl(hwnd, WM_GETTEXTLENGTH, 0, 0);
+    ItalEnsure(text, length);
     lineCount = (int)Ctl(hwnd, EM_GETLINECOUNT, 0, 0);
     first = (int)Ctl(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0);
     pitch = LineHeight();
@@ -1100,9 +1228,13 @@ static void HeadsSync(HWND hwnd) {
     if (first > 0) first--;
     for (row = first; row < last; row++) {
         int rowStart = (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)row, 0);
+        int rowEnd = row + 1 < lineCount ? (int)Ctl(hwnd, EM_LINEINDEX, (WPARAM)(row + 1), 0) : length;
+        int spanIndex;
         POINT origin;
-        if (rowStart < 0 || rowStart > length) { lineStart = -1; continue; }
-        if (!HeadRow(text, length, rowStart, &lineStart) || !IndexPos(rowStart, &origin)) continue;
+        if (rowStart < 0 || rowStart > length || rowEnd < rowStart || rowEnd > length) { lineStart = -1; continue; }
+        spanIndex = SpanFirst(rowStart);
+        if (!HeadRow(text, length, rowStart, &lineStart) && (spanIndex >= g_ital.count || g_ital.list[spanIndex].start >= rowEnd)) continue;
+        if (!IndexPos(rowStart, &origin)) continue;
         band = view;
         band.top = origin.y;
         band.bottom = origin.y + pitch;
@@ -1123,7 +1255,7 @@ static void InvisiblesPaint(HWND hwnd, HDC hdc, const RECT *clip) {
     DWORD selStart = 0, selEnd = 0;
     COLORREF normal, selected;
     int saved, length, pitch, first, last, lineCount, row, cell, caretHidden = 0;
-    HeadsPaint(hwnd, hdc, clip);
+    StylePaint(hwnd, hdc, clip);
     if (!g_invisibles || hwnd != g_edit) return;
     EditViewRect(hwnd, &view);
     if (clip && !IntersectRect(&view, &view, clip)) return;
@@ -1192,7 +1324,7 @@ done:
 }
 
 static void InvisiblesSync(HWND hwnd) {
-    HeadsSync(hwnd);
+    StyleSync(hwnd);
     if (!g_invisibles || g_invisSync || g_paintDepth || g_inBars || hwnd != g_edit || !IsWindowVisible(hwnd)) return;
     g_invisSync = 1;
     InvalidateRect(hwnd, NULL, FALSE);

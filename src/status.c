@@ -6,8 +6,9 @@
 #define ICON_MAX  64
 
 enum { TB_LIGHT, TB_DARK, TB_WRAP, TB_ONTOP, TB_INVIS, TB_COUNT };
-enum { BT_ONTOP, BT_INVIS, BT_WRAP, BT_COUNT };
+enum { BT_FONT, BT_ONTOP, BT_INVIS, BT_WRAP, BT_COUNT };
 static const struct { int id; const WCHAR *tip; } g_btn[BT_COUNT] = {
+    [BT_FONT]  = { IDM_FMT_FONT,        L"font size (click to change the font)" },
     [BT_ONTOP] = { IDM_VIEW_ONTOP,      L"toggle always on top" },
     [BT_INVIS] = { IDM_VIEW_INVISIBLES, L"show / hide invisible characters" },
     [BT_WRAP]  = { IDM_FMT_WRAP,     L"toggle word wrap" },
@@ -21,10 +22,23 @@ static WCHAR g_txt[SB_COUNT][64];
 static int   g_sbH, g_hotp = -1, g_hotBtn = -1;
 static int   g_floor[SB_COUNT];
 static int   g_need[SB_COUNT];
+static WCHAR g_fontTxt[16];
+static int   g_fontW;
 
 static int BtnCount(void) { return BT_COUNT; }
+static int BtnW(int button) { return button == BT_FONT ? g_fontW : S(BAR_BTN_W); }
+static int BtnsW(void) {
+    int button, width = 0;
+    for (button = 0; button < BT_COUNT; button++) width += BtnW(button);
+    return width;
+}
 static int PanelW(int index);
 static void Measure(void);
+
+static void FontMeasure(HDC hdc) {
+    int width = TextW(hdc, g_fontTxt, -1), floor = TextW(hdc, L"88.8", -1);
+    g_fontW = (width > floor ? width : floor) + TextW(hdc, L"pt", -1) + S(2) + 2 * S(6);
+}
 
 static int BtnsRight(int clientWidth) {
     if (!g_sbH) Measure();
@@ -32,8 +46,10 @@ static int BtnsRight(int clientWidth) {
 }
 
 static void BtnRect(int clientWidth, int clientHeight, int button, RECT *rect) {
-    rect->left = BtnsRight(clientWidth) - (BtnCount() - button) * S(BAR_BTN_W);
-    rect->right = rect->left + S(BAR_BTN_W);
+    int next;
+    rect->left = BtnsRight(clientWidth);
+    for (next = button; next < BT_COUNT; next++) rect->left -= BtnW(next);
+    rect->right = rect->left + BtnW(button);
     rect->top = S(2);
     rect->bottom = clientHeight - S(1);
 }
@@ -232,6 +248,7 @@ static void Measure(void) {
     int i;
     GetTextMetricsW(hdc, &metrics);
     g_sbH = metrics.tmHeight + S(8);
+    FontMeasure(hdc);
     g_floor[SB_POS] = TextWidth(hdc, L"99999999:99999");
     for (i = 0; i < SB_COUNT; i++) g_need[i] = TextWidth(hdc, g_txt[i]);
     SelectObject(hdc, oldFont);
@@ -244,8 +261,9 @@ int StatusHeight(void) {
 }
 
 int StatusMinWidth(void) {
-    int i, width = S(4) + BtnCount() * S(BAR_BTN_W);
+    int i, width;
     if (!g_sbH) Measure();
+    width = S(4) + BtnsW();
     for (i = 0; i < SB_COUNT; i++) width += PanelW(i);
     return width;
 }
@@ -269,8 +287,39 @@ void StatusSet(HWND hwnd, int index, const WCHAR *text) {
     InvalidateRect(hwnd, NULL, FALSE);
 }
 
+void StatusFontSize(HWND hwnd, int tenths) {
+    WCHAR text[16];
+    if (tenths % 10) wsprintfW(text, L"%d.%d", tenths / 10, tenths % 10);
+    else wsprintfW(text, L"%d", tenths / 10);
+    if (wcmp(g_fontTxt, text) == 0) return;
+    wcopy(g_fontTxt, text, 16);
+    if (g_sbH) {
+        HDC hdc = GetDC(NULL);
+        HGDIOBJ oldFont = SelectObject(hdc, g_fontMenu);
+        FontMeasure(hdc);
+        SelectObject(hdc, oldFont);
+        ReleaseDC(NULL, hdc);
+    }
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+static COLORREF MixC(COLORREF fg, COLORREF bg, int percent) {
+    return RGB(GetRValue(bg) + (GetRValue(fg) - GetRValue(bg)) * percent / 100, GetGValue(bg) + (GetGValue(fg) - GetGValue(bg)) * percent / 100, GetBValue(bg) + (GetBValue(fg) - GetBValue(bg)) * percent / 100);
+}
+
+static void FontBtnPaint(HDC hdc, const RECT *rect, BOOL hot) {
+    COLORREF face = hot ? C_ACCENT : C_FACE;
+    int numW = TextW(hdc, g_fontTxt, -1), unitW = TextW(hdc, L"pt", -1), gap = S(2);
+    int x = (rect->left + rect->right - (numW + gap + unitW)) / 2;
+    RECT box;
+    box.left = x; box.right = x + numW; box.top = rect->top; box.bottom = rect->bottom;
+    TextC(hdc, g_fontTxt, -1, &box, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, hot ? C_ON_ACCENT : MixC(C_TEXT, face, BAR_FONT_OPACITY));
+    box.left = x + numW + gap; box.right = box.left + unitW;
+    TextC(hdc, L"pt", -1, &box, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, hot ? C_ON_ACCENT : MixC(C_TEXT, face, BAR_FONT_UNIT_OPACITY));
+}
+
 static void Panels(const RECT *client, RECT out[SB_COUNT]) {
-    int x = BtnsRight(client->right) - BtnCount() * S(BAR_BTN_W), i;
+    int x = BtnsRight(client->right) - BtnsW(), i;
     out[SB_ENC].right = client->right - S(2);
     out[SB_ENC].left = out[SB_ENC].right - PanelW(SB_ENC);
     out[SB_ENC].top = S(2); out[SB_ENC].bottom = client->bottom - S(1);
@@ -323,6 +372,7 @@ static void Paint(HWND hwnd) {
         BtnRect(client.right, client.bottom, i, &rect);
         Bevel(memDc, &rect, BV_FLAT_DN);
         if (hot) { RECT fill = rect; InflateRect(&fill, -1, -1); FillC(memDc, &fill, C_ACCENT); }
+        if (i == BT_FONT) { FontBtnPaint(memDc, &rect, hot); continue; }
         ThemeIcon(memDc, kind, (rect.left + rect.right - iconSize) / 2, (rect.top + rect.bottom - iconSize) / 2 + (i == BT_WRAP ? S(BAR_WRAP_ICON_DY) : i == BT_ONTOP ? S(BAR_PIN_ICON_DY) : S(BAR_INVIS_ICON_DY)), iconSize, hot ? C_ON_ACCENT : C_TEXT, hot ? C_ACCENT : C_FACE, hot ? 100 : BtnOpacity(i));
     }
     BitBlt(hdc, 0, 0, client.right, client.bottom, memDc, 0, 0, SRCCOPY);

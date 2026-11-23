@@ -6,7 +6,7 @@
 #define APP_NAME     L"notepad mint"
 #define TITLE_TAIL   L" - " APP_NAME
 #define APP_CLASS    L"notepad_mint"
-#define APP_VERSION  L"1.6.1"
+#define APP_VERSION  L"1.7.0"
 #define PATH_CAP     1024
 
 typedef struct Palette {
@@ -166,6 +166,8 @@ typedef unsigned (*MenuStateFn)(int id);
 #define BAR_BTN_ICON 12
 #define BAR_BTN_OPACITY_ON 60
 #define BAR_BTN_OPACITY 20
+#define BAR_FONT_OPACITY 80
+#define BAR_FONT_UNIT_OPACITY 40
 #define BAR_WRAP_ICON_DY 1
 #define BAR_PIN_ICON_DY 1
 #define BAR_INVIS_ICON_DY 1
@@ -195,6 +197,7 @@ int   StatusHeight(void);
 int   StatusMinWidth(void);
 void  StatusSet(HWND hwnd, int index, const WCHAR *text);
 void  StatusRefont(HWND hwnd);
+void  StatusFontSize(HWND hwnd, int tenths);
 void  TipTrack(HWND host, const RECT *anchor, const WCHAR *tip, int id, int below);
 void  TipTimer(void);
 void  TipHide(void);
@@ -235,6 +238,7 @@ DWORD DocBodySize(const WCHAR *text, int len, int enc, int eol);
 extern DWORD g_textRev;
 
 #define FONT_MIN 70
+#define FONT_DEFAULT 105
 #define FIND_CAP 256
 #define PAGE_TEXT_CAP 128
 #define FONT_MAX 2000

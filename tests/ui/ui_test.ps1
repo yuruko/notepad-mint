@@ -1169,7 +1169,7 @@ function Test-T9 {                                                              
     $lh12 = Line-Height $app
     $dlg = Open-Font $app
     Pass 'T9.1 font dialog opens (class mp_font, title "font")'
-    $defPt = [regex]::Match([IO.File]::ReadAllText((Join-Path $Src 'prefs.c')), 'g_pf\.pt\s*=\s*(\d+)\s*;').Groups[1].Value     # PrefsDefaults
+    $defPt = [regex]::Match([IO.File]::ReadAllText((Join-Path $Src 'mp.h')), '#define\s+FONT_DEFAULT\s+(\d+)').Groups[1].Value     # PrefsDefaults
     CkEq 'T9.2 the size box starts with the default size (PrefsDefaults)' (PtText ([int]$defPt)) (Get-Field $dlg $IDT.ID_SIZE)
     CkChk 'T9.3 "monospaced fonts only" is on by default' $dlg $IDT.ID_MONO 1
     Set-Field $dlg $IDT.ID_SIZE '18'

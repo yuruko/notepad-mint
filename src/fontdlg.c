@@ -343,7 +343,7 @@ static void FontCmd(FontSt *state, int id, int code) {
     case ID_RESET:
         wcopy(state->face, DEFAULT_FACE, 32);
         FontResolve(state->face);
-        state->pt = 110;
+        state->pt = FONT_DEFAULT;
         state->bold = 0;
         state->italic = 0;
         ShowState(state);
