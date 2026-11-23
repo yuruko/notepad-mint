@@ -869,9 +869,9 @@ static int InvisibleKind(const WCHAR *text, int index, int length) {
 }
 
 static COLORREF InvisibleColor(COLORREF bg, COLORREF fg) {
-    return RGB((3 * GetRValue(bg) + GetRValue(fg)) / 4,
-               (3 * GetGValue(bg) + GetGValue(fg)) / 4,
-               (3 * GetBValue(bg) + GetBValue(fg)) / 4);
+    return RGB((9 * GetRValue(bg) + GetRValue(fg)) / 10,
+               (9 * GetGValue(bg) + GetGValue(fg)) / 10,
+               (9 * GetBValue(bg) + GetBValue(fg)) / 10);
 }
 
 static void InvisibleLine(HDC hdc, int x, int y, int endX, int endY) {

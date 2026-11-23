@@ -50,7 +50,7 @@ function Test-T51 {
         Reset-Doc $app $text
         [void](Snd $ed 0x8 0 0)
         $bg = $pal[$theme].edit; $fg = $pal[$theme].text
-        $rgb = @(0,1,2 | ForEach-Object { [int][Math]::Floor((3 * $bg[$_] + $fg[$_]) / 4) })
+        $rgb = @(0,1,2 | ForEach-Object { [int][Math]::Floor((9 * $bg[$_] + $fg[$_]) / 10) })
         $shot = Ed-Shot $app
         try { $off = View-Ink $shot $rgb } finally { $shot.Bmp.Dispose() }
         $idx++; Ck ('T51.' + $idx + ' ' + $theme + ': invisible markers start hidden') ($off -eq 0) ('marker pixels ' + $off)
@@ -59,7 +59,7 @@ function Test-T51 {
         $shot = Ed-Shot $app
         try {
             $count = View-Ink $shot $rgb
-            $idx++; Ck ('T51.' + $idx + ' ' + $theme + ': Alt+S shows marks at exactly 25% foreground opacity') ($count -gt 15) ('marker pixels ' + $count + ', expected rgb ' + ($rgb -join ','))
+            $idx++; Ck ('T51.' + $idx + ' ' + $theme + ': Alt+S shows marks at exactly 10% foreground opacity') ($count -gt 15) ('marker pixels ' + $count + ', expected rgb ' + ($rgb -join ','))
             $pitch = (Ed-Pos $app 7)[1] - (Ed-Pos $app 0)[1]
             foreach ($mark in @(@(1, 'space'), @(3, 'tab'), @(5, 'newline'), @(7, 'empty line'), @(10, 'nonbreaking space'), @(15, 'zero-width space'), @(20, 'direction mark'), @(25, 'byte order mark'))) {
                 $p = Ed-Pos $app $mark[0]
@@ -73,8 +73,8 @@ function Test-T51 {
         $shot = Ed-Shot $app
         try {
             $hbg = [System.Drawing.SystemColors]::Highlight; $hfg = [System.Drawing.SystemColors]::HighlightText
-            $selected = @([int][Math]::Floor((3*$hbg.R+$hfg.R)/4), [int][Math]::Floor((3*$hbg.G+$hfg.G)/4), [int][Math]::Floor((3*$hbg.B+$hfg.B)/4))
-            $idx++; Ck ('T51.' + $idx + ' selected markers use 25% over the highlight colour') ((View-Ink $shot $selected) -gt 15)
+            $selected = @([int][Math]::Floor((9*$hbg.R+$hfg.R)/10), [int][Math]::Floor((9*$hbg.G+$hfg.G)/10), [int][Math]::Floor((9*$hbg.B+$hfg.B)/10))
+            $idx++; Ck ('T51.' + $idx + ' selected markers use 10% over the highlight colour') ((View-Ink $shot $selected) -gt 15)
         } finally { $shot.Bmp.Dispose() }
         [void](Snd $ed $EM_SETSEL 0 0)
         [void](Snd $app.Main $WM_COMMAND $IDM.IDM_FMT_WRAP 0)
