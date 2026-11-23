@@ -1068,11 +1068,10 @@ static void ItalScan(const WCHAR *text, int length) {
     int i = 0;
     while (i < length) {
         WCHAR ch = text[i];
-        int end = -1, lineStart = i == 0 || IsEol(text[i - 1]);
+        int end = -1;
         if ((ch == L'`' || ch == L'"' || ch == L'\'') && i + 2 < length && text[i + 1] == ch && text[i + 2] == ch) end = TripleEnd(text, length, i + 3, ch);
         else if (ch == L'/' && i + 1 < length && text[i + 1] == L'*') end = BlockEnd(text, length, i + 2);
         else if (ch == L'/' && i + 1 < length && text[i + 1] == L'/' && (i == 0 || text[i - 1] == L' ' || text[i - 1] == L'\t' || text[i - 1] == L';' || text[i - 1] == L'{' || text[i - 1] == L'}' || text[i - 1] == L')' || text[i - 1] == L',' || IsEol(text[i - 1]))) end = LineEnd(text, length, i);
-        else if (ch == L'#' && !lineStart && (text[i - 1] == L' ' || text[i - 1] == L'\t') && (i + 1 >= length || text[i + 1] == L' ' || text[i + 1] == L'\t' || text[i + 1] == L'#' || IsEol(text[i + 1]))) end = LineEnd(text, length, i);
         else if (ch == L'`' || ch == L'"') end = QuoteEnd(text, length, i, ch);
         else if (ch == 0x201C) end = QuoteEnd(text, length, i, 0x201D);
         else if ((ch == L'\'' || ch == 0x2018) && (i == 0 || !IsWordCh(text[i - 1]))) end = QuoteEnd(text, length, i, ch == L'\'' ? L'\'' : 0x2019);
